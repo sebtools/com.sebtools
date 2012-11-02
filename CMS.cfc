@@ -122,9 +122,9 @@
 	<cfquery name="qPage" datasource="#variables.DataSource#">
 	SELECT		TOP 1
 				cmsPages.PageID,PageName,FileName,SectionID,
-				Title,Description,Keywords,Contents,Contents2,ImageFileName,
+				cmsPageVersions.Title,cmsPageVersions.Description,cmsPageVersions.Keywords,cmsPageVersions.Contents,cmsPageVersions.Contents2,ImageFileName,
 				'' AS FullFilePath, '' AS UrlPath, FileName AS FileNameOld,
-				WhenCreated AS Updated,
+				cmsPageVersions.WhenCreated AS Updated,
 				MapPageID,
 				TemplateID
 	FROM		cmsPages,
@@ -236,7 +236,7 @@
 	<cfelse>
 		<cfquery name="qPages" datasource="#variables.datasource#">
 		SELECT		cmsPages.PageID,SectionID,PageName,FileName,
-					Title
+					cmsPages.Title
 		FROM		cmsPages
 		INNER JOIN	cmsPages2Versions
 			ON		cmsPages.PageID = cmsPages2Versions.PageID
@@ -792,6 +792,9 @@
 	var qGetSection = 0;
 	var result = 0;
 	var doUpdate = false;
+	var DirSection = "";
+	var FileApplicationCFM = "";
+	var ApplicationCFMOutput = "";
 	
 	if ( StructKeyExists(arguments,"SectionID") AND Not Val(arguments.SectionID) ) {
 		StructDelete(arguments,"SectionID");
@@ -839,12 +842,18 @@
 	
 	<!--- Try to create new directory --->
 	<cfif StructKeyExists(arguments,"SectionDir")>
-		<cfif NOT DirectoryExists("#variables.RootPath##variables.dirdelim##getSectionPath(result)#")>
+		<cfset DirSection = "#variables.RootPath##variables.dirdelim##getSectionPath(result)#">
+		<cfif NOT DirectoryExists(DirSection)>
 			<cftry>
-				<cfdirectory action="CREATE" directory="#variables.RootPath##variables.dirdelim##getSectionPath(result)#" mode="777">
+				<cfdirectory action="CREATE" directory="#DirSection#" mode="777">
 			<cfcatch>
 			</cfcatch>
 			</cftry>
+		</cfif>
+		<cfset FileApplicationCFM = DirSection & "Application.cfm">
+		<cfif NOT FileExists(FileApplicationCFM)>
+			<cfset ApplicationCFMOutput = '<cfinclude template="../Application.cfm"><cfset layout.setSection("#qSection.SectionTitle#")>'>
+			<cffile action="write" file="#FileApplicationCFM#" output="#ApplicationCFMOutput#" >
 		</cfif>
 	</cfif>
 	
@@ -1223,8 +1232,8 @@
 			<cfif variables.Datamgr.getDatabase() EQ "Sim">
 			<field ColumnName="Title" CF_DataType="CF_SQL_VARCHAR" Length="20" />
 			<field ColumnName="WhenCreated" CF_DataType="CF_SQL_DATE" />
-			<field ColumnName="Description" CF_DataType="CF_SQL_VARCHAR" Length="240" />
-			<field ColumnName="Keywords" CF_DataType="CF_SQL_VARCHAR" Length="240" />
+			<field ColumnName="Description" CF_DataType="CF_SQL_VARCHAR" Length="500" />
+			<field ColumnName="Keywords" CF_DataType="CF_SQL_VARCHAR" Length="900" />
 			<field ColumnName="Contents" CF_DataType="CF_SQL_LONGVARCHAR" />
 			<field ColumnName="Contents2" CF_DataType="CF_SQL_LONGVARCHAR" />
 			<field ColumnName="VersionDescription" CF_DataType="CF_SQL_VARCHAR" Length="240" />
@@ -1241,8 +1250,8 @@
 			<field ColumnName="SiteVersionID" CF_DataType="CF_SQL_INTEGER" />
 			<field ColumnName="Title" CF_DataType="CF_SQL_VARCHAR" Length="120" />
 			<field ColumnName="WhenCreated" CF_DataType="CF_SQL_DATE" />
-			<field ColumnName="Description" CF_DataType="CF_SQL_VARCHAR" Length="240" />
-			<field ColumnName="Keywords" CF_DataType="CF_SQL_VARCHAR" Length="240" />
+			<field ColumnName="Description" CF_DataType="CF_SQL_VARCHAR" Length="500" />
+			<field ColumnName="Keywords" CF_DataType="CF_SQL_VARCHAR" Length="900" />
 			<field ColumnName="Contents" CF_DataType="CF_SQL_LONGVARCHAR" />
 			<field ColumnName="Contents2" CF_DataType="CF_SQL_LONGVARCHAR" />
 			<field ColumnName="VersionDescription" CF_DataType="CF_SQL_VARCHAR" Length="240" />
@@ -1253,7 +1262,7 @@
 			<field ColumnName="ParentSectionID" CF_DataType="CF_SQL_INTEGER" />
 			<field ColumnName="SectionTitle" CF_DataType="CF_SQL_VARCHAR" Length="60" />
 			<field ColumnName="Description" CF_DataType="CF_SQL_VARCHAR" Length="240" />
-			<field ColumnName="Keywords" CF_DataType="CF_SQL_VARCHAR" Length="240" />
+			<field ColumnName="Keywords" CF_DataType="CF_SQL_VARCHAR" Length="900" />
 			<field ColumnName="SectionDir" CF_DataType="CF_SQL_VARCHAR" Length="240" />
 			<field ColumnName="SectionLink" CF_DataType="CF_SQL_VARCHAR" Length="240" />
 			<field ColumnName="MapSectionID" CF_DataType="CF_SQL_INTEGER" />
