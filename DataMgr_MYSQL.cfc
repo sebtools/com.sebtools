@@ -1,5 +1,5 @@
-<!--- 2.5 Beta 3 Dev 2 (Build 168) --->
-<!--- Last Updated: 2011-03-30 --->
+<!--- 2.5 Beta 3 (Build 171) --->
+<!--- Last Updated: 2012-01-25 --->
 <!--- Created by Steve Bryant 2004-12-08 --->
 <cfcomponent extends="DataMgr" displayname="Data Manager for MySQL" hint="I manage data interactions with the MySQL database.">
 
@@ -63,9 +63,9 @@
 	
 	<cfloop index="colname" list="#arguments.fields#">
 		<cfif Len(result)>
-			<cfset result =  "#result#, '#arguments.delimeter#', #colname#">
+			<cfset result =  "#result#, '#arguments.delimeter#', CAST(#colname# AS CHAR)">
 		<cfelse>
-			<cfset result = "#colname#">
+			<cfset result = "CAST(#colname# AS CHAR)">
 		</cfif>
 	</cfloop>
 	<cfset result = "CONCAT(#result#)">
@@ -93,13 +93,13 @@
 		<cfif ArrayLen(aSQL)>
 			<cfset ArrayAppend(aSQL,", '#arguments.delimeter#', ")>
 		</cfif>
+		<cfset ArrayAppend(aSQL,"CAST(")>
 		<cfif isSimpleValue(fieldSQL)>
 			<cfset ArrayAppend(aSQL,"#fieldSQL#")>
 		<cfelse>
-			<!--- <cfset ArrayAppend(aSQL,"CAST(")> --->
 			<cfset ArrayAppend(aSQL,fieldSQL)>
-			<!--- <cfset ArrayAppend(aSQL," AS varchar)")> --->
 		</cfif>
+		<cfset ArrayAppend(aSQL," AS CHAR)")>
 	</cfloop>
 	<cfset ArrayAppend(aSQL2,"CONCAT(")>
 	<cfset ArrayAppend(aSQL2,aSQL)>

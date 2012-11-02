@@ -247,7 +247,7 @@
 		<cfif ReFindNoCase(".*parameter.*function.*required but was not passed in",CFCATCH.Message)>
 			<cfthrow message="Error on #compName#: #CFCATCH.Message#" detail="#CFCATCH.Detail#">
 		<cfelse>
-			<cfrethrow>
+			<cfthrow message="Error on #compName#: #CFCATCH.Message#" detail="#CFCATCH.Detail#" errorcode="#CFCATCH.ErrorCode#" extendedinfo="#CFCATCH.extendedinfo#">
 		</cfif>
 		<!--- <cfdump var="#CFCATCH#">
 		<cfdump var="#variables.args#">

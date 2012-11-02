@@ -1,5 +1,5 @@
-<!--- 2.5 Beta 3 Dev 1 (Build 167) --->
-<!--- Last Updated: 2011-01-16 --->
+<!--- 2.5 Beta 3 (Build 171) --->
+<!--- Last Updated: 2012-01-25 --->
 <!--- Created by Steve Bryant 2004-12-08 --->
 <cfcomponent extends="DataMgr" displayname="Data Manager for Sybase" hint="I manage data interactions with the Sybase database.">
 
@@ -214,9 +214,8 @@
 	
 	<cfswitch expression="#arguments.type#">
 		<cfcase value="bigint"><cfset result = "CF_SQL_BIGINT"></cfcase>
-		<cfcase value="sql_variant,sysname"><cfset result = ""></cfcase>
+		<cfcase value="binary,image,sql_variant,sysname,varbinary"><cfset result = ""></cfcase>
 		<cfcase value="bit"><cfset result = "CF_SQL_BIT"></cfcase>
-		<cfcase value="binary,blob,image,varbinary"><cfset result = "CF_SQL_BLOB"></cfcase>
 		<cfcase value="char"><cfset result = "CF_SQL_CHAR"></cfcase>
 		<cfcase value="datetime"><cfset result = "CF_SQL_DATE"></cfcase>
 		<cfcase value="decimal"><cfset result = "CF_SQL_DECIMAL"></cfcase>
@@ -250,7 +249,6 @@
 	<cfswitch expression="#arguments.CF_Datatype#">
 		<cfcase value="CF_SQL_BIGINT"><cfset result = "bigint"></cfcase>
 		<cfcase value="CF_SQL_BIT"><cfset result = "bit"></cfcase>
-		<cfcase value="CF_SQL_BLOB"><cfset result = "blob"></cfcase>
 		<cfcase value="CF_SQL_CHAR"><cfset result = "char"></cfcase>
 		<cfcase value="CF_SQL_DATE"><cfset result = "datetime"></cfcase>
 		<cfcase value="CF_SQL_DECIMAL"><cfset result = "decimal"></cfcase>

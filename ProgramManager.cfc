@@ -1,5 +1,5 @@
-<!--- 1.0 Beta 2 (Build 14) --->
-<!--- Last Updated: 2011-03-30 --->
+<!--- 1.0 Beta 3 (Build 35) --->
+<!--- Last Updated: 2011-11-23 --->
 <!--- Information: sebtools.com --->
 <cfcomponent>
 
@@ -8,6 +8,7 @@
 	<cfargument name="NoticeMgr" type="any" required="no">
 	<cfargument name="Scheduler" type="any" required="no">
 	<cfargument name="ErrorEmail" type="string" required="no">
+	<cfargument name="Observer" type="any" required="no">
 	
 	<cfset initInternal(argumentCollection=arguments)>
 	
@@ -19,6 +20,7 @@
 	<cfargument name="NoticeMgr" type="any" required="no">
 	<cfargument name="Scheduler" type="any" required="no">
 	<cfargument name="ErrorEmail" type="string" required="no">
+	<cfargument name="Observer" type="any" required="no">
 	
 	<!--- Copy initialization arguments to variables so that they will be persistent with component but not available outside component --->
 	<cfscript>
@@ -43,7 +45,6 @@
 	
 	variables.xDefs = loadXML(getMethodOutputValue(variables,"xml"));
 	This.xDefs = variables.xDefs;
-	loadCustomFields();
 	if ( Len(Trim(xmlcustom)) ) {
 		//Make sure to use prefix attribute in customxml
 		if (
@@ -54,6 +55,7 @@
 		}
 		variables.xDefsCustom = loadXML(xmlcustom);
 	}
+	loadCustomFields();
 	
 	if ( StructKeyExists(arguments,"NoticeMgr") ) {
 		This.NoticeMgr = variables.NoticeMgr;
@@ -63,10 +65,13 @@
 		This.Scheduler = variables.Scheduler;
 		loadScheduledTask();
 	}
-	
 	loadComponents();
 	
 	variables.SendEmailOnError = true;
+	
+	if ( StructKeyExists(This,"Observer") AND StructKeyExists(This.Observer,"setSubject") ) {
+		This.Observer.setSubject(This);
+	}
 	</cfscript>
 	
 	<cfreturn This>
@@ -76,32 +81,48 @@
 	
 	<cfset var result = "">
 	
-	<cfif StructKeyExists(variables,"CustomSuffix") AND isSimpelValue(variables.CustomSuffix) AND Len(Trim(variables.CustomSuffix))>
+	<cfif StructKeyExists(variables,"CustomSuffix") AND isSimpleValue(variables.CustomSuffix) AND Len(Trim(variables.CustomSuffix))>
 		<cfset result = variables.CustomSuffix>
-	<cfelseif ListLen(variables.me.fullname,"_") EQ 2>
+	<cfelseif ListLen(ListLast(variables.me.fullname,"."),"_") EQ 2>
 		<cfset result = ListLast(variables.me.fullname,"_")>
 	</cfif>
 	
 	<cfreturn result>
 </cffunction>
 
+<cffunction name="getMeData" access="public" returntype="struct" output="false" hint="">
+	
+	<cfset var sThis = 0>
+	<cfset var filename = "">
+	
+	<cfif NOT StructKeyExists(Variables,"me")>
+		<cfset sThis = getMetaData(This)>
+		<cfset filename = ListLast(sThis.name,".")>
+		
+		<cfset variables.me = StructNew()>
+		<cfset variables.me["fullname"] = filename>
+		<cfset variables.me["name"] = ListFirst(variables.me["fullname"],"_")>
+		<cfset variables.me["path"] = reverse(ListRest(reverse(sThis.name),"."))>
+		<cfif StructKeyExists(sThis,"DisplayName")>
+			<cfset variables.me["label"] = sThis.DisplayName>
+		<cfelse>
+			<cfset variables.me["label"] = variables.me["name"]>
+		</cfif>
+		<cfset variables.me["dir"] = getDirectoryFromPath(sThis.path)>
+	</cfif>
+	
+	<cfreturn Variables.me>
+</cffunction>
+
 <cffunction name="loadComponentData" access="public" returntype="void" output="false" hint="">
 	
-	<cfset var sThis = getMetaData(This)>
-	<cfset var filename = ListLast(sThis.name,".")>
-	<cfset var result = "">
+	<cfset getMeData()>
 	
-	<cfset variables.me = StructNew()>
-	<cfset variables.me["fullname"] = filename>
-	<cfset variables.me["name"] = ListFirst(variables.me["fullname"],"_")>
-	<cfset variables.me["path"] = reverse(ListRest(reverse(sThis.name),"."))>
-	<cfif StructKeyExists(sThis,"DisplayName")>
-		<cfset variables.me["label"] = sThis.DisplayName>
-	<cfelse>
-		<cfset variables.me["label"] = variables.me["name"]>
-	</cfif>
-	<cfset variables.me["dir"] = getDirectoryFromPath(sThis.path)>
+</cffunction>
+
+<cffunction name="getPrefix" access="public" returntype="string" output="no">
 	
+	<cfreturn Variables.prefix>
 </cffunction>
 
 <cffunction name="getServiceComponent" access="public" returntype="any" output="no">
@@ -142,9 +163,17 @@
 <cffunction name="getComponentTableName" access="public" returntype="string" output="false" hint="">
 	<cfargument name="Comp" type="any" required="true">
 	
-	<cfset var sCompData = getMetaData(arguments.Comp)>
+	<cfset var sCompData = 0>
 	<cfset var qInfo = 0>
 	<cfset var result = "">
+	
+	<cfif isObject(arguments.Comp)>
+		<cfset sCompData = getMetaData(arguments.Comp)>
+	<cfelseif isStruct(arguments.Comp)>
+		<cfset sCompData = arguments.Comp>
+	<cfelse>
+		<cfthrow message="Comp argument must be a component or a structure." type="ProgramManager">
+	</cfif>
 	
 	<cfquery name="qInfo" dbtype="query">
 	SELECT	name
@@ -163,7 +192,23 @@
 		<cfif qInfo.RecordCount EQ 1>
 			<cfset result = qInfo.name>
 		<cfelse>
-			<cfthrow message="Unable to determine table for #ListLast(sCompData.name,".")#." type="ProgramManager">
+			<cfif
+					StructKeyExists(sCompData,"extends")
+				AND	StructKeyExists(sCompData.extends,"name")
+				AND	NOT (
+							ListLast(sCompData.extends.name,".") EQ "Records"
+						OR	ListLast(sCompData.extends.name,".") EQ "component"
+				)
+			>
+				<cftry>
+						<cfset result = getComponentTableName(sCompData.extends)>
+				<cfcatch>
+					<cfthrow message="Unable to determine table for #ListLast(sCompData.name,".")#." type="ProgramManager">
+				</cfcatch>
+				</cftry>
+			<cfelse>
+				<cfthrow message="Unable to determine table for #ListLast(sCompData.name,".")#." type="ProgramManager">
+			</cfif>
 		</cfif>
 	</cfif>
 	
@@ -191,6 +236,17 @@
 	</cfif>
 	
 	<cfreturn result>
+</cffunction>
+
+<cffunction name="notifyEvent" access="public" returntype="void" output="no">
+	<cfargument name="EventName" type="string" required="true">
+	<cfargument name="Args" type="struct" required="false">
+	<cfargument name="result" type="any" required="false">
+	
+	<cfif StructKeyExists(Variables,"Observer") AND StructKeyExists(Variables.Observer,"notifyEvent")>
+		<cfset Variables.Observer.notifyEvent(ArgumentCollection=Arguments)>
+	</cfif>
+	
 </cffunction>
 
 <cffunction name="customxml" access="private" returntype="string" output="false" hint="">
@@ -345,24 +401,44 @@
 	<cfset var ext = getCustomExtension()>
 	<cfset var extpath = "">
 	
-	<cfif NOT StructKeyExists(arguments,"path")>
-		<cfset arguments.path = "#variables.me.path#.#arguments.name#">
+	<cfif NOT StructKeyExists(Arguments,"path")>
+		<cfset Arguments.path = "#variables.me.path#.#arguments.name#">
 	</cfif>
 	
 	<cfset extpath = "#getDirectoryFromPath(getCurrentTemplatePath())##arguments.name#_#ext#.cfc">
 	
 	<cfif Len(ext) AND FileExists(extpath)>
-		<cfset arguments.path = "#arguments.path#_#ext#">
+		<cfset Arguments.path = "#Arguments.path#_#ext#">
 	</cfif>
 	
-	<cfset arguments["Manager"] = variables.Manager>
-	<cfset arguments["Parent"] = This>
-	<cfset arguments[variables.me.name] = This>
+	<cfset StructAppend(Arguments,loadComponentArguments())>
 	
-	<cfinvoke component="#arguments.path#" method="init" returnvariable="this.#name#" argumentCollection="#arguments#"></cfinvoke>
+	<cfinvoke component="#Arguments.path#" method="init" returnvariable="this.#name#" ArgumentCollection="#Arguments#"></cfinvoke>
 	
-	<cfset variables[arguments.name] = This[arguments.name]>
+	<cfset variables[Arguments.name] = This[Arguments.name]>
 	
+</cffunction>
+
+<cffunction name="loadComponentArguments" access="private" returntype="any" output="no" hint="I return the arguments to be passed to each component.">
+	
+	<cfset var sArgs = StructNew()>
+	
+	<cfset sArgs["Manager"] = variables.Manager>
+	<cfset sArgs["Parent"] = This>
+	<cfset sArgs[variables.me.name] = This>
+	
+	<cfreturn sArgs>
+</cffunction>
+
+<cffunction name="getErrorType" access="public" returntype="string" output="no">
+	
+	<cfset getMeData()>
+	
+	<cfif NOT StructKeyExists(Variables,"ErrorType")>
+		<cfset Variables.ErrorType = ListLast(variables.me.name,'.')>
+	</cfif>
+	
+	<cfreturn Variables.ErrorType>
 </cffunction>
 
 <cffunction name="getRootURL" access="package" returntype="string" output="no">
@@ -420,8 +496,6 @@
 			<cfinvokeargument name="Subject" value="#arguments.Subject#">
 			<cfinvokeargument name="html" value="#arguments.html#">
 		</cfinvoke>
-	<cfelse>
-		<cfmail to="steve@bryantwebconsulting.com" from="robot@bryantwebconsulting.com" server="mail.bryantwebconsulting.com" type="html" subject="#variables.me.label# Error">#arguments.html#</cfmail>
 	</cfif>
 	
 </cffunction>
@@ -441,7 +515,7 @@
 	</cfif>
 	
 	<cfthrow
-		type="#variables.me.name#"
+		type="#getErrorType()#"
 		message="#arguments.message#"
 		errorcode="#arguments.errorcode#"
 		detail="#arguments.detail#"
@@ -449,6 +523,44 @@
 	>
 	
 </cffunction>
+
+<cffunction name="onMissingMethod" access="public" returntype="any" output="no">
+	
+	<cfset var result = 0>
+	<cfset var method = Arguments.missingMethodName>
+	<cfset var args = Arguments.missingMethodArguments>
+	<cfset var isValidMethod = false>
+	<cfset var ii = 0>
+	<cfset var sTable = 0>
+	
+	<cfloop index="ii" from="1" to="#ArrayLen(This.xDefs.tables.table)#">
+		<cfset sTable = This.xDefs.tables.table[ii].XmlAttributes>
+		<cfif
+				StructKeyExists(sTable,"methodPlural")
+			AND	StructKeyExists(This,sTable["methodPlural"])
+			AND	StructKeyExists(This[sTable["methodPlural"]],method)
+		>
+			<cfinvoke
+				returnvariable="result"
+				component="#This[sTable.methodPlural]#"
+				method="#method#"
+				argumentcollection="#args#"
+			/>
+			<cfset isValidMethod = true>
+			<cfbreak>
+		</cfif>
+	</cfloop>
+	
+	<cfif NOT isValidMethod>
+		<cfthrow message="The method #method# was not found in component #getCurrentTemplatePath()#" detail=" Ensure that the method is defined, and that it is spelled correctly.">
+	</cfif>
+	
+	<cfif isDefined("result")>
+		<cfreturn result>
+	</cfif>
+	
+</cffunction>
+
 <cfscript>
 function makeLinkVar(str) {
 	return LCase(makeCompName(str));

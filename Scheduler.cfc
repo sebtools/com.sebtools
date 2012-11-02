@@ -29,7 +29,7 @@
 
 <cffunction name="getActionRecords" access="public" returntype="query" output="no">
 	
-	<cfreturn variables.DataMgr.getRecords("schActions")>
+	<cfreturn variables.DataMgr.getRecords("schActions",arguments)>
 </cffunction>
 
 <cffunction name="getTaskRecords" access="public" returntype="query" output="no">
@@ -109,6 +109,10 @@
 	<cfargument name="weekdays" type="string" required="no" hint="The week days on which the task can be run.">
 	
 	<cfset var qTask = getTaskNameRecord(arguments.Name)>
+	
+	<cfif Len(Arguments.ComponentPath) GT 50>
+		<cfset Arguments.ComponentPath = Right(Arguments.ComponentPath,50)>
+	</cfif>
 	
 	<!--- Make sure task of this name doesn't exist for another component. --->
 	<cfif StructKeyExists(variables.tasks,arguments.Name)>
@@ -194,6 +198,7 @@
 		<cfset TimeMarkEnd = getTickCount()>
 		<cfset sAction.Success = true>
 	<cfcatch>
+		<cfset StructDelete(variables.sRunningTasks,arguments.Name)>
 		<cfset sAction.Success = false>
 		<cfset TimeMarkEnd = getTickCount()>
 		<cfset sAction.Seconds = GetSecondsDiff(TimeMarkBegin,TimeMarkEnd)>

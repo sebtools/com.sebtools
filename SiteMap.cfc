@@ -116,7 +116,7 @@
 <cffunction name="getPageLabel" access="public" returntype="string" hint="I return the label of the page based on its url.">
 	<cfargument name="SCRIPT_NAME" type="string" required="yes">
 	
-	<cfset var element = XmlSearch(variables.xSiteMap,'/site//page[@url="#arguments.SCRIPT_NAME#"]')>
+	<cfset var element = XmlSearch(variables.xSiteMap,'/site//page[@url="#XmlFormat(arguments.SCRIPT_NAME)#"]')>
 	<cfset var result = "">
 	
 	<cfif isArray(element) AND ArrayLen(element) eq 1 AND StructKeyExists(element[1],"XmlAttributes") AND StructKeyExists(element[1].XmlAttributes,"label")>
