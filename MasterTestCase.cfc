@@ -1,4 +1,4 @@
-<cfcomponent displayname="Master Test Case" extends="net.sourceforge.cfunit.framework.TestCase">
+<cfcomponent displayname="Master Test Case" extends="mxunit.framework.TestCase">
 
 <cffunction name="getRandomValue" access="private" returntype="string" output="no">
 	<cfargument name="field" type="struct" required="yes">
