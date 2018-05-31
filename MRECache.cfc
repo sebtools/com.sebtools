@@ -21,7 +21,6 @@
 	<cfset var ii = 0>
 
 	<cfloop index="ii" from="1" to="#ArrayLen(aCacheNames)#">
-		<cfdump var="#Left(aCacheNames[ii],Len(id))#">
 		<cfif Left(aCacheNames[ii],Len(id)) EQ id>
 			<cfset remove(dequalify(aCacheNames[ii]))>
 		</cfif>
@@ -56,7 +55,7 @@
 
 	<cfset var local = StructNew()>
 	<cfset var begin = 0>
-	
+
 	<cfif NOT exists(Arguments.id)>
 		<cfif NOT StructKeyExists(Arguments,"Args")>
 			<cfset Arguments["Args"] = {}>
@@ -100,7 +99,7 @@
 		<cfif isSimpleValue(Arguments.data)>
 			<cfset result = "#result#_" & Arguments.data>
 		<cfelse>
-			<cfset result = "#result#_" & Hash(SerializeJSON(Arguments.data))>	
+			<cfset result = "#result#_" & Hash(SerializeJSON(Arguments.data))>
 		</cfif>
 	</cfif>
 
@@ -135,7 +134,7 @@
 
 	<cfset var local = StructNew()>
 	<cfset var begin = 0>
-	
+
 	<cfif NOT exists(Arguments.id)>
 		<cfif NOT StructKeyExists(Arguments,"Args")>
 			<cfset Arguments["Args"] = {}>
@@ -250,7 +249,7 @@
 
 <cffunction name="getTimeSpanFromInterval" access="public" returntype="numeric" output="false" hint="I return a timespan from an interval string.">
 	<cfargument name="interval" type="string" required="true">
-	
+
 	<cfset var result = 0>
 	<cfset var timespans = "second,minute,hour,day,week,month,quarter,year">
 	<cfset var dateparts = "s,n,h,d,ww,m,q,yyyy">
@@ -266,7 +265,7 @@
 	<cfset var instance = "">
 	<cfset var thisint = "">
 	<cfset var sNums = 0>
-	
+
 	<cfif ListLen(arguments.interval) GT 1>
 		<cfloop list="#arguments.interval#" index="thisint">
 			<cfset result += getTimeSpanFromInterval(thisint)>
@@ -303,10 +302,10 @@
 			<cfset arguments.interval = ListDeleteAt(arguments.interval,ListFindNoCase(arguments.interval,"other"," ")," ")>
 			<cfset num = num * 2>
 		</cfif>
-		
+
 		<!--- Figure out timespan --->
 		<cfset timespan = ListLast(arguments.interval," ")>
-		
+
 		<!--- Ditch ending "s" or "ly" --->
 		<cfif Right(timespan,1) EQ "s">
 			<cfset timespan = Left(timespan,Len(timespan)-1)>
@@ -317,16 +316,16 @@
 		<cfif timespan EQ "dai">
 			<cfset timespan = "day">
 		</cfif>
-		
+
 		<cfif ListFindNoCase(timespans,timespan)>
 			<cfset value = ListGetAt(vals,ListFindNoCase(timespans,timespan))>
 		<cfelse>
 			<cfthrow message="#timespan# is not a valid inteval measurement.">
 		</cfif>
-		
+
 		<cfset result = value * num>
 	</cfif>
-	
+
 	<cfreturn result>
 </cffunction>
 
@@ -395,7 +394,7 @@
 	<cfif NOT StructKeyExists(Variables.meta[Arguments.id],"NumCalls")>
 		<cfset Variables.meta[Arguments.id]["NumCalls"] = 0>
 	</cfif>
-	
+
 </cffunction>
 
 </cfcomponent>
