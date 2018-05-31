@@ -2,7 +2,7 @@
 
 <cffunction name="init" access="public" returntype="any" output="false" hint="I initialize and return the component.">
 	<cfargument name="AWS" type="any" required="true">
-	
+
 	<cfset Arguments.subdomain = "email">
 
 	<cfset initInternal(ArgumentCollection=Arguments)>
@@ -19,7 +19,6 @@
 	<cfset var aIdentities = Variables.AWS.callLimitedAPI(
 		subdomain="email",
 		Action="ListIdentities",
-		Parameters={"IdentityType"="Domain"},
 		timeSpan=CreateTimeSpan(0,3,0,0),
 		waitlimit=300
 	)>
@@ -29,7 +28,7 @@
 
 <cffunction name="GetIdentityNotificationAttributes" access="public" returntype="any" output="no">
 	<cfargument name="Members" type="string" required="true">
-	
+
 	<cfset var result = Variables.AWS.callLimitedAPI(
 		subdomain="email",
 		Action="GetIdentityNotificationAttributes",
@@ -70,7 +69,7 @@
 </cffunction>
 
 <cffunction name="_GetSendStatistics" access="public" returntype="query" output="no">
-	
+
 	<cfscript>
 	var columns = "Complaints,Rejects,Bounces,DeliveryAttempts,Timestamp";
 	var xStatistics = Variables.AWS.callLimitedAPI(
@@ -121,7 +120,7 @@
 	<cfargument name="Identity" type="string" required="true">
 	<cfargument name="SnsTopic" type="string" required="true">
 	<cfargument name="NotificationTypes" type="string" default="Bounce,Complaint">
-	
+
 	<cfset var type = "">
 
 	<cfloop list="#Arguments.NotificationTypes#" index="type">
@@ -193,7 +192,7 @@
 		Component=This,
 		MethodName="_isVerified",
 		Args=Arguments,
-		timeSpan=CreateTimeSpan(0,0,3,0)
+		timeSpan=CreateTimeSpan(0,3,0,0)
 	)>
 </cffunction>
 
@@ -292,7 +291,7 @@
 	<cfscript>
 	var key = "";
 	var result = [];
-	
+
 	if ( isArray(Arguments.recipients) ) {
 		return Arguments.recipients;
 	}
@@ -322,11 +321,11 @@
 	<cfargument name="replyto" 			 	type="any"		required="false">
 	<cfargument name="subject" 			 	type="string"	required="false">
 	<cfargument name="html" 			 	type="string"	required="false" 	hint="html message">
-	<cfargument name="subjectCharset" 	 	type="string"	required="false" 	hint="Charset of the subject" default="utf-8">
+	<cfargument name="subject_charset" 	 	type="string"	required="false" 	hint="Charset of the subject" default="utf-8">
 	<cfargument name="returnpath" 	 		type="string"	required="false" 	hint="The email address to which bounce notifications are to be forwarded. If the message cannot be delivered to the recipient, then an error message will be returned from the recipient's ISP; this message will then be forwarded to the email address specified by the ReturnPath parameter">
-	<cfargument name="messagetextCharset"  	type="string"	required="false" 	hint="message of the email">
-	<cfargument name="messagehtmlCharset" 	type="string" 	required="false" 	hint="Charset of the html message">
-	
+	<cfargument name="text_charset"  	type="string"	required="false" 	hint="message of the email">
+	<cfargument name="html_charset" 	type="string" 	required="false" 	hint="Charset of the html message">
+
 	<cfscript>
 	var sParams = {};
 	var result = 0;
@@ -341,53 +340,53 @@
 			Arguments[emailfield] = emailarray(Arguments[emailfield]);
 		}
 	}
-	
+
 	for (ii=1; ii lte arraylen(arguments.to); ii++){
 		sParams['Destination.ToAddresses.member.#ii#'] = trim(arguments.to[ii]);
 	}
-	
-	if(structKeyExists(arguments,"cc") and IsArray(arguments.cc)){
+
+	if (structKeyExists(arguments,"cc") and IsArray(arguments.cc)) {
 		for (ii=1; ii lte arraylen(arguments.cc); ii++){
 			sParams['Destination.CcAddresses.member.#ii#'] = trim(arguments.cc[ii]);
 		}
 	}
-	
-	if(structKeyExists(arguments,"bcc") and IsArray(arguments.bcc)){
+
+	if (structKeyExists(arguments,"bcc") and IsArray(arguments.bcc)) {
 		for (ii=1; ii lte arraylen(arguments.bcc); ii++){
 			sParams['Destination.BccAddresses.member.#ii#'] = trim(arguments.bcc[ii]);
 		}
 	}
-	
-	if(structKeyExists(arguments,"replyto") and IsArray(arguments.replyto)){
+
+	if (structKeyExists(arguments,"replyto") and IsArray(arguments.replyto)) {
 		for (ii=1; ii lte arraylen(arguments.replyto); ii++){
 			sParams['ReplyToAddresses.member.#ii#'] = trim(arguments.replyto[ii]);
 		}
 	}
-	
+
 	sParams['Source'] = trim(arguments.from);
-	
-	if(structKeyExists(arguments,"returnpath") and len(trim(arguments.returnpath))){
+
+	if (structKeyExists(arguments,"returnpath") and len(trim(arguments.returnpath))) {
 		sParams['ReturnPath'] = trim(arguments.returnpath);
 	}
-	
-	if(structKeyExists(arguments,"subject") and len(trim(arguments.subject))){
+
+	if (structKeyExists(arguments,"subject") and len(trim(arguments.subject))) {
 		sParams['Message.Subject.Data'] = trim(arguments.subject);
-		if(structKeyExists(arguments,"subjectCharset") and len(trim(arguments.subjectCharset))){
-			sParams['Message.Subject.Charset'] = trim(arguments.subjectCharset);
-		}	
+		if(structKeyExists(arguments,"subject_charset") and len(trim(arguments.subject_charset))){
+			sParams['Message.Subject.Charset'] = trim(arguments.subject_charset);
+		}
 	}
-	
-	if(structKeyExists(arguments,"text") and len(trim(arguments.text))){
+
+	if (structKeyExists(arguments,"text") and len(trim(arguments.text))) {
 		sParams['Message.Body.Text.Data'] = trim(arguments.text);
-		if(structKeyExists(arguments,"messagetextCharset") and len(trim(arguments.messagetextCharset))){
-			sParams['Message.Body.Text.Charset'] = trim(arguments.messagetextCharset);
-		}	
+		if (structKeyExists(arguments,"text_charset") and len(trim(arguments.text_charset))){
+			sParams['Message.Body.Text.Charset'] = trim(arguments.text_charset);
+		}
 	}
-	
-	if(structKeyExists(arguments,"html") and len(trim(arguments.html))){
+
+	if (structKeyExists(arguments,"html") and len(trim(arguments.html))) {
 		sParams['Message.Body.Html.Data'] = trim(arguments.html);
-		if(structKeyExists(arguments,"messagehtmlCharset") and len(trim(arguments.messagehtmlCharset))){
-			sParams['Message.Body.Html.Charset'] = trim(arguments.messagehtmlCharset);
+		if (structKeyExists(arguments,"html_charset") and len(trim(arguments.html_charset))){
+			sParams['Message.Body.Html.Charset'] = trim(arguments.html_charset);
 		}
 	}
 
@@ -400,7 +399,7 @@
 	if ( isXml(result) AND StructKeyExists(result,"MessageId") ) {
 		return result["MessageId"].XmlText;
 	}
-	
+
 	return result;
 	</cfscript>
 </cffunction>
@@ -412,6 +411,13 @@
 	<cfset var VerificationToken = xResult["VerifyDomainIdentityResponse"]["VerifyDomainIdentityResult"]["VerificationToken"].XmlText>
 
 	<cfreturn VerificationToken>
+</cffunction>
+
+<cffunction name="VerifyEmailIdentity" access="public" returntype="void" output="no">
+	<cfargument name="EmailAddress" type="string" required="true">
+
+	<cfset callAPI(Action="VerifyEmailIdentity",parameters={"EmailAddress"=Arguments.EmailAddress})>
+
 </cffunction>
 
 <cffunction name="_GetSendQuota" access="private" returntype="struct" output="no">
@@ -449,7 +455,7 @@
 	if ( REFindNoCase("\.\w{2,3}\.\w{2}$",result) ) {
 		parts = 3;
 	}
-	
+
 	// Peel off all of the subdomains.
 	while ( ListLen(result,".") GT parts ) {
 		result = listDeleteAt(result,1,".");
