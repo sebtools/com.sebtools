@@ -106,6 +106,10 @@
 	<cfset var result = "">
 	<cfset var LeftLength = 0>
 
+	<cfif Arguments.Length EQ 0>
+		<cfset Arguments.Length = 1000>
+	</cfif>
+
 	<cfif arguments.Length GT 0>
 		<cfif Len(arguments.Suffix) EQ 0 AND ListLen(arguments.Root,".") GT 1>
 			<cfset arguments.Suffix = "." & ListLast(arguments.Root,".")>
@@ -141,7 +145,7 @@
 </cffunction>
 
 <cffunction name="loadMimeTypes" access="public" returntype="any" output="false">
-	
+
 	<cfset var CFHTTP = 0>
 	<cfset var sMimes = 0>
 	<cfset var key = "">
@@ -161,7 +165,7 @@
 </cffunction>
 
 <cffunction name="loadMimeTypes_RealTime" access="public" returntype="any" output="false">
-	
+
 	<cfset var CFHTTP = 0>
 	<cfset var sMimes = 0>
 	<cfset var key = "">
@@ -418,7 +422,7 @@
 	<cfif ListLen(Arguments.FileName,variables.dirdelim) GT 1 AND FileExists(Arguments.FileName)>
 		<cfset result = Arguments.FileName>
 	<cfelse>
-		<cfset result = getDirectory(arguments.Folder) & arguments.FileName>
+		<cfset result = getDirectory(arguments.Folder) & cleanFileName(arguments.FileName)>
 	</cfif>
 
 	<cfreturn result>
@@ -791,6 +795,7 @@ Copies a directory.
 	<cfargument name="maxlength" type="numeric" default="0">
 
 	<cfset var result = ReReplaceNoCase(arguments.name,"[^a-zA-Z0-9_\-\.]","_","ALL")><!--- Remove special characters from file name --->
+	<cfset result = ReReplaceNoCase(result,"\s+","_","ALL")><!--- Remove empty space from file name --->
 
 	<cfset result = ReReplaceNoCase(result,"_{2,}","_","ALL")>
 
@@ -827,7 +832,7 @@ Copies a directory.
 	<cfset var dirdelim = getDirDelim()>
 	<cfset var result = cleanFileName(name=Arguments.name,maxlength=Arguments.maxlength)>
 	<cfset var path = "#dir##dirdelim##result#">
-	
+
 	<!--- If corrected file name doesn't match original, rename it --->
 	<cfif arguments.name NEQ result AND FileExists("#arguments.dir##dirdelim##arguments.name#")>
 		<cfset path = createUniqueFileName(path,arguments.maxlength)>
