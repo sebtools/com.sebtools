@@ -15,21 +15,25 @@
 <cffunction name="init" access="public" returntype="NoticeMgr" output="no" hint="I instantiate and return this component.">
 	<cfargument name="DataMgr" type="any" required="yes">
 	<cfargument name="Mailer" type="any" required="yes">
-	
+	<cfargument name="Observer" type="any" required="no">
+
 	<cfscript>
 	variables.DataMgr = arguments.DataMgr;
 	variables.Mailer = arguments.Mailer;
 	This.DataMgr = arguments.DataMgr;
 	This.Mailer = arguments.Mailer;
-	
+	if ( StructKeyExists(Arguments,"Observer") ) {
+		Variables.Observer = Arguments.Observer;
+	}
+
 	variables.datasource = variables.DataMgr.getDatasource();
-	
+
 	variables.DataMgr.loadXML(getDbXml(),true,true);
 	loadNotices();
-	
+
 	//upgrade();
 	</cfscript>
-	
+
 	<cfreturn this>
 </cffunction>
 
@@ -41,10 +45,10 @@
 	<cfargument name="HTML" type="string" required="no" hint="The HTML for the email (for HTML email)">
 	<cfargument name="DataKeys" type="string" required="no" hint="A list of data keys for the component (the values to evaluate from within brackets in the email).">
 	<cfargument name="Notes" type="string" required="no" hint="Notes about the Notice.">
-	
+
 	<cfset var qCheckNotice = 0>
 	<cfset var sCheckNotice = StructNew()>
-	
+
 	<!---
 	If a notice of this name already exists for another component, throw an error (type="NoticeMgr")
 	--->
@@ -59,7 +63,7 @@
 			<cfthrow message="A notice of this name is already being used by another component (""#qCheckNotice.Component#"")." type="NoticeMgr" errorcode="NameConflict">
 		</cfif>
 	</cfif>
-	
+
 	<!---
 	Only take action if this notice of this name doesn't already exists for this component.
 	(we don't want to update because the admin may have change the notice from the default settings)
@@ -80,19 +84,19 @@
 			<cfinvokeargument name="text" value="#qCheckNotice.Text#">
 		</cfinvoke>
 	</cfif>
-	
+
 </cffunction>
 
 <cffunction name="changeDataKeys" access="public" returntype="void" output="no" hint="I change the Data Keys for the given notice.">
 	<cfargument name="Name" type="string" required="yes" hint="The name of this notice (must be unique)">
 	<cfargument name="DataKeys" type="string" required="no" hint="A list of data keys for the component (the values to evaluate from within brackets in the email).">
-	
+
 	<cfset var qCheckNotice = 0>
 	<cfset var data = StructNew()>
-	
+
 	<cfset data["Name"] = arguments.Name>
 	<cfset qCheckNotice = variables.DataMgr.getRecords(tablename="emlNotices",data=data,fieldlist="NoticeID,Subject,HTML,Text")>
-	
+
 	<cfif qCheckNotice.RecordCount>
 		<cfset data = StructNew()>
 		<cfset data["NoticeID"] = qCheckNotice.NoticeID>
@@ -108,7 +112,7 @@
 	<cfelse>
 		<cfthrow message="No notice of this name (#arguments.Name#) exists." type="NoticeMgr" errorcode="NoSuchNotice">
 	</cfif>
-	
+
 </cffunction>
 
 <cffunction name="getDataMgr" access="public" returntype="any" output="no" hint="I get the DataMgr for this component.">
@@ -126,37 +130,37 @@
 <cffunction name="getNotice" access="public" returntype="query" output="no" hint="I get the requested notice.">
 	<cfargument name="NoticeID" type="string" required="no" hint="The database id for this notice.">
 	<cfargument name="Name" type="string" required="no" hint="The unique name for this notice.">
-	
+
 	<cfset var reqargs = "NoticeID,Name">
 	<cfset var arg = "">
 	<cfset var hasArg = false>
-	
+
 	<cfloop index="arg" list="#reqargs#">
 		<cfif StructKeyExists(arguments,arg)>
 			<cfset hasArg = true>
 		</cfif>
 	</cfloop>
-	
+
 	<cfif NOT hasArg>
 		<cfthrow message="getNotice requires one of the following arguments: #reqargs#" type="NoticeMgr" errorcode="GetNoticeRequiredArgs">
 	</cfif>
-	
+
 
 	<cfreturn variables.DataMgr.getRecord("emlNotices",arguments)>
 </cffunction>
 
 <cffunction name="getNotices" access="public" returntype="query" output="no" hint="I get all of the notices.">
 	<cfargument name="fieldlist" type="string" default="">
-	
+
 	<cfset Arguments.tablename = "emlNotices">
-	
+
 	<cfreturn variables.DataMgr.getRecords(ArgumentCollection=Arguments)>
 </cffunction>
 
 <cffunction name="loadNotices" access="public" returntype="any" output="no">
-	
+
 	<cfset var qNotices = getNotices(fieldlist="Name,Subject,DataKeys,HTML,Text")>
-	
+
 	<cfloop query="qNotices">
 		<cfinvoke component="#variables.Mailer#" method="addNotice">
 			<cfinvokeargument name="name" value="#Name#">
@@ -166,22 +170,22 @@
 			<cfinvokeargument name="text" value="#Text#">
 		</cfinvoke>
 	</cfloop>
-	
+
 </cffunction>
 
 <cffunction name="removeNotice" access="public" returntype="void" output="no" hint="I remove a notice.">
 	<cfargument name="name" type="string" required="yes">
-	
+
 	<cfset var qNotice = getNotice(Name=arguments.Name)>
 	<cfset var data = StructNew()>
-	
+
 	<cfif qNotice.RecordCount>
 		<cfset data["NoticeID"] = qNotice.NoticeID>
 		<cfset variables.DataMgr.deleteRecord("emlNotices",data)>
 	</cfif>
-	
+
 	<cfset variables.Mailer.removeNotice(arguments.Name)>
-	
+
 </cffunction>
 
 <cffunction name="saveNotice" access="public" returntype="string" output="no" hint="I save a notice.">
@@ -192,15 +196,15 @@
 	<cfargument name="HTML" type="string" required="no" hint="The HTML for the email (for HTML email)">
 	<cfargument name="DataKeys" type="string" required="no" hint="A list of data keys for the component (the values to evaluate from within brackets in the email).">
 	<cfargument name="Notes" type="string" required="no" hint="Notes about the Notice.">
-	
+
 	<cfset var result = 0>
 	<cfset var qNotice = getNotice(Name=arguments.Name)>
-	
+
 	<!--- Actions to perform if this is an existing notice --->
 	<cfif qNotice.RecordCount>
 		<!--- Name drives the id here, not vice-versa --->
 		<cfset arguments["NoticeID"] = qNotice.NoticeID>
-		
+
 		<!---
 		TODO: Make sure Component and Name haven't changed if this is an existing notice
 		--->
@@ -208,7 +212,7 @@
 			<cfthrow message="You cannot change the component with which a notice is associated." type="NoticeMgr" errorcode="ChangeComponent">
 		</cfif>
 	</cfif>
-	
+
 	<!--- Make sure notice has something in it --->
 	<cfif NOT
 		(
@@ -218,13 +222,13 @@
 	>
 		<cfthrow message="If Contents argument is not provided than either html or text arguments must be." type="Mailer" errorcode="ContentsRequired">
 	</cfif>
-	
-	
+
+
 	<!--- Save notice record --->
 	<cfset result = variables.DataMgr.saveRecord("emlNotices",arguments)>
 	<!--- get notice record --->
 	<cfset qNotice = getNotice(Name=arguments.Name)>
-	
+
 	<!--- Add/save notice to mailer --->
 	<cfif Len(qNotice.HTML) OR Len(qNotice.Text)>
 		<cfinvoke component="#variables.Mailer#" method="addNotice">
@@ -235,22 +239,26 @@
 			<cfinvokeargument name="text" value="#qNotice.Text#">
 		</cfinvoke>
 	</cfif>
-	
+
 </cffunction>
 
 <cffunction name="sendNotice" access="public" returntype="struct" output="no" hint="I send set/override any data based on the data given and send the given notice.">
 	<cfargument name="name" type="string" required="yes" hint="The name of the notice you want to send.">
 	<cfargument name="data" type="struct" hint="The data you want to use for this email message.">
 
+	<cfif StructKeyExists(Variables,"Observer")>
+		<cfset Variables.Observer.announceEvent(EventName="NoticeMgr:sendNotice",Args=Arguments)>
+	</cfif>
+
 	<cfreturn variables.Mailer.sendNotice(argumentCollection=arguments)>
 </cffunction>
 
 <cffunction name="upgrade" access="private" returntype="any" output="no">
-	
+
 	<cfset var dbtables = variables.DataMgr.getDatabaseTables()>
 	<cfset var qOldRecords = 0>
 	<cfset var qNewRecords = getNotices()>
-	
+
 	<!---
 	Look for mainResponses table and copy all responses to emlNotices.
 	Then ditch mainResponses.
@@ -280,12 +288,12 @@
 				)
 		</cfquery>
 	</cfif>
-	
+
 </cffunction>
 
 <cffunction name="getDbXml" access="private" returntype="string" output="no" hint="I return the XML for the tables needed for Searcher to work.">
 	<cfset var tableXML = "">
-	
+
 	<cfsavecontent variable="tableXML">
 	<tables>
 		<table name="emlNotices">
@@ -300,7 +308,7 @@
 		</table>
 	</tables>
 	</cfsavecontent>
-	
+
 	<cfreturn tableXML>
 </cffunction>
 
