@@ -3,18 +3,18 @@
 <cffunction name="init" access="public" returntype="any" output="no">
 	<cfargument name="Manager" type="any" required="yes">
 	<cfargument name="POIUtility" type="any" required="no">
-	
+
 	<cfset initInternal(argumentCollection=arguments)>
-	
+
 	<cfreturn This>
 </cffunction>
 
 <cffunction name="initInternal" access="public" returntype="any" output="no">
 	<cfargument name="Manager" type="any" required="yes">
 	<cfargument name="POIUtility" type="any" required="no">
-	
+
 	<cfset Super.initInternal(argumentCollection=arguments)>
-	
+
 	<cfif
 			NOT StructKeyExists(variables,"POIUtility")
 		AND	StructKeyExists(variables,"Parent")
@@ -27,42 +27,42 @@
 		</cfcatch>
 		</cftry>
 	</cfif>
-	
+
 	<cfif
 			NOT StructKeyExists(variables,"POIUtility")
 		AND	StructKeyExists(variables.Manager,"POIUtility")
 	>
 		<cfset variables.POIUtility = variables.Manager.POIUtility>
 	</cfif>
-	
+
 	<cfif NOT StructKeyExists(variables,"POIUtility")>
 		<cfthrow message="Importer required POIUtility to work.">
 	</cfif>
-	
+
 	<cfset getImportee()>
-	
+
 	<cfreturn This>
 </cffunction>
 
 <cffunction name="getFieldsStruct" access="public" returntype="struct" output="no">
-	
+
 	<cfset var sResult = Super.getFieldsStruct(argumentCollection=arguments)>
-	
+
 	<cfif StructKeyExists(variables,"Importee")>
 		<cfset StructAppend(sResult,variables.Importee.getFieldsStruct(argumentCollection=arguments))>
 	</cfif>
-	
+
 	<cfreturn sResult>
 </cffunction>
 
 <cffunction name="getMetaStruct" access="public" returntype="struct" output="no">
-	
+
 	<cfset var sResult = Super.getMetaStruct(argumentCollection=arguments)>
 	<cfset var sImporteeStruct = {}>
-	
+
 	<cfset sResult["method_save"] = "importRecords">
 	<cfset sResult["property_handles_files"] = false>
-	
+
 	<cfif StructKeyExists(variables,"Importee")>
 		<cftry>
 			<cfset sImporteeStruct = variables.Importee.getMetaStruct(argumentCollection=arguments)>
@@ -74,16 +74,16 @@
 		</cfcatch>
 		</cftry>
 	</cfif>
-	
+
 	<cfreturn sResult>
 </cffunction>
 
 <cffunction name="getImportee" access="public" returntype="any" output="no">
-	
+
 	<cfset var result = 0>
 	<cfset var sThis = 0>
 	<cfset var name = 0>
-	
+
 	<cfif StructKeyExists(variables,"Importee") AND isObject(variables.Importee)>
 		<cfset result = variables.Importee>
 	<cfelse>
@@ -111,21 +111,21 @@
 			</cfif>
 		</cfif>
 	</cfif>
-	
+
 	<cfif StructKeyExists(variables,"Importee") AND NOT isObject(variables.Importee)>
 		<cfset StructDelete(variables,"Importee")>
 	</cfif>
-	
+
 	<cfif StructKeyExists(variables,"Importee")>
 		<cfset variables.sImporteeMeta = variables.Importee.getMetaStruct()>
 		<cfset result = variables.Importee>
 	</cfif>
-	
+
 	<cfreturn result>
 </cffunction>
 
 <cffunction name="getParentComponent" access="public" returntype="any" output="no">
-	
+
 	<cfif StructKeyExists(variables,"Parent")>
 		<cfreturn variables.Parent>
 	<cfelse>
@@ -134,35 +134,35 @@
 </cffunction>
 
 <cffunction name="importRecord" access="public" returntype="void" output="no">
-	
+
 	<cfif StructKeyExists(variables,"Importee")>
 		<cfinvoke component="#variables.Importee#" method="#variables.sImporteeMeta.method_save#" argumentCollection="#arguments#">
 	</cfif>
-	
+
 </cffunction>
 
 <cffunction name="importRecords" access="public" returntype="void" output="no">
-	
+
 	<cfset var success = false>
 	<cfset var ErrorMessage = "">
 	<cfset var sArgs = Duplicate(arguments)>
-	
+
 	<cfif StructKeyExists(variables,"Importee")>
 		<cfset sArgs["Component"] = This>
 		<cfset sArgs["Method"] = "import#variables.sImporteeMeta.method_Singular#">
 		<cfset sArgs["ExcelFile"] = arguments.FileImport>
 		<cfset sArgs["CatchErrTypes"] = variables.sImporteeMeta.catch_types>
-		
+
 		<cfset StructDelete(sArgs,"FileImport")>
 	</cfif>
-	
+
 	<cfset success = importSpreadsheet(argumentCollection=sArgs)>
-	
+
 	<cfif NOT success>
 		<cfset ErrorMessage = 'Some records failed to upload. <a href="/f/#variables.Importer.getFolder('FileErrors')#/#arguments.FileImport#">Download Remaing Data</a>.'>
 		<cfthrow message="#ErrorMessage#" type="Importer">
 	</cfif>
-	
+
 </cffunction>
 
 <cffunction name="importSpreadsheet" access="public" returntype="boolean" output="no" hint="I return all of the Imports.">
@@ -172,7 +172,7 @@
 	<cfargument name="RequiredColumns" type="string" required="no">
 	<cfargument name="CatchErrTypes" type="string" default="">
 	<cfargument name="CompactionDelim" type="string" default="">
-	
+
 	<cfset var ValidSheet = 0>
 	<cfset var qRecords = 0>
 	<cfset var CurrentColumn = "">
@@ -184,27 +184,27 @@
 	<cfset var sArgs = Duplicate(arguments)>
 	<cfset var sFields = StructNew()>
 	<cfset var sData = {}>
-	
+
 	<cfset StructDeleteKeys(sArgs,"component,method,ExcelFile,RequiredColumns,CatchErrTypes")>
-	
+
 	<cfif NOT StructKeyExists(arguments,"RequiredColumns")>
 		<cfset arguments.RequiredColumns = getRequiredColumns(arguments.component,arguments.method)>
 	</cfif>
-	
+
 	<cfset addNamedQueries(aSheets,arguments.CompactionDelim)>
-	
+
 	<!--- Find sheet to import --->
 	<cfset ValidSheet = getValidSheet(aSheets,arguments.RequiredColumns,sArgs,arguments.CompactionDelim)>
-	
+
 	<cfset qRecords = aSheets[ValidSheet].NamedQuery>
-	
+
 	<cfset aReturnSheets[ValidSheet].Query = QueryNew("#qRecords.ColumnList#,SpreadSheetImportError")>
 	<cfset ArrayAppend(aReturnSheets[ValidSheet].ColumnNames,"SpreadSheetImportError")>
-	
+
 	<cfif structKeyExists(arguments.component,"getFieldsStruct")>
 		<cfset sFields = arguments.component.getFieldsStruct()>
 	</cfif>
-	
+
 	<!--- Remove records that do not have any data (POIUtility used by readExcel does not ignore empty rows in sheet) --->
 	<cfquery name="qRecords" dbtype="query">
 	SELECT	*
@@ -214,7 +214,7 @@
 		OR	(#CurrentColumn# <> '' AND #CurrentColumn# IS NOT NULL)
 	</cfloop>
 	</cfquery>
-	
+
 	<cfloop query="qRecords">
 		<cfset sData = variables.DataMgr.queryRowToStruct(qRecords,CurrentRow)>
 		<cfset StructCompactKeys(sData,arguments.CompactionDelim)>
@@ -234,26 +234,26 @@
 		</cfcatch>
 		</cftry>
 	</cfloop>
-	
+
 	<cfif NOT isSuccessful>
 		<!---<cfthrow message="Upload Failed for unknown reason." type="Importer">--->
 		<cfset saveSpreadsheet(arguments.ExcelFile,aReturnSheets,arguments.CompactionDelim)>
 		<cfset sImport["FileErrors"] = arguments.ExcelFile>
 	</cfif>
-	
+
 	<cfset sImport["FileImport"] = arguments.ExcelFile>
 	<cftry>
 		<cfset saveImport(argumentCollection=sImport)>
 	<cfcatch>
 	</cfcatch>
 	</cftry>
-	
-	
+
+
 	<cfreturn isSuccessful>
 </cffunction>
 
 <cffunction name="addMethods" access="private" returntype="void" output="no">
-	
+
 	<cfset var singular = 0>
 	<cfset var plural = 0>
 	<cfset var methods = 0>
@@ -262,15 +262,15 @@
 	<cfset var rmethod = "">
 	<cfset var ii = 0>
 	<cfset var sImporteeStruct = 0>
-	
+
 	<cfset Super.addMethods()>
-	
+
 	<cfif StructKeyExists(variables,"Importee")>
 		<cfset sImporteeStruct = variables.Importee.getMetaStruct()>
 		<cfset singular = sImporteeStruct.method_Singular>
 		<cfset plural = sImporteeStruct.method_Plural>
 		<cfset methods = "import#singular#,import#plural#">
-		
+
 		<cfloop index="ii" from="1" to="#ListLen(methods)#" step="1">
 			<cfset method = ListGetAt(methods,ii)>
 			<cfset rmethod = ListGetAt(rmethods,ii)>
@@ -282,20 +282,20 @@
 			</cfif>
 		</cfloop>
 	</cfif>
-	
+
 </cffunction>
 
 <!---<cffunction name="removeImport" access="public" returntype="void" output="no" hint="I delete the given Import.">
 	<cfargument name="ImportID" type="string" required="yes">
-	
+
 	<cfset removeRecord(argumentCollection=arguments)>
-	
+
 </cffunction>--->
 
 <cffunction name="readExcel" access="private" returntype="any" output="no" hint="I save one Import.">
-	
+
 	<cfset var result = 0>
-	
+
 	<cftry>
 		<cfset result = variables.POIUtility.ReadExcel(argumentCollection=arguments)>
 	<cfcatch>
@@ -311,7 +311,7 @@
 		</cfif>
 	</cfcatch>
 	</cftry>
-	
+
 	<cfif isDefined("result")>
 		<cfreturn result>
 	</cfif>
@@ -320,16 +320,16 @@
 <cffunction name="getNamedQuery" access="public" returntype="query" output="false" hint="I return a query that uses the header row of the spreadsheet for the column names in the query.">
 	<cfargument name="sheet" type="struct" required="true">
 	<cfargument name="CompactionDelim" type="string" default="">
-	
+
 	<cfset var aColumns = arguments.sheet.ColumnNames>
 	<cfset var qRawData = arguments.sheet.Query>
 	<cfset var qData = QueryNew(ListCompact(ArrayToList(aColumns),arguments.CompactionDelim))>
 	<cfset var NumColumns = ArrayLen(aColumns)>
 	<cfset var ii = 0>
-	
+
 	<cfif ArrayLen(aColumns) AND qRawData.RecordCount>
 		<cfset QueryAddRow(qData,qRawData.RecordCount)>
-		
+
 		<cfloop query="qRawData">
 			<cfloop index="ii" from="1" to="#NumColumns#" step="1">
 				<cfif Len(Trim(Compact(aColumns[ii],arguments.CompactionDelim)))>
@@ -338,40 +338,40 @@
 			</cfloop>
 		</cfloop>
 	<cfelse>
-		<cfset qData = qRawData> 
+		<cfset qData = qRawData>
 	</cfif>
-	
+
 	<cfreturn qData>
 </cffunction>
 
 <cffunction name="addNamedQuery" access="private" returntype="void" output="false" hint="I add a NamedQuery key to a sheet as a column with column headers coming from the header row.">
 	<cfargument name="sheet" type="struct" required="true">
 	<cfargument name="CompactionDelim" type="string" default="">
-	
+
 	<cfif arguments.sheet.HasheaderRow IS true AND ArrayLen(arguments.sheet.ColumnNames)>
 		<cfset arguments.sheet.NamedQuery = getNamedQuery(arguments.sheet,arguments.CompactionDelim)>
 	</cfif>
-	
+
 </cffunction>
 
 <cffunction name="addNamedQueries" access="private" returntype="void" output="false" hint="I add a NamedQuery key to each sheet in the spreadsheet as a column with column headers coming from the header row.">
 	<cfargument name="sheets" type="array" required="true">
 	<cfargument name="CompactionDelim" type="string" default="">
-	
+
 	<cfset var ii = 0>
-	
+
 	<cfloop index="ii" from="1" to="#ArrayLen(arguments.sheets)#" step="1">
 		<cfset addNamedQuery(arguments.sheets[ii],arguments.CompactionDelim)>
 	</cfloop>
-	
+
 </cffunction>
 
 <cffunction name="appendArgDefaults" access="private" returntype="void" output="false" hint="I add a NamedQuery key to each sheet in the spreadsheet as a column with column headers coming from the header row.">
 	<cfargument name="struct" type="struct" required="true">
 	<cfargument name="args" type="struct" required="true">
-	
+
 	<cfset var key = "">
-	
+
 	<cfscript>
 	for ( key in arguments.args ) {
 		if (
@@ -384,7 +384,7 @@
 		}
 	}
 	</cfscript>
-	
+
 </cffunction>
 
 <cffunction name="getValidSheet" access="private" returntype="numeric" output="no" hint="I return all of the Imports.">
@@ -392,13 +392,13 @@
 	<cfargument name="RequiredColumns" type="string" required="yes">
 	<cfargument name="Defaults" type="struct" required="no">
 	<cfargument name="CompactionDelim" type="string" default="">
-	
+
 	<cfset var aSheets = arguments.sheets>
 	<cfset var ii = 0>
 	<cfset var result = 0>
 	<cfset var cols = "">
 	<cfset var defaultcols = "">
-	
+
 	<cfif StructKeyExists(arguments,"Defaults") AND StructCount(arguments.Defaults)>
 		<cfscript>
 		for (ii in arguments.Defaults) {
@@ -408,7 +408,7 @@
 		}
 		</cfscript>
 	</cfif>
-	
+
 	<!--- Find sheet to import --->
 	<cfloop index="ii" from="1" to="#ArrayLen(aSheets)#" step="1">
 		<cfset cols = ListCompact(ArrayToList(aSheets[ii].ColumnNames),arguments.CompactionDelim)>
@@ -419,11 +419,11 @@
 			<cfset result = ii>
 		</cfif>
 	</cfloop>
-	
+
 	<cfif NOT result>
 		<cfthrow message="Unable to find valid import data in spreadsheet. [#arguments.RequiredColumns#][#cols#][#ListCompare(arguments.RequiredColumns,cols)#]{#defaultcols#}" type="Importer" errorcode="NoValidSheet">
 	</cfif>
-	
+
 	<cfreturn result>
 </cffunction>
 
@@ -431,11 +431,11 @@
 	<cfargument name="FileName" type="string" required="true">
 	<cfargument name="sheets" type="array" required="true">
 	<cfargument name="CompactionDelim" type="string" default="">
-	
+
 	<cfset var ii = 0>
 	<cfset var aSheets = ArrayNew(1)>
 	<cfset var FilePath = variables.FileMgr.getFilePath(arguments.FileName,getFolder('FileErrors'))>
-	
+
 	<cfloop index="ii" from="1" to="#ArrayLen(arguments.sheets)#" step="1">
 		<cfset ArrayAppend(aSheets,StructNew())>
 		<cfset aSheets[ii].ColumnList = ListCompact(ArrayToList(arguments.sheets[ii].ColumnNames),arguments.CompactionDelim)>
@@ -443,25 +443,25 @@
 		<cfset aSheets[ii].Query = arguments.sheets[ii].Query>
 		<cfset aSheets[ii].SheetName = arguments.sheets[ii].Name>
 	</cfloop>
-	
+
 	<cfset variables.POIUtility.WriteExcel(FilePath=FilePath,Sheets=aSheets)>
-	
+
 </cffunction>
 
 <cffunction name="getRequiredColumns" access="public" returntype="string" output="no">
 	<cfargument name="component" type="any" required="yes">
 	<cfargument name="method" type="string" required="yes">
-	
+
 	<cfset var sMethod = getMetaData(arguments.component[arguments.method])>
 	<cfset var ii = 0>
 	<cfset var result = "">
-	
+
 	<cfloop index="ii" from="1" to="#ArrayLen(sMethod.Parameters)#" step="1">
 		<cfif StructKeyExists(sMethod.Parameters[ii],"Required") AND sMethod.Parameters[ii].Required IS true>
 			<cfset result = ListAppend(result,sMethod.Parameters[ii].name)>
 		</cfif>
 	</cfloop>
-	
+
 	<cfreturn result>
 </cffunction>
 
@@ -494,7 +494,7 @@
 <cffunction name="Compact" access="private" returntype="string" output="false">
 	<cfargument name="str" type="string" required="true">
 	<cfargument name="CompactionDelim" type="string" default="">
-	
+
 	<cfreturn ReReplaceNoCase(str,"[^a-z0-9]","#arguments.CompactionDelim#","ALL")>
 </cffunction>
 
@@ -502,69 +502,69 @@
 	<cfargument name="list" type="string" required="true">
 	<cfargument name="CompactionDelim" type="string" default="">
 	<cfargument name="delimiter" type="string" default=",">
-	
+
 	<cfset var result = "">
 	<cfset var word = "">
-	
+
 	<cfloop list="#arguments.list#" delimiters="#arguments.delimiter#" index="word">
 		<cfset result = ListAppend(result,Compact(word,arguments.CompactionDelim),arguments.delimiter)>
 	</cfloop>
-	
+
 	<cfreturn result>
 </cffunction>
 
 <cffunction name="ArrayCompact" access="private" returntype="array" output="false">
 	<cfargument name="array" type="array" required="true">
 	<cfargument name="CompactionDelim" type="string" default="">
-	
+
 	<cfset var result = "">
 	<cfset var ii = "">
-	
+
 	<cfloop index="ii" from="1" to="#ArrayLen(arguments.array)#" step="1">
 		<cfif isSimpleValue(arguments.array[ii])>
 			<cfset arguments.array[ii] = Compact(arguments.array[ii],arguments.CompactionDelim)>
 		</cfif>
 	</cfloop>
-	
+
 	<cfreturn arguments.array>
 </cffunction>
 
 <cffunction name="StructCompactKeys" access="private" returntype="struct" output="false">
 	<cfargument name="struct" type="struct" required="true">
 	<cfargument name="CompactionDelim" type="string" default="">
-	
+
 	<cfset var sResult = StructNew()>
 	<cfset var key = "">
-	
+
 	<cfloop collection="#arguments.struct#" item="key">
 		<cfset sResult[Compact(key,arguments.CompactionDelim)] = arguments.struct[key]>
 	</cfloop>
-	
+
 	<cfset arguments.struct = sResult>
-	
+
 	<cfreturn arguments.struct>
 </cffunction>
 
 <cffunction name="StructDeleteKeys" access="private" returntype="struct" output="false">
 	<cfargument name="struct" type="struct" required="true">
 	<cfargument name="keys" type="string" required="true">
-	
+
 	<cfset var key = "">
-	
+
 	<cfloop list="#arguments.keys#" index="key">
 		<cfset StructDelete(arguments.struct,key)>
 	</cfloop>
-	
+
 	<cfreturn arguments.struct>
 </cffunction>
 
 <cffunction name="StructFormatData" access="private" returntype="struct" output="false">
 	<cfargument name="struct" type="struct" required="true">
 	<cfargument name="sFields" type="struct" required="false">
-	
+
 	<cfset var key = "">
 	<cfset var types = "date,time">
-	
+
 	<cfif StructKeyExists(arguments,"sFields") AND StructCount(arguments.sFields)>
 		<cfloop collection="#arguments.struct#" item="key">
 			<cfif
@@ -595,7 +595,7 @@
 			</cfif>
 		</cfloop>
 	</cfif>
-	
+
 	<cfreturn arguments.struct>
 </cffunction>
 
@@ -610,11 +610,11 @@
 	<cfargument name="Delim1" type="string" default="," hint="Delimiter used for List1">
 	<cfargument name="Delim2" type="string" default="," hint="Delimiter used for List2.">
 	<cfargument name="Delim3" type="string" default="," hint="Delimiter to use for the list returned by the function.">
-	
+
 	<cfscript>
 	var result = "";
 	var ii = 0;
-	
+
 	/* Loop through the full list, checking for the values from the partial list.
 	* Add any elements from the full list not found in the partial list to the
 	* temporary list
@@ -625,18 +625,18 @@
 		}
 	}
 	</cfscript>
-	
+
 	<cfreturn result>
 </cffunction>
 
 <cffunction name="QueryAddRecord" access="private" returntype="void" output="false" hint="I add a row to a query with data from a structure.">
 	<cfargument name="query" type="query" required="true">
 	<cfargument name="struct" type="struct" required="true">
-	
+
 	<cfset var col = "">
-	
+
 	<cfset QueryAddRow(arguments.query)>
-	
+
 	<cfloop list="#arguments.query.ColumnList#" index="col">
 		<cfif StructKeyExists(arguments.struct,col) AND isSimpleValue(arguments.struct[col])>
 			<cftry>
@@ -646,7 +646,7 @@
 			</cftry>
 		</cfif>
 	</cfloop>
-	
+
 </cffunction>
 
 </cfcomponent>
