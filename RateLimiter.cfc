@@ -15,7 +15,7 @@
 	<cfreturn This>
 </cffunction>
 
-<cffunction name="called" access="public" returntype="void" output="false">
+<cffunction name="called" access="public" returntype="void" output="false" hint="I mark an id as having just been called.">
 	<cfargument name="id" type="string" required="true">
 	<cfargument name="result" type="any" required="false">
 
@@ -28,7 +28,7 @@
 
 </cffunction>
 
-<cffunction name="calling" access="public" returntype="void" output="false">
+<cffunction name="calling" access="public" returntype="void" output="false" hint="I see if the given id is currently running.">
 	<cfargument name="id" type="string" required="true">
 
 	<cfset Variables.running[Arguments.id] = now()>
@@ -41,13 +41,13 @@
 	<cfreturn Variables.MrECache.exists(Arguments.id)>
 </cffunction>
 
-<cffunction name="isCallable" access="public" returntype="boolean" output="false">
+<cffunction name="isCallable" access="public" returntype="boolean" output="false" hint="I see if the given id is callable.">
 	<cfargument name="id" type="string" required="true">
 
 	<cfreturn NOT ( isAvailable(Arguments.id) OR isCalling(Arguments.id) )>
 </cffunction>
 
-<cffunction name="isCalling" access="public" returntype="boolean" output="false">
+<cffunction name="isCalling" access="public" returntype="boolean" output="false" hint="I see if the given id is being called currently.">
 	<cfargument name="id" type="string" required="true">
 	<cfargument name="check" type="boolean" default="false" hint="Check if it was run recently.">
 
@@ -113,7 +113,7 @@
 		}
 		</cfscript>
 	</cfif>
-	
+
 	<cfif NOT isCallable(Arguments.id)>
 		<!--- If MrECache has rate limiter value then we are within the rate limit and must return the default value. --->
 		<cfif NOT StructKeyExists(Arguments,"default")>
