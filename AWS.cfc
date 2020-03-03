@@ -162,7 +162,7 @@
 					response_result = response["RESPONSE"]["#Arguments.Action#Response"].XmlChildren;
 				} else {
 					response_result = response["RESPONSE"]["#Arguments.Action#Response"];
-				}	
+				}
 			}
 		} else {
 			response_result = response["RESPONSE"];
@@ -174,12 +174,12 @@
 	if ( isSimpleValue(response_result) ) {
 		return response_result;
 	}
-	
+
 	//If we get an error response from AWS, throw that as an exception.
 	if ( StructKeyExists(response_result,"ErrorResponse") ) {
 		throwError(Message=response_result.ErrorResponse.Error.Message.XmlText,errorcode=response_result.ErrorResponse.Error.Code.XmlText);
 	}
-	
+
 	//If the XML response has children, but no attributes then we can safely return the children as a struct.
 	if (
 				isXml(response_result)
@@ -218,7 +218,7 @@
 	<cfargument name="method" type="string" default="GET" hint="The HTTP method to invoke.">
 	<cfargument name="parameters" type="struct" default="#structNew()#" hint="An struct of HTTP URL parameters to send in the request.">
 	<cfargument name="timeout" type="numeric" default="20" hint="The default call timeout.">
-	
+
 	<cfscript>
 	var results = {};
 	var HTTPResults = "";
@@ -228,6 +228,7 @@
 	var EndPointURL = getEndPointUrl(Arguments.subdomain);
 	var NamedArgs = "subdomain,Action,method,parameters,timeout";
 	var arg = "";
+	var param = "";
 
 	for (arg in Arguments) {
 		if ( isSimpleValue(Arguments[arg]) AND Len(Trim(Arguments[arg])) AND NOT ListFindNoCase(NamedArgs,arg) ) {
@@ -243,17 +244,17 @@
 	Arguments.parameters["Action"] = Arguments.Action;
 
 	sortedParams = ListSort(StructKeyList(Arguments.parameters), "textnocase");
-	
+
 	if( Arguments.method IS "POST" ) {
 		paramtype = "FORMFIELD";
 	}
-	
+
 	results.error = false;
 	results.response = {};
 	results.message ="";
 	results.responseheader = {};
 	</cfscript>
-	
+
 	<cf_http
 		method="#arguments.method#"
 		url="#EndPointURL#"
@@ -269,7 +270,7 @@
 			<cf_httpparam type="#paramType#" name="#param#" value="#trim(arguments.parameters[param])#" />
 		</cfloop>
 	</cf_http>
-	
+
 	<cfscript>
 	results["Method"] = Arguments.method;
 	results["URL"] = EndPointURL;
@@ -284,7 +285,7 @@
 	if( Len(HTTPResults.errorDetail) ) {
 		results.error = true;
 	}
-	
+
 	if (
 				StructKeyExists(HTTPResults.responseHeader, "content-type")
 			AND	HTTPResults.responseHeader["content-type"] EQ "text/xml"
@@ -327,7 +328,7 @@
 	<cfargument name="string" type="any" required="true" />
 
 	<cfset var fixedData = Replace(Arguments.string,"\n","#chr(10)#","all")>
-	
+
 	<cfreturn toBase64(HMAC_SHA256(getSecretKey(),fixedData) )>
 </cffunction>
 
@@ -342,7 +343,7 @@
 	var mac = createObject("java","javax.crypto.Mac").getInstance(key.getAlgorithm());
 	mac.init(key);
 	mac.update(jMsg);
-	
+
 	return mac.doFinal();
 	</cfscript>
 </cffunction>
@@ -352,7 +353,7 @@
 	<cfargument name="errorcode" type="string" default="">
 	<cfargument name="detail" type="string" default="">
 	<cfargument name="extendedinfo" type="string" default="">
-	
+
 	<cfthrow
 		type="AWS"
 		message="#Arguments.message#"
@@ -360,7 +361,7 @@
 		detail="#Arguments.detail#"
 		extendedinfo="#Arguments.extendedinfo#"
 	>
-	
+
 </cffunction>
 
 <cffunction name="onMissingMethod" access="public" returntype="any" output="false" hint="">
