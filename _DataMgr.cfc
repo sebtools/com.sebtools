@@ -112,6 +112,8 @@
 		<cfset oMixer = CreateObject("component","DataMgrEngine_openbd")>
 	<cfelseif variables.CFServer EQ "Railo">
 		<cfset oMixer = CreateObject("component","DataMgrEngine_railo")>
+	<cfelseif variables.CFServer EQ "Lucee">
+		<cfset oMixer = CreateObject("component","DataMgrEngine_railo")>
 	</cfif>
 
 	<cfif isObject(oMixer)>
