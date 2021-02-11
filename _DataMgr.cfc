@@ -113,7 +113,7 @@
 	<cfelseif variables.CFServer EQ "Railo">
 		<cfset oMixer = CreateObject("component","DataMgrEngine_railo")>
 	<cfelseif variables.CFServer EQ "Lucee">
-		<cfset oMixer = CreateObject("component","DataMgrEngine_railo")>
+		<cfset oMixer = CreateObject("component","DataMgrEngine_lucee")>
 	</cfif>
 
 	<cfif isObject(oMixer)>
