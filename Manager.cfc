@@ -1,6 +1,7 @@
 <!--- 1.0 Beta 3 (Build 36) --->
 <!--- Last Updated: 2014-07-21 --->
-<!--- Information: http://www.bryantwebconsulting.com/docs/com-sebtools/manager.cfm?version=Build%2012 ---><cfcomponent output="false">
+<!--- Information: http://www.bryantwebconsulting.com/docs/com-sebtools/manager.cfm?version=Build%2012 --->
+<cfcomponent output="false" extends="component">
 
 <cffunction name="init" access="public" returntype="any" output="no">
 	<cfargument name="DataMgr" type="any" required="no">
@@ -857,6 +858,13 @@
 	<cfargument name="data" type="struct" default="#StructNew()#">
 
 	<cfreturn alterRecords(arguments.tablename,variables.DataMgr.getRecords(argumentCollection=alterArgs(argumentCollection=arguments)))>
+</cffunction>
+
+<cffunction name="getRecordsSQL" access="public" returntype="array" output="no">
+	<cfargument name="tablename" type="string" required="yes">
+	<cfargument name="data" type="struct" default="#StructNew()#">
+
+	<cfreturn variables.DataMgr.getRecordsSQL(argumentCollection=alterArgs(argumentCollection=arguments))>
 </cffunction>
 
 <cffunction name="isRecordDeletable" access="public" returntype="boolean" output="no">
@@ -1877,12 +1885,32 @@
 
 	</cfloop>
 
-
 	<!--- Handle Fields with ftable attributes --->
 	<cfset adjustXmlFTableFields(xDef)>
 
 	<!--- Add names to fields with only types --->
 	<cfset adjustXmlAddNamesToTypes(xDef)>
+
+	<cfloop index="tt" from="1" to="#ArrayLen(aTables)#">
+		<cfset table = aTables[tt].XmlAttributes["name"]>
+		<cfset aFields = XmlSearch(xDef,"//table[@name='#table#']//field[string-length(@name)>0]")>
+		<!--- Add filters for fentities --->
+		<cfloop index="ff" from="1" to="#ArrayLen(aFields)#">
+			<cfif
+					StructKeyHasLen(aFields[ff].XmlAttributes,"fentity")
+				AND	NOT (
+							StructKeyHasLen(aTables[tt].XmlAttributes,"entity")
+						AND	aFields[ff].XmlAttributes["fentity"] EQ aTables[tt].XmlAttributes["entity"]
+					)
+			>
+				<cfset xField = XmlElemNew(xDef,"filter")>
+				<cfset xField.XmlAttributes["name"] = Pluralize(makeCompName(aFields[ff].XmlAttributes["fentity"]))>
+				<cfset xField.XmlAttributes["field"] = aFields[ff].XmlAttributes["name"]>
+				<cfset xField.XmlAttributes["operator"] = "IN">
+				<cfset ArrayAppend(aTables[tt].XmlChildren,Duplicate(xField))>
+			</cfif>
+		</cfloop>
+	</cfloop>
 
 	<cfreturn xDef>
 </cffunction>

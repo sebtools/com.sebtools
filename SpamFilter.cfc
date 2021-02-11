@@ -9,35 +9,30 @@
 	<cfargument name="DataMgr" type="any" required="yes">
 	<cfargument name="getNewDefs" type="boolean" default="0">
 	<cfargument name="Scheduler" type="any" required="false">
-	
+
 	<cfscript>
 	var qWords = 0;
-	
+
 	variables.DataMgr = arguments.DataMgr;
 	variables.getNewDefs = arguments.getNewDefs;
-	
+
 	variables.datasource = variables.DataMgr.getDatasource();
 	variables.DataMgr.loadXML(getDbXml(),true,true);
 	if ( StructKeyExists(arguments,"Scheduler") ) {
 		variables.Scheduler = arguments.Scheduler;
 		loadScheduledTask();
-	} 
+	}
 	</cfscript>
-	
+
 	<cfif variables.getNewDefs AND NOT StructKeyExists(arguments,"Scheduler")>
 		<cfset loadUniversalData()>
 	</cfif>
-	
-	
-	<cfset qWords = variables.DataMgr.getRecords("spamWords")>
-	
+
 	<!--- Add Default Words --->
-	<cfif NOT qWords.RecordCount>
+	<cfif variables.DataMgr.hasRecords("spamWords")>
 		<cfset loadWords(getDefaultSpamWords())>
 	</cfif>
-	
-	<cfset upgrade()>
-	
+
 	<cfreturn this>
 </cffunction>
 
@@ -58,41 +53,41 @@
 <cffunction name="filter" access="public" returntype="struct" output="no" hint="I run the filter on the given structure and return it.">
 	<cfargument name="data" type="struct" required="yes">
 	<cfargument name="maxpoints" type="numeric" default="0">
-	
+
 	<cfif isSpam(argumentCollection=arguments)>
 		<cfthrow message="This message appears to be spam." detail="If you feel that you have gotten this message in error, pleas change your entry and try again." type="SpamFilter" errorcode="Spam">
 	</cfif>
-	
+
 	<cfreturn arguments.data>
 </cffunction>
 
 <cffunction name="isSpam" access="public" returntype="boolean" output="no" hint="I indicate whether the given structure is spam.">
 	<cfargument name="data" type="struct" required="yes">
 	<cfargument name="maxpoints" type="numeric" default="0">
-	
+
 	<cfset var pointlimit = arguments.maxpoints>
 	<cfset var pointval = 0>
 	<cfset var result = false>
-	
+
 	<!--- If we don't have a point limit, set it to the number of fields --->
 	<cfif NOT pointlimit>
 		<cfset pointlimit = getPointLimit(arguments.data,maxpoints)>
 	</cfif>
-	
+
 	<!--- Run that filter! --->
 	<cfset pointval = getPoints(arguments.data,maxpoints)>
-	
+
 	<cfif pointval GT pointlimit>
 		<cfset result = true>
 	</cfif>
-	
+
 	<cfreturn result>
 </cffunction>
 
 <cffunction name="getPoints" access="public" returntype="numeric" output="no"hint="I return the number of points in the given structure.">
 	<cfargument name="data" type="struct" required="yes">
 	<cfargument name="maxpoints" type="numeric" default="0">
-	
+
 	<cfset var langPoints = 0>
 	<cfset var pointval = 0>
 	<cfset var qWords = variables.DataMgr.getRecords("spamWords")>
@@ -101,7 +96,7 @@
 	<cfset var finds = 0>
 	<cfset var field2 = "">
 	<cfset var duplist = "">
-	
+
 	<cfloop collection="#arguments.data#" item="field">
 		<cfif isSimpleValue(arguments.data[field]) AND Len(field) AND Len(arguments.data[field]) AND field NEQ "Email">
 			<cfloop query="qWords">
@@ -144,13 +139,13 @@
 
 		</cfif>
 	</cfloop>
-	
+
 	<cfreturn pointval>
 </cffunction>
 
 <cffunction name="getPointsArray" access="public" returntype="array" output="no"hint="I return an array of details about the points in the given structure.">
 	<cfargument name="data" type="struct" required="yes">
-	
+
 	<cfset var pointval = 0>
 	<cfset var qWords = variables.DataMgr.getRecords("spamWords")>
 	<cfset var qRegExs = variables.DataMgr.getRecords("spamRegExs")>
@@ -159,7 +154,7 @@
 	<cfset var aPoints = ArrayNew(1)>
 	<cfset var field2 = "">
 	<cfset var duplist = "">
-	
+
 	<cfloop collection="#arguments.data#" item="field">
 		<cfif isSimpleValue(arguments.data[field]) AND Len(field) AND Len(arguments.data[field]) AND field NEQ "Email">
 			<cfloop query="qWords">
@@ -195,83 +190,83 @@
 			</cfloop>
 		</cfif>
 	</cfloop>
-	
+
 	<cfreturn aPoints>
 </cffunction>
 
 <cffunction name="getRegEx" access="public" returntype="query" output="no" hint="I return the requested regex.">
 	<cfargument name="RegExID" type="string" required="yes">
-	
+
 	<cfreturn variables.DataMgr.getRecord("spamRegExs",arguments)>
 </cffunction>
 
 <cffunction name="getRegExs" access="public" returntype="query" output="no" hint="I return all of the regexs.">
-	
+
 	<cfreturn variables.DataMgr.getRecords("spamRegExs",arguments)>
 </cffunction>
 
 <cffunction name="getWord" access="public" returntype="query" output="no" hint="I return the requested word.">
 	<cfargument name="WordID" type="string" required="yes">
-	
+
 	<cfreturn variables.DataMgr.getRecord("spamWords",arguments)>
 </cffunction>
 
 <cffunction name="getWords" access="public" returntype="query" output="no" hint="I return all of the words.">
-	
+
 	<cfreturn variables.DataMgr.getRecords("spamWords",arguments)>
 </cffunction>
 
 <cffunction name="loadUniversalData" access="public" returntype="void" output="no" hint="I get external spam definitions.">
-	
+
 	<cftry>
 		<!--- Do an HTTP call to get a text file with spam words --->
 		<cfhttp url="http://www.bryantwebconsulting.com/spamdefs.txt" method="GET" resolveurl="false"></cfhttp>
-		
+
 		<!--- Parse the XML file and load new spam words --->
 		<cfset loadWords(CFHTTP.FileContent)>
-		
+
 		<cfcatch>
 		</cfcatch>
 	</cftry>
-	
+
 	<cftry>
 		<!--- Do an HTTP call to get an XML file with spam expressions --->
 		<cfhttp url="http://www.bryantwebconsulting.com/spamdefs.xml" method="GET" resolveurl="false"></cfhttp>
-		
+
 		<!--- Parse the XML file and load new spam expressions --->
 		<cfset variables.DataMgr.loadXML(CFHTTP.FileContent,true,true)>
-		
+
 		<cfcatch>
 		</cfcatch>
 	</cftry>
-	
+
 </cffunction>
 
 <cffunction name="loadWords" access="public" returntype="void" output="no"hint="I load the given list of (carriage-return delimited) words to the spam words definitions.">
 	<cfargument name="wordlist" type="string" required="yes">
-	
+
 	<cfset var word = "">
 	<cfset var data = StructNew()>
-	
+
 	<cfloop list="#arguments.wordlist#" index="word" delimiters="#cr#">
 		<cfset data["Word"] = trim(word)>
 		<cfset variables.DataMgr.insertRecord("spamWords",data,"skip")>
 	</cfloop>
-	
+
 </cffunction>
 
 <cffunction name="removeRegEx" access="public" returntype="void" output="no" hint="I delete the given RegEx.">
 	<cfargument name="RegExID" type="string" required="yes">
-	
+
 	<cfset variables.DataMgr.deleteRecord("spamRegExs",arguments)>
-	
+
 </cffunction>
 
 <cffunction name="removeWord" access="public" returntype="void" output="no" hint="I delete the given Word.">
 	<cfargument name="WordID" type="string" required="yes">
-	
+
 	<cfset variables.DataMgr.deleteRecord("spamWords",arguments)>
-	
+
 </cffunction>
 
 <cffunction name="saveRegEx" access="public" returntype="string" output="no" hint="I save a RegEx.">
@@ -279,7 +274,7 @@
 	<cfargument name="RegEx" type="string" required="no">
 	<cfargument name="Label" type="string" required="no">
 	<cfargument name="points" type="string" required="no">
-	
+
 	<cfreturn variables.DataMgr.saveRecord("spamRegExs",arguments)>
 </cffunction>
 
@@ -287,7 +282,7 @@
 	<cfargument name="WordID" type="string" required="no">
 	<cfargument name="Word" type="string" required="no">
 	<cfargument name="points" type="string" required="no">
-	
+
 	<cfreturn variables.DataMgr.saveRecord("spamWords",arguments)>
 </cffunction>
 
@@ -295,14 +290,14 @@
 	<cfargument name="string" type="string" require="true">
 	<cfargument name="regex" type="string" require="true">
 	<cfargument name="checkcase" type="boolean" default="false">
-	
+
 	<cfset var result = 0>
 	<cfset var sFind = 0>
-	
+
 	<cfif arguments.checkcase>
 		<cfreturn numRegExCaseMatches(arguments.string,arguments.regex)>
 	</cfif>
-	
+
 	<cfscript>
 	sFind = REFindNoCase(arguments.regex, arguments.string, 1, true);
 	while ( sFind.pos[1] GT 0 ) {
@@ -310,24 +305,24 @@
 		sFind = REFindNoCase(arguments.regex, arguments.string, sFind.pos[1]+sFind.len[1], true );
 	}
 	</cfscript>
-	
+
 	<cfreturn result>
 </cffunction>
 
 <cffunction name="getRegExCaseMatches" access="public" returntype="array" output="no" hint="I return an array of the given regular expression is matches in the given string.">
 	<cfargument name="string" type="string" require="true">
 	<cfargument name="regex" type="string" require="true">
-	
+
 	<cfset var aResults = ArrayNew(1)>
 	<cfset var sFind = REFind(arguments.regex, arguments.string,1,true)>
-	
+
 	<cfscript>
 	while ( sFind.pos[1] GT 0 ) {
 		ArrayAppend(aResults, Mid(Arguments.string,sFind.pos[1],sFind.len[1]));
 		sFind = REFind(arguments.regex, arguments.string, sFind.pos[1]+1,true);
 	}
 	</cfscript>
-	
+
 	<cfreturn aResults>
 </cffunction>
 
@@ -335,10 +330,10 @@
 	<cfargument name="string" type="string" require="true">
 	<cfargument name="regex" type="string" require="true">
 	<cfargument name="maxpoints" type="numeric" default="0">
-	
+
 	<cfset var result = 0>
 	<cfset var findat = REFind(arguments.regex, arguments.string)>
-	
+
 	<cfscript>
 	while ( findat GT 0 ) {
 		result = result + 1;
@@ -348,7 +343,7 @@
 		findat = REFind(arguments.regex, arguments.string, findat+1);
 	}
 	</cfscript>
-	
+
 	<cfreturn result>
 </cffunction>
 
@@ -356,32 +351,22 @@
 	<cfargument name="string" type="string" require="true">
 	<cfargument name="word" type="string" require="true">
 	<cfargument name="maxpoints" type="numeric" default="0">
-	
-	<cfreturn numRegExMatches(arguments.string,"\b#arguments.word#\b",arguments.maxpoints)>
-</cffunction>
 
-<cffunction name="upgrade" access="public" returntype="void" output="no">
-	
-	<cfquery datasource="#variables.datasource#">
-	UPDATE	spamRegExs
-	SET		RegEx = <cfqueryparam value="^['_a-z0-9-]+(\.['_a-z0-9-]+)*@[a-z0-9-]+(\.[a-z0-9-]+)*\.(([a-z]{2,3})|(aero|coop|info|museum|name|jobs|travel))$" cfsqltype="CF_SQL_VARCHAR">
-	WHERE	RegEx = <cfqueryparam value="['_a-z0-9-]+(\.['_a-z0-9-]+)*@[a-z0-9-]+(\.[a-z0-9-]+)*\.(([a-z]{2,3})|(aero|coop|info|museum|name|jobs|travel))" cfsqltype="CF_SQL_VARCHAR">
-	</cfquery>
-	
+	<cfreturn numRegExMatches(arguments.string,"\b#arguments.word#\b",arguments.maxpoints)>
 </cffunction>
 
 <cffunction name="getPointLimit" access="public" returntype="numeric" output="no">
 	<cfargument name="struct" type="struct" required="yes">
-	
+
 	<cfset var key = "">
 	<cfset var result = 0>
-	
+
 	<cfloop collection="#arguments.struct#" item="key">
 		<cfif StructKeyExists(arguments.struct,key) AND isSimpleValue(arguments.struct[key]) AND Len(Trim(arguments.struct[key])) AND key NEQ "Email">
 			<cfset result = result + 1>
 		</cfif>
 	</cfloop>
-	
+
 	<cfreturn result>
 </cffunction>
 
@@ -406,9 +391,9 @@
 </cffunction>
 
 <cffunction name="getDbXml" access="public" returntype="string" output="no" hint="I return the XML for the tables needed for SpamFilter.cfc to work.">
-	
+
 	<cfset var tableXML = "">
-	
+
 	<cfsavecontent variable="tableXML"><cfoutput>
 	<tables>
 		<table name="spamWords">
@@ -436,7 +421,7 @@
 		</data>
 	</tables>
 	</cfoutput></cfsavecontent>
-	
+
 	<cfreturn tableXML>
 </cffunction>
 
@@ -520,7 +505,7 @@ propecia
 pussy
 rental-car-e-site
 ringtones
-roulette 
+roulette
 sex
 shemale
 shoes

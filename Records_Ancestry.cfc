@@ -53,16 +53,10 @@
 		<cfreturn "">
 	</cfif>
 
-	<!--- If AncestorNames has more than one value then the values before the first will be the AncestorNames for the parent. --->
 	<cfif ListLen(Arguments.AncestorNames,"|") GT 1>
-		<cfset sRecord["AncestorNames"] = ListDeleteAt(
-			Arguments.AncestorNames,
-			ListLen(
-				Arguments.AncestorNames,
-				"|"
-			),
-			"|"
-		)>
+		<cfset sRecord["AncestorNames"] = getAncestorNamesParentNames(Arguments.AncestorNames)>
+	<cfelse>
+		<cfset sRecord["AncestorNames"] = "">
 	</cfif>
 
 	<!--- Find the ancestor record indicated --->
@@ -75,6 +69,26 @@
 
 	<!--- If no record found, then no ancestor (return NULL) --->
 	<cfreturn "">
+</cffunction>
+
+<cffunction name="getAncestorNamesParentNames" access="public" returntype="string" output="no">
+	<cfargument name="AncestorNames" type="string" required="yes">
+
+	<cfset var result = "">
+
+	<!--- If AncestorNames has more than one value then the values before the first will be the AncestorNames for the parent. --->
+	<cfif ListLen(Arguments.AncestorNames,"|") GT 1>
+		<cfset result = ListDeleteAt(
+			Arguments.AncestorNames,
+			ListLen(
+				Arguments.AncestorNames,
+				"|"
+			),
+			"|"
+		)>
+	</cfif>
+
+	<cfreturn result>
 </cffunction>
 
 <cffunction name="getAncestorNames" access="public" returntype="string" output="no">
@@ -112,6 +126,30 @@
 	</cfoutput>
 
 	<cfreturn result>
+</cffunction>
+
+<cffunction name="getFullTree" access="public" returntype="struct" output="no">
+	<cfset var sMeta = getMetaStruct()>
+	<cfset var qRecords = getRecords(orderby="AncestorNames",fieldlist="#sMeta.pkfields#,#sMeta.field_label#,AncestorNames")>
+	<cfset var sResults = {}>
+	<cfset var node = "">
+	<cfset var ancestor = "">
+
+	<cfoutput query="qRecords">
+		<cfset sThis = sResults>
+		<cfloop list="#AncestorNames#" index="ancestor" delimiters="|">
+			<cfif NOT StructKeyExists(sThis,ancestor)>
+				<cfset sThis[ancestor] = {}>
+			</cfif>
+			<cfset sThis = sThis[ancestor]>
+		</cfloop>
+		<cfset sThis[LossDetailName][0] = {
+			"#sMeta.pkfields#":qRecords[sMeta.pkfields][CurrentRow],
+			"#sMeta.field_label#":qRecords[sMeta.field_label][CurrentRow]
+		}>
+	</cfoutput>
+
+	<cfreturn sResults>
 </cffunction>
 
 <cffunction name="saveRecord" access="public" returntype="string" output="no">
@@ -199,23 +237,37 @@
 		<cfelseif StructKeyHasLen(Arguments,"AncestorNames")>
 			<cfset Arguments["Parent#sMeta.arg_pk#"] = getAncestorNamesParentID(Arguments.AncestorNames)>
 			<cfif NOT Val(Arguments["Parent#sMeta.arg_pk#"])>
-				<cfthrow type="#smeta.method_Plural#" message="AncestorNames (#Arguments.AncestorNames#) passed in for which no value was found.">
+				<cfset StructDelete(Arguments,"Parent#sMeta.arg_pk#")>
+				<cfif StructKeyExists(Arguments,"createMissingAncestors") AND Arguments.createMissingAncestors IS true>
+					<cfinvoke
+						component="#This#"
+						method="save#variables.methodSingular#"
+						returnvariable="Arguments.Parent#sMeta.arg_pk#"
+					>
+						<cfinvokeargument name="#smeta.field_label#" value="#ListLast(Arguments.AncestorNames,'|')#">
+						<cfinvokeargument name="AncestorNames" value="#getAncestorNamesParentNames(Arguments.AncestorNames)#">
+						<cfinvokeargument name="createMissingAncestors" value="true">
+					</cfinvoke>
+				<cfelse>
+					<cfthrow type="#smeta.method_Plural#" message="AncestorNames (#Arguments.AncestorNames#) passed in for which no value was found.">
+				</cfif>
 			</cfif>
-		<cfelse>
-			<cfset Arguments["Parent#sMeta.arg_pk#"] = "">
 		</cfif>
 	</cfif>
 
-	<!--- Make sure that a record cannot change its parent --->
+	<!--- Make sure that a record cannot change its parent (unless specified). --->
 	<cfif StructKeyExists(Arguments,"#sMeta.arg_pk#") AND StructKeyExists(Arguments,"Parent#sMeta.arg_pk#")>
 		<cfset sRec = {"#sMeta.arg_pk#"=Arguments[sMeta.arg_pk],fieldlist="Parent#sMeta.arg_pk#"}>
 		<cfset qBefore = getRecord(ArgumentCollection=sRec)>
+
 		<cfif
 			qBefore.RecordCount
 			AND
 			qBefore["Parent#sMeta.arg_pk#"][1] NEQ Arguments["Parent#sMeta.arg_pk#"]
 		>
-			<cfthrow type="#smeta.method_Plural#" message="Parent #LCase(smeta.label_Plural)# may not be altered.">
+			<cfif NOT ( StructKeyExists(Arguments,"doChangeParent") AND Arguments.doChangeParent IS true )>
+				<cfthrow type="#smeta.method_Plural#" message="Parent #LCase(smeta.label_Plural)# may not be altered. If you want to change the parent, then pass in true for the argument 'doChangeParent'.">
+			</cfif>
 		</cfif>
 	</cfif>
 

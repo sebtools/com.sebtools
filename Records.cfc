@@ -2,12 +2,10 @@
 <!--- Last Updated: 2011-11-23 --->
 <!--- Created by Steve Bryant 2007-09-13 --->
 <!--- Information: http://www.bryantwebconsulting.com/docs/com-sebtools/records.cfm?version=Build%2012 --->
-<cfcomponent output="false">
+<cfcomponent output="false" extends="component">
 
 <cfset variables.sSpecifyingValues = StructNew()>
 <cfset variables.OnExists = "save">
-
-<cfinclude template="udfs.cfm">
 
 <cffunction name="init" access="public" returntype="any" output="no">
 	<cfargument name="Manager" type="any" required="yes">
@@ -297,6 +295,18 @@
 	<cfreturn alterRecords(variables.Manager.getRecords(tablename=variables.table,data=arguments),arguments)>
 </cffunction>
 
+<cffunction name="getRecordsSQL" access="public" returntype="array" output="no">
+
+	<cfif NOT ( StructKeyExists(Arguments,"alter") AND Arguments.alter EQ false )>
+		<cfset arguments.alterargs_for = "gets">
+		<cfset Arguments = alterArgs(argumentCollection=arguments)>
+	</cfif>
+
+	<cfset StructAppend(Arguments,getSpecifyingValues(),"no")>
+
+	<cfreturn variables.Manager.getRecordsSQL(tablename=variables.table,data=arguments)>
+</cffunction>
+
 <cffunction name="getTableMetaStruct" access="public" returntype="struct" output="false" hint="">
 	<cfreturn variables.Manager.getMetaStruct(variables.table)>
 </cffunction>
@@ -327,8 +337,14 @@
 	<cfset sArgs["Function"] = "count">
 	<cfset sArgs["FunctionAlias"] = "NumRecords">
 	<cfset arguments.alterargs_for = "num">
-	<cfset sArgs["data"] = alterArgs(argumentCollection=arguments)>
+	<cfset sArgs["data"] = alterArgs(argumentCollection=Arguments)>
 	<cfset sArgs["fieldlist"] = "">
+
+	<cfif StructKeyExists(sArgs["data"],"AdvSQL")>
+		<cfset sArgs["data"]["AdvSQL"] = StructCopy(sArgs["data"]["AdvSQL"])>
+		<cfset StructDelete(sArgs["data"]["AdvSQL"],"SELECT")>
+		<cfset StructDelete(sArgs["data"]["AdvSQL"],"ORDER BY")>
+	</cfif>
 
 	<cfset qRecords = variables.Manager.getRecords(argumentCollection=sArgs)>
 
@@ -413,6 +429,14 @@
 <cffunction name="validateRecord" access="public" returntype="struct" output="no">
 
 	<cfreturn Arguments>
+</cffunction>
+
+<cffunction name="getFieldSelectSQL" access="package" returntype="any" output="no">
+	<cfargument name="field" type="string" required="yes">
+	<cfargument name="tablealias" type="string" required="no">
+	<cfargument name="useFieldAlias" type="boolean" default="true">
+
+	<cfreturn Variables.DataMgr.getFieldSelectSQL(tablename=Variables.table,ArgumentCollection=Arguments)>
 </cffunction>
 
 <cffunction name="addMethods" access="private" returntype="void" output="no">
