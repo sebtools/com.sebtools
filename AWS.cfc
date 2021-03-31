@@ -3,6 +3,7 @@
 <cffunction name="init" access="public" returntype="any" output="false" hint="I initialize and return the component.">
 	<cfargument name="Credentials" type="any" required="true" hint="AWS Credentials.">
 	<cfargument name="region" type="string" required="false" hint="The AWS region.">
+	<cfargument name="signature" type="string" default="v4">
 
 	<cfset var key = "">
 
@@ -39,6 +40,8 @@
 	<cfset This.RateLimiter = Variables.RateLimiter>
 
 	<cfset Variables.sServices = StructNew()>
+
+	<cfset Variables.oSignature = CreateObject("component","aws.sigs.#Arguments.signature#").init(This)>
 
 	<cfreturn This>
 </cffunction>
@@ -222,32 +225,9 @@
 	<cfscript>
 	var results = {};
 	var HTTPResults = "";
-	var timestamp = GetHTTPTimeString(Now());
-	var paramtype = "URL";
-	var sortedParams = "";
-	var EndPointURL = getEndPointUrl(Arguments.subdomain);
-	var NamedArgs = "subdomain,Action,method,parameters,timeout";
-	var arg = "";
-	var param = "";
-
-	for (arg in Arguments) {
-		if ( isSimpleValue(Arguments[arg]) AND Len(Trim(Arguments[arg])) AND NOT ListFindNoCase(NamedArgs,arg) ) {
-			if ( ListLen(EndPointURL,"?") EQ 1 ) {
-				EndPointURL &= "?";
-			} else {
-				EndPointURL &= "&";
-			}
-			EndPointURL &= "#arg#=#Trim(Arguments[arg])#";
-		}
-	}
-
-	Arguments.parameters["Action"] = Arguments.Action;
-
-	sortedParams = ListSort(StructKeyList(Arguments.parameters), "textnocase");
-
-	if( Arguments.method IS "POST" ) {
-		paramtype = "FORMFIELD";
-	}
+	var sRequest = Variables.oSignature.getRequest(ArgumentCollection=Arguments);
+	var sParam = 0;
+	var header = "";
 
 	results.error = false;
 	results.response = {};
@@ -255,25 +235,21 @@
 	results.responseheader = {};
 	</cfscript>
 
-	<cf_http
-		method="#arguments.method#"
-		url="#EndPointURL#"
-		charset="utf-8"
-		result="HTTPResults"
-		timeout="#arguments.timeout#"
-	>
-		<cf_httpparam type="header" name="Date" value="#timestamp#" />
-		<cf_httpparam type="header" name="Host" value="#getHost(Arguments.subdomain)#" />
-		<cf_httpparam type="header" name="X-Amzn-Authorization" value="AWS3-HTTPS AWSAccessKeyId=#getAccessKey()#,Algorithm=HmacSHA256,Signature=#createSignature(timestamp)#" />
-
-		<cfloop list="#sortedParams#" index="param">
-			<cf_httpparam type="#paramType#" name="#param#" value="#trim(arguments.parameters[param])#" />
+	<cf_http result="HTTPResults" AttributeCollection="#sRequest#">
+		<cfloop list="#ListSort(StructKeyList(sRequest.Headers),'text')#" index="header">
+			<cf_httpparam type="header" name="#header#" value="#sRequest.Headers[header]#" />
+		</cfloop>
+		<cfif StructKeyExists(sRequest,"Payload")>
+			<cf_httpparam type="body" value="#sRequest.Payload#" />
+		</cfif>
+		<cfloop array="#sRequest.params#" index="sParam">
+			<cf_httpparam AttributeCollection="#sParam#" />
 		</cfloop>
 	</cf_http>
 
 	<cfscript>
 	results["Method"] = Arguments.method;
-	results["URL"] = EndPointURL;
+	results["URL"] = sRequest.url;
 	results["Host"] = getHost(Arguments.subdomain);
 	if ( StructKeyExists(HTTPResults,"fileContent") ) {
 		results.response = HTTPResults.fileContent;
