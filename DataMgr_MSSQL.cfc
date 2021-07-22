@@ -409,6 +409,7 @@
 		<cfcase value="smallint"><cfset result = "CF_SQL_SMALLINT"></cfcase>
 		<cfcase value="smallmoney"><cfset result = "CF_SQL_MONEY4"></cfcase>
 		<cfcase value="text"><cfset result = "CF_SQL_LONGVARCHAR"></cfcase>
+		<cfcase value="time"><cfset result = "CF_SQL_TIME"></cfcase>
 		<cfcase value="tinyint"><cfset result = "CF_SQL_TINYINT"></cfcase>
 		<cfcase value="uniqueidentifier"><cfset result = "CF_SQL_IDSTAMP"></cfcase>
 		<cfcase value="varchar">
@@ -454,6 +455,7 @@
 		<cfcase value="CF_SQL_NUMERIC"><cfset result = "numeric"></cfcase>
 		<cfcase value="CF_SQL_REAL"><cfset result = "real"></cfcase>
 		<cfcase value="CF_SQL_SMALLINT"><cfset result = "smallint"></cfcase>
+		<cfcase value="CF_SQL_TIME"><cfset result = "time"></cfcase>
 		<cfcase value="CF_SQL_TIMESTAMP"><cfset result = "datetime"></cfcase>
 		<cfcase value="CF_SQL_TINYINT"><cfset result = "tinyint"></cfcase>
 		<cfcase value="CF_SQL_VARCHAR"><cfset result = "varchar"></cfcase>
