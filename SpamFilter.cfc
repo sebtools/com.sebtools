@@ -356,6 +356,8 @@
 	<cfargument name="string" type="string" require="true">
 	<cfargument name="word" type="string" require="true">
 	<cfargument name="maxpoints" type="numeric" default="0">
+	
+	<cfset arguments.string = javacast("string", arguments.string).replaceAll("\s+", " ")>
 
 	<cfreturn numRegExMatches(arguments.string,"\b#arguments.word#\b",arguments.maxpoints)>
 </cffunction>
