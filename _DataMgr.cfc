@@ -5063,6 +5063,9 @@
 	<cfcase value="CF_SQL_DATETIME,CF_SQL_TIMESTAMP">
 		<cfset result = "datetime">
 	</cfcase>
+	<cfcase value="CF_SQL_TIME">
+		<cfset result = "time">
+	</cfcase>
 	<cfcase value="CF_SQL_LONGVARCHAR,CF_SQL_CLOB">
 		<cfset result = "invalid">
 	</cfcase>
@@ -5418,6 +5421,9 @@
 	<cfcase value="CF_SQL_DATE,CF_SQL_DATETIME">
 		<cfset result = "date">
 	</cfcase>
+	<cfcase value="CF_SQL_TIME">
+		<cfset result = "time">
+	</cfcase>
 	<cfdefaultcase>
 		<cfset result = arguments.CF_DataType>
 	</cfdefaultcase>
@@ -5456,6 +5462,9 @@
 	</cfcase>
 	<cfcase value="date">
 		<cfset isOK = isValidDate(datum)>
+	</cfcase>
+	<cfcase value="time">
+		<cfset isOK = isValid("time", datum)>
 	</cfcase>
 	<cfdefaultcase>
 		<cfset isOK = true>
