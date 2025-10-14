@@ -3,154 +3,167 @@
 <!--- Created by Steve Bryant 2004-12-08 --->
 <!--- Information: http://www.bryantwebconsulting.com/docs/datamgr/?version=2.5 --->
 <cfcomponent displayname="Data Manager" hint="I manage data interactions with the database. I can be used to handle inserts/updates.">
+<cfscript>
+Variables.DataMgrVersion = "2.6";
+Variables.DefaultDatasource = getDefaultDatasource();
 
-<cfset variables.DataMgrVersion = "2.6">
-<cfset variables.DefaultDatasource = getDefaultDatasource()>
+public struct function ArgumentsFi() {
+	
+	// This is a fix for function being a reserved word in cfscript
+	if (
+		StructKeyExists(Arguments,"functionName")
+		AND
+		NOT StructKeyExists(Arguments,"function")
+	) {
+		Arguments["function"] = Arguments.functionName;
+	}
 
-<cffunction name="init" access="public" returntype="DataMgr" output="no" hint="I instantiate and return this object.">
-	<cfargument name="datasource" type="string" required="no" default="#variables.DefaultDatasource#">
-	<cfargument name="database" type="string" required="no">
-	<cfargument name="username" type="string" required="no">
-	<cfargument name="password" type="string" required="no">
-	<cfargument name="SmartCache" type="boolean" default="false">
-	<cfargument name="SpecialDateType" type="string" default="CF">
-	<cfargument name="XmlData" type="string" required="no">
-	<cfargument name="logfile" type="string" required="no">
-	<cfargument name="Observer" type="any" required="no">
-	<cfargument name="databasename" type="string" required="no" hint="If DataMgr should manage in a different database than the default, indicate that here.">
+	return Arguments;
+}
 
-	<cfset var me = 0>
+/**
+* I instantiate and return DataMgr.
+* @databasename If DataMgr should manage in a different database than the default, indicate that here.
+*/
+public function init(
+	string datasource="#Variables.DefaultDatasource#",
+	string database,
+	string username,
+	string password,
+	boolean SmartCache="false",
+	string SpecialDateType="CF",
+	string XmlData,
+	string logfile,
+	Observer,
+	string databasename
+) {
+	var me = 0;
 
-	<cfset variables.datasource = arguments.datasource>
-	<cfset variables.CFServer = Server.ColdFusion.ProductName>
-	<cfset variables.CFVersion = ListFirst(Server.ColdFusion.ProductVersion)>
-	<cfset variables.SpecialDateType = arguments.SpecialDateType>
+	Variables.datasource = Arguments.datasource;
+	Variables.CFServer = Server.ColdFusion.ProductName;
+	Variables.CFVersion = ListFirst(Server.ColdFusion.ProductVersion);
+	Variables.SpecialDateType = Arguments.SpecialDateType;
 
-	<cfif StructKeyExists(arguments,"username") AND StructKeyExists(arguments,"password")>
-		<cfset variables.username = arguments.username>
-		<cfset variables.password = arguments.password>
-	</cfif>
+	if ( StructKeyExists(Arguments,"username") AND StructKeyExists(Arguments,"password") ) {
+		Variables.username = Arguments.username;
+		Variables.password = Arguments.password;
+	}
 
-	<cfif StructKeyExists(arguments,"logfile") AND Len(Arguments.logfile)>
-		<cfset variables.logfile = arguments.logfile>
-	</cfif>
+	if ( StructKeyExists(Arguments,"logfile") AND Len(Arguments.logfile) ) {
+		Variables.logfile = Arguments.logfile;
+	}
 
-	<cfif StructKeyExists(arguments,"Observer")>
-		<cfset variables.Observer = arguments.Observer>
-	</cfif>
+	if ( StructKeyExists(Arguments,"Observer") ) {
+		Variables.Observer = Arguments.Observer;
+	}
 
-	<cfif StructKeyExists(arguments,"defaultdatabase")>
-		<cfset variables.defaultdatabase = arguments.defaultdatabase>
-	</cfif>
+	if ( StructKeyExists(Arguments,"defaultdatabase") ) {
+		Variables.defaultdatabase = Arguments.defaultdatabase;
+	}
 
-	<cfset variables.SmartCache = arguments.SmartCache>
+	Variables.SmartCache = Arguments.SmartCache;
 
-	<cfset Variables.dbprefix = "">
-	<cfset Variables.prefix = "">
-	<cfif StructKeyExists(arguments,"databasename")>
-		<cfset variables.databasename = arguments.databasename>
-		<cfset Variables.dbprefix = "#variables.databasename#.">
-		<cfif NOT StructKeyExists(arguments,"owner")>
-			<cfset Variables.owner = "dbo">
-		</cfif>
-		<cfset Variables.prefix = "#Variables.dbprefix#dbo.">
-	</cfif>
+	Variables.dbprefix = "";
+	Variables.prefix = "";
+	if ( StructKeyExists(Arguments,"databasename") ) {
+		Variables.databasename = Arguments.databasename;
+		Variables.dbprefix = "#Variables.databasename#.";
+		if ( NOT StructKeyExists(Arguments,"owner") ) {
+			Variables.owner = "dbo";
+		}
+		Variables.prefix = "#Variables.dbprefix#dbo.";
+	}
 
-	<cfset Variables.DataMgr = This>
+	Variables.DataMgr = This;
 
-	<cfset variables.dbprops = getProps()>
-	<cfset variables.tables = StructNew()><!--- Used to internally keep track of table fields used by DataMgr --->
-	<cfset variables.tableprops = StructNew()><!--- Used to internally keep track of tables properties used by DataMgr --->
-	<cfset setCacheDate()><!--- Used to internally keep track caching --->
+	Variables.dbprops = getProps();
+	Variables.tables = StructNew();// Used to internally keep track of table fields used by DataMgr
+	Variables.tableprops = StructNew();// Used to internally keep track of tables properties used by DataMgr
+	setCacheDate();// Used to internally keep track caching
 
-	<!--- instructions for special processing decisions --->
-	<cfset variables.nocomparetypes = "CF_SQL_LONGVARCHAR,CF_SQL_CLOB,CF_SQL_BLOB"><!--- Don't run comparisons against fields of these cf_datatypes for queries --->
-	<cfset variables.dectypes = "CF_SQL_DECIMAL"><!--- Decimal types (shouldn't be rounded by DataMgr) --->
-	<cfset variables.aggregates = "avg,count,max,min,sum">
+	// instructions for special processing decisions
+	Variables.nocomparetypes = "CF_SQL_LONGVARCHAR,CF_SQL_CLOB,CF_SQL_BLOB";// Don't run comparisons against fields of these cf_datatypes for queries
+	Variables.dectypes = "CF_SQL_DECIMAL";// Decimal types (shouldn't be rounded by DataMgr)
+	Variables.aggregates = "avg,count,max,min,sum";
 
-	<!--- Information for logging --->
-	<cfset variables.doLogging = false>
-	<cfset variables.logtable = "datamgrLogs">
-	<cfset variables.UUID = CreateUUID()>
+	// Information for logging
+	Variables.doLogging = false;
+	Variables.logtable = "datamgrLogs";
+	Variables.UUID = CreateUUID();
 
-	<!--- Code to run only if not in a database adaptor already --->
-	<cfif ListLast(getMetaData(this).name,".") EQ "DataMgr">
-		<cfif NOT StructKeyExists(arguments,"database")>
-			<cfset addEngineEnhancements(true)>
-			<cfset arguments.database = getDatabase()>
-		</cfif>
+	// Code to run only if not in a database adaptor already
+	if ( ListLast(getMetaData(this).name,".") EQ "DataMgr" ) {
+		if ( NOT StructKeyExists(Arguments,"database") ) {
+			addEngineEnhancements(true);
+			Arguments.database = getDatabase();
+		}
 
-		<!--- This will make sure that if a database is passed the component for that database is returned --->
-		<cfif StructKeyExists(arguments,"database")>
-			<cfif StructKeyExists(variables,"username") AND StructKeyExists(variables,"password")>
-				<cfset me = CreateObject("component","DataMgr_#arguments.database#").init(ArgumentCollection=Arguments)>
-			<cfelse>
-				<cfset me = CreateObject("component","DataMgr_#arguments.database#").init(ArgumentCollection=Arguments)>
-			</cfif>
-		</cfif>
-	<cfelse>
-		<cfset addEngineEnhancements(false)>
-		<cfset me = this>
-	</cfif>
+		// This will make sure that if a database is passed the component for that database is returned
+		if ( StructKeyExists(Arguments,"database") ) {
+			if ( StructKeyExists(Variables,"username") AND StructKeyExists(Variables,"password") ) {
+				me = CreateObject("component","DataMgr_#Arguments.database#").init(ArgumentCollection=Arguments);
+			} else {
+				me = CreateObject("component","DataMgr_#Arguments.database#").init(ArgumentCollection=Arguments);
+			}
+		}
+	} else {
+		addEngineEnhancements(false);
+		me = this;
+	}
 
-	<cfif StructKeyExists(arguments,"XmlData")>
-		<cfset me.loadXml(arguments.XmlData,true,true)/>
-	</cfif>
+	if ( StructKeyExists(Arguments,"XmlData") ) {
+		me.loadXml(Arguments.XmlData,true,true);
+	}
 
-	<cfreturn me>
-</cffunction>
+	return me;
+}
 
-<cffunction name="addEngineEnhancements" access="private" returntype="void" output="no">
-	<cfargument name="isLoadingDatabaseType" type="boolean" default="false">
+private void function addEngineEnhancements(boolean isLoadingDatabaseType=false) {
+	var oMixer = 0;
+	var key = "";
 
-	<cfset var oMixer = 0>
-	<cfset var key = "">
+	if ( ListFirst(Variables.CFServer," ") EQ "ColdFusion" AND Variables.CFVersion GTE 8 ) {
+		oMixer = CreateObject("component","DataMgrEngine_cf8");
+	} else if ( Variables.CFServer EQ "BlueDragon" ) {
+		oMixer = CreateObject("component","DataMgrEngine_openbd");
+	} else if ( Variables.CFServer EQ "Railo" ) {
+		oMixer = CreateObject("component","DataMgrEngine_railo");
+	} else if ( Variables.CFServer EQ "Lucee" ) {
+		oMixer = CreateObject("component","DataMgrEngine_lucee");
+	}
 
-	<cfif ListFirst(variables.CFServer," ") EQ "ColdFusion" AND variables.CFVersion GTE 8>
-		<cfset oMixer = CreateObject("component","DataMgrEngine_cf8")>
-	<cfelseif variables.CFServer EQ "BlueDragon">
-		<cfset oMixer = CreateObject("component","DataMgrEngine_openbd")>
-	<cfelseif variables.CFServer EQ "Railo">
-		<cfset oMixer = CreateObject("component","DataMgrEngine_railo")>
-	<cfelseif variables.CFServer EQ "Lucee">
-		<cfset oMixer = CreateObject("component","DataMgrEngine_lucee")>
-	</cfif>
+	if ( isObject(oMixer) ) {
+		for ( key in oMixer ) {
+			if ( key NEQ "getDatabase" OR Arguments.isLoadingDatabaseType ) {
+				Variables[key] = oMixer[key];
+				if ( StructKeyExists(This,key) ) {
+					This[key] = oMixer[key];
+				}
+			}
+		}
+	}
+}
 
-	<cfif isObject(oMixer)>
-		<cfloop collection="#oMixer#" item="key">
-			<cfif key NEQ "getDatabase" OR arguments.isLoadingDatabaseType>
-				<cfset variables[key] = oMixer[key]>
-				<cfif StructKeyExists(This,key)>
-					<cfset This[key] = oMixer[key]>
-				</cfif>
-			</cfif>
-		</cfloop>
-	</cfif>
+private string function getAdvSQLDelimiter(required string key) {
+	switch(Arguments.key) {
+		case "SELECT":
+		case "ORDER BY":
+		case "GROUP BY":
+		case "HAVING":
+		case "SET":
+			return ",";
+		case "WHERE":
+			return "AND";
+		default:
+			return "";
+	}
+}
 
-</cffunction>
-
-<cffunction name="getAdvSQLDelimiter" access="private" returntype="string" output="no">
-	<cfargument name="key" type="string" required="true">
-
-	<cfswitch expression="#Arguments.key#">
-	<cfcase value="SELECT,ORDER BY,GROUP BY,HAVING,SET">
-		<cfreturn ",">
-	</cfcase>
-	<cfcase value="WHERE,">
-		<cfreturn "AND">
-	</cfcase>
-	<cfdefaultcase>
-		<cfreturn "">
-	</cfdefaultcase>
-	</cfswitch>
-</cffunction>
-
-<cffunction name="addAdvSQL" access="public" returntype="void" output="no">
-	<cfargument name="Args" type="struct" required="true">
-	<cfargument name="key" type="string" required="true">
-	<cfargument name="sql" type="any" required="true">
-
-	<cfscript>
+public void function addAdvSQL(
+	required struct Args,
+	required string key,
+	required sql
+) {
 	var delim = getAdvSQLDelimiter(Arguments.key);
 	var sql_start = "";
 
@@ -188,86 +201,97 @@
 	}
 
 	ArrayAppend(Arguments.Args["AdvSQL"][Arguments.key],Arguments.sql);
-	</cfscript>
+}
 
-</cffunction>
+/**
+* I add a value to a list field if it doesn't already exist. Can be used with any list value (not just relation fields).
+*/
+public void function addRelationListValue(
+	required string tablename,
+	required string pkvalue,
+	required string field,
+	required string	value
+) {
+	var pklist = getPrimaryKeyFieldNames(arguments.tablename);
+	var sPKData = {"#pklist#":Arguments.pkvalue};
+	var qRecord = getRecords(tablename=Arguments.tablename,data=sPKData,fieldlist=Arguments.field);
+	var OldValue = qRecord[Arguments.field][1];
+	var sData = StructCopy(sPKData);
 
-<cffunction name="addRelationListValue" access="public" returntype="void" output="no" hint="I add a value to a list field if it doesn't already exist. Can be used with any list value (not just relation fields).">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="pkvalue" type="string" required="yes">
-	<cfargument name="field" type="string" required="yes">
-	<cfargument name="value" type="string" required="yes">
-
-	<cfset var pklist = getPrimaryKeyFieldNames(arguments.tablename)>
-	<cfset var sPKData = {"#pklist#":Arguments.pkvalue}>
-	<cfset var qRecord = getRecords(tablename=Arguments.tablename,data=sPKData,fieldlist=Arguments.field)>
-	<cfset var OldValue = qRecord[Arguments.field][1]>
-	<cfset var sData = StructCopy(sPKData)>
-
-	<cfif NOT ListFindNoCase(OldValue,Arguments.value)>
-		<cfset sData[Arguments.field] = ListAppend(OldValue,Arguments.value)>
-		<cfset saveRecord(
+	if ( NOT ListFindNoCase(OldValue,Arguments.value) ) {
+		sData[Arguments.field] = ListAppend(OldValue,Arguments.value);
+		saveRecord(
 			tablename=Arguments.tablename,
 			data=sData
-		)>
-	</cfif>
+		);
+	}
+}
 
-</cffunction>
+/**
+ * @param tablename The name of the table involved in the event.
+ * @param action The action performed (e.g., insert, update, delete).
+ * @param method The DataMgr method executed.
+ * @param data The data passed to the method.
+ * @param fieldlist (Optional)
+ * @param Args The arguments passed to the method.
+ * @param sql (Optional)
+ * @param pkvalue (Optional)
+ * @param ChangeUUID (Optional)
+ * @return void
+ * @access private
+ */
+private void function announceEvent(
+	required string tablename,
+	required string action,
+	required string method,
+	required struct data,
+	string fieldlist = "",
+	required struct Args,
+	any sql,
+	any pkvalue,
+	string ChangeUUID
+) {
+	
+	if ( StructKeyExists(variables, "Observer") AND StructKeyExists(variables.Observer, "announceEvent") ) {
+		variables.Observer.announceEvent(
+			EventName = "DataMgr:#arguments.action#",
+			Args = Arguments
+		);
+	}
 
-<cffunction name="announceEvent" access="private" returntype="void" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="action" type="string" required="yes" hint="The action taken.">
-	<cfargument name="method" type="string" required="yes" hint="The DataMgr method executed.">
-	<cfargument name="data" type="struct" required="yes" hint="The data passed to the method.">
-	<cfargument name="fieldlist" type="string" default="">
-	<cfargument name="Args" type="struct" required="yes" hint="The arguments passed to the method.">
-	<cfargument name="sql" type="any" required="no">
-	<cfargument name="pkvalue" type="any" required="no">
-	<cfargument name="ChangeUUID" type="string" required="no">
+}
 
-	<cfif StructKeyExists(variables,"Observer") AND StructKeyExists(variables.Observer,"announceEvent")>
-		<cfset variables.Observer.announceEvent(
-			EventName="DataMgr:#arguments.action#",
-			Args=Arguments
-		)>
-	</cfif>
+public void function setCacheDate() {
+	variables.CacheDate = now();
+}
 
-</cffunction>
+public void function setObserver(any Observer) {
+	variables.Observer = Arguments.Observer;
+}
 
-<cffunction name="setCacheDate" access="public" returntype="void" output="no">
-	<cfset variables.CacheDate = now()>
-</cffunction>
+public string function getDefaultDatasource() {
+	var result = "";
 
-<cffunction name="setObserver" access="public" returntype="void" output="no">
-	<cfargument name="Observer" type="any" required="no">
+	try {
+		if ( isDefined("Application") AND StructKeyExists(Application,"Datasource") ) {
+			result = Application.Datasource;
+		}
+	} catch( any e) {
 
-	<cfset variables.Observer = Arguments.Observer>
+	}
 
-</cffunction>
+	return result;
+}
 
-<cffunction name="getDefaultDatasource" access="public" returntype="string" output="no">
+/**
+* I return a clean version (stripped of MS-Word characters) of the given structure.
+*/
 
-	<cfset var result = "">
+public struct function clean(required struct Struct) {
+	var key = "";
+	var sResult = {};
 
-	<cftry>
-		<cfif isDefined("Application") AND StructKeyExists(Application,"Datasource")>
-			<cfset result = Application.Datasource>
-		</cfif>
-	<cfcatch>
-	</cfcatch>
-	</cftry>
-
-	<cfreturn result>
-</cffunction>
-
-<cffunction name="clean" access="public" returntype="struct" output="no" hint="I return a clean version (stripped of MS-Word characters) of the given structure.">
-	<cfargument name="Struct" type="struct" required="yes">
-
-	<cfset var key = "">
-	<cfset var sResult = StructNew()>
-
-	<cfscript>
-	for (key in arguments.Struct) {
+	for  (key in arguments.Struct ) {
 		if ( Len(key) AND StructKeyExists(arguments.Struct,key) AND isSimpleValue(arguments.Struct[key]) ) {
 			// Trim the field value. -- Don't do it! This causes trouble with encrypted strings
 			//sResult[key] = Trim(sResult[key]);
@@ -294,315 +318,342 @@
 			sResult[key] = Replace(sResult[key], "&##8482;", "&trade;", "ALL");// trademark
 		}
 	}
-	</cfscript>
 
-	<cfreturn sResult>
-</cffunction>
+	return sResult;
+}
 
-<cffunction name="createTable" access="public" returntype="string" output="no" hint="I take a table (for which the structure has been loaded) and create the table in the database.">
-	<cfargument name="tablename" type="string" required="yes">
+/**
+* I take a table (for which the structure has been loaded) and create the table in the database.
+*/
+public string function createTable(required string tablename) {
+	var CreateSQL = getCreateSQL(arguments.tablename);
+	var thisSQL = "";
 
-	<cfset var CreateSQL = getCreateSQL(arguments.tablename)>
-	<cfset var thisSQL = "">
+	var arrFields = getFields(arguments.tablename);// table structure
+	var sField = 0;
+	var increments = 0;
 
-	<cfset var ii = 0><!--- generic counter --->
-	<cfset var arrFields = getFields(arguments.tablename)><!--- table structure --->
-	<cfset var increments = 0>
+	// Make sure table has no more than one increment field --->
+	for ( sField in arrFields ) {
+		if ( sField.Increment ) {
+			increments++;
+		}
+	}
+	if ( increments GT 1 ) {
+		throwDMError("#arguments.tablename# has more than one increment field. A table is limited to only one increment field.","MultipleIncrements");
+	}
 
-	<!--- Make sure table has no more than one increment field --->
-	<cfloop index="ii" from="1" to="#ArrayLen(arrFields)#" step="1">
-		<cfif arrFields[ii].Increment>
-			<cfset increments = increments + 1>
-		</cfif>
-	</cfloop>
-	<cfif increments GT 1>
-		<cfset throwDMError("#arguments.tablename# has more than one increment field. A table is limited to only one increment field.","MultipleIncrements")>
-	</cfif>
+	StructDelete(variables,"cache_dbtables");
 
-	<cfset StructDelete(variables,"cache_dbtables")>
+	//try to create table
+	try {
+		for ( thisSQL in ListToArray(CreateSQL,";") ) {
+			if ( thisSQL CONTAINS " " ) {
+				//Ugly hack to get around Oracle's need for a semi-colon in SQL that doesn't split up SQL commands
+				thisSQL = ReplaceNoCase(thisSQL,"|DataMgr_SemiColon|",";","ALL");
+				runSQL(thisSQL);
+			}
+		}
+	} catch( any err ) {
+		//If the ceation fails, throw an error with the sql code used to create the database.
+		if (
+			NOT (
+				err.Message CONTAINS "There is already an object named"
+				OR
+				(
+					StructKeyExists(err,"Cause")
+					AND
+					StructKeyExists(err.Cause,"Message")
+					AND
+					err.Cause.Message CONTAINS "There is already an object named"
+				)
+			)
+		) {
+			throwDMError("SQL Error in Creation. Verify Datasource (#chr(34)##variables.datasource##chr(34)#) is valid.","CreateFailed",CreateSQL);
+		}
+	}
 
-	<!--- try to create table --->
-	<cftry>
-		<cfloop index="thisSQL" list="#CreateSQL#" delimiters=";"><cfif thisSQL CONTAINS " ">
-			<!--- Ugly hack to get around Oracle's need for a semi-colon in SQL that doesn't split up SQL commands --->
-			<cfset thisSQL = ReplaceNoCase(thisSQL,"|DataMgr_SemiColon|",";","ALL")>
-			<cfset runSQL(thisSQL)>
-		</cfif></cfloop>
-		<cfcatch><!--- If the ceation fails, throw an error with the sql code used to create the database. --->
-			<cfif NOT (
-					CFCATCH.Message CONTAINS "There is already an object named"
-				OR	(
-							StructKeyExists(CFCATCH,"Cause")
-						AND	StructKeyExists(CFCATCH.Cause,"Message")
-						AND	CFCATCH.Cause.Message CONTAINS "There is already an object named"
-					)
-			)>
-				<cfset throwDMError("SQL Error in Creation. Verify Datasource (#chr(34)##variables.datasource##chr(34)#) is valid.","CreateFailed",CreateSQL)>
-			</cfif>
-		</cfcatch>
-	</cftry>
+	setCacheDate();
 
-	<cfset setCacheDate()>
+	return CreateSQL;
+}
 
-	<cfreturn CreateSQL>
-</cffunction>
+/**
+* I indicate whether or not the given table exists in the database.
+*/
+public boolean function dbtableexists(
+	required string tablename,
+	string dbtables
+) {
+	var result = false;
+	var qTest = 0;
 
-<cffunction name="dbtableexists" access="public" returntype="boolean" output="no" hint="I indicate whether or not the given table exists in the database">
-	<cfargument name="tablename" type="string" required="true">
-	<cfargument name="dbtables" type="string" default="">
+	if ( NOT ( StructKeyExists(arguments,"dbtables") AND Len(Trim(arguments.dbtables)) ) ) {
+		arguments.dbtables = "";
+		try {
+			//Try to get a list of tables load in DataMgr
+			arguments.dbtables = getDatabaseTablesCache();
+		} catch( any err ) {
 
-	<cfset var result = false>
-	<cfset var qTest = 0>
+		}
+	}
 
-	<cfif NOT ( StructKeyExists(arguments,"dbtables") AND Len(Trim(arguments.dbtables)) )>
-		<cfset arguments.dbtables = "">
-		<cftry><!--- Try to get a list of tables load in DataMgr --->
-			<cfset arguments.dbtables = getDatabaseTablesCache()>
-		<cfcatch>
-		</cfcatch>
-		</cftry>
-	</cfif>
+	if ( Len(arguments.dbtables) ) {// If we have tables loaded in DataMgr
+		if ( ListFindNoCase(arguments.dbtables, arguments.tablename) ) {
+			result = true;
+		}
+	}
+	// SEB 2010-04-25: This seems a tad aggresive (a lot of penalty for a just in case measure). Let's ditch it unless it proves essential.
+	if ( false AND NOT result ) {
+		result = true;
+		try {// create any table on which a select statement errors
+			qTest = runSQL("SELECT #getMaxRowsPrefix(1)# #escape(variables.tables[arguments.tablename][1].ColumnName)# FROM #escape(arguments.tablename)# #getMaxRowsSuffix(1)#");
+		} catch( any err ) {
+			result = false;
+		}
+	}
 
-	<cfif Len(arguments.dbtables)><!--- If we have tables loaded in DataMgr --->
-		<cfif ListFindNoCase(arguments.dbtables, arguments.tablename)>
-			<cfset result = true>
-		</cfif>
-	</cfif>
-	<!--- SEB 2010-04-25: This seems a tad aggresive (a lot of penalty for a just in case measure). Let's ditch it unless it proves essential. --->
-	<cfif false AND NOT result>
-		<cfset result = true>
-		<cftry><!--- create any table on which a select statement errors --->
-			<cfset qTest = runSQL("SELECT #getMaxRowsPrefix(1)# #escape(variables.tables[arguments.tablename][1].ColumnName)# FROM #escape(arguments.tablename)# #getMaxRowsSuffix(1)#")>
-			<cfcatch>
-				<cfset result = false>
-			</cfcatch>
-		</cftry>
-	</cfif>
+	return result;
+}
 
-	<cfreturn result>
-</cffunction>
+/**
+* I create any tables that I know should exist in the database but don't.
+* @tables A list of tables to create. If not provided, createTables will try to create any table that has been loaded into it but does not exist in the database.
+* @dbtables A list of tables that exist in the database. If not provided, createTables will try to get a list of tables from the database.
+*/
+public string function CreateTables(
+	string tables,
+	string dbtables
+) {
+	var table = "";
+	var tablesExist = {};
+	var qTest = 0;
+	var FailedSQL = "";
+	var DBErr = "";
+	var result = "";
 
-<cffunction name="CreateTables" access="public" returntype="string" output="no" hint="I create any tables that I know should exist in the database but don't.">
-	<cfargument name="tables" type="string" required="no" hint="I am a list of tables to create. If I am not provided createTables will try to create any table that has been loaded into it but does not exist in the database.">
-	<cfargument name="dbtables" type="string" required="false">
+	if ( NOT StructKeyExists(arguments,"tables") ) {
+		arguments.tables = StructKeyList(variables.tables);
+	}
 
-	<cfset var table = "">
-	<cfset var tablesExist = StructNew()>
-	<cfset var qTest = 0>
-	<cfset var FailedSQL = "">
-	<cfset var DBErr = "">
-	<cfset var result = "">
+	if ( NOT ( StructKeyExists(arguments,"dbtables") AND Len(Trim(arguments.dbtables)) ) ) {
+		arguments.dbtables = "";
+		try {
+		// Try to get a list of tables load in DataMgr
+			arguments.dbtables = getDatabaseTablesCache();
+		} catch (any err) {
 
-	<cfif NOT StructKeyExists(arguments,"tables")>
-		<cfset arguments.tables = StructKeyList(variables.tables)>
-	</cfif>
+		}
+	}
 
-	<cfif NOT ( StructKeyExists(arguments,"dbtables") AND Len(Trim(arguments.dbtables)) )>
-		<cfset arguments.dbtables = "">
-		<cftry><!--- Try to get a list of tables load in DataMgr --->
-			<cfset arguments.dbtables = getDatabaseTablesCache()>
-		<cfcatch>
-		</cfcatch>
-		</cftry>
-	</cfif>
+	for ( table in ListToArray(arguments.tables) ) {
+		// Create table if it doesn't exist
+		if ( NOT dbtableexists(table,arguments.dbtables) ) {
+			try {
+				createTable(table);
+				arguments.dbtables = ListAppend(arguments.dbtables,table);
+				result = ListAppend(result,table);
+			}
+			catch (DataMgr err) {
+				if ( Len(err.Detail) ) {
+					FailedSQL = ListAppend(FailedSQL,err.Detail,";");
+				} else {
+					FailedSQL = ListAppend(FailedSQL,err.Message,";");
+				}
+				if ( Len(err.ExtendedInfo) ) {
+					DBErr = err.ExtendedInfo;
+				}
+			}
+		}
+	}
 
-	<cfloop index="table" list="#arguments.tables#">
-		<!--- Create table if it doesn't exist --->
-		<cfif NOT dbtableexists(table,arguments.dbtables)>
-			<cftry>
-				<cfset createTable(table)>
-				<cfset arguments.dbtables = ListAppend(arguments.dbtables,table)>
-				<cfset result = ListAppend(result,table)>
-				<cfcatch type="DataMgr">
-					<cfif Len(CFCATCH.Detail)>
-						<cfset FailedSQL = ListAppend(FailedSQL,CFCATCH.Detail,";")>
-					<cfelse>
-						<cfset FailedSQL = ListAppend(FailedSQL,CFCATCH.Message,";")>
-					</cfif>
-					<cfif Len(CFCATCH.ExtendedInfo)>
-						<cfset DBErr = CFCATCH.ExtendedInfo>
-					</cfif>
-				</cfcatch>
-			</cftry>
-		</cfif>
-	</cfloop>
+	if ( Len(FailedSQL) ) {
+		throwDMError("SQL Error in Creation. Verify Datasource (#chr(34)##variables.datasource##chr(34)#) is valid.","CreateFailed",FailedSQL,DBErr);
+	}
 
-	<cfif Len(FailedSQL)>
-		<cfset throwDMError("SQL Error in Creation. Verify Datasource (#chr(34)##variables.datasource##chr(34)#) is valid.","CreateFailed",FailedSQL,DBErr)>
-	</cfif>
+	return result;
+}
 
-	<cfreturn result>
-</cffunction>
+/**
+* I delete the record with the given Primary Key(s).
+* @tablename The name of the table from which to delete a record.
+* @data A structure indicating the record to delete. A key indicates a field. The structure should have a key for each primary key in the table.
+*/
+public void function deleteRecord(
+	required string tablename,
+	required data
+) {
+	var i = 0;// just a counter
+	var fields = getUpdateableFields(arguments.tablename);
+	var pkfields = getPKFields(arguments.tablename);// the primary key fields for this table
+	var rfields = getRelationFields(arguments.tablename);// relation fields in table
+	var sData = arguments.data;// The incoming data structure
+	var isLogicalDelete = isLogicalDeletion(arguments.tablename);
+	var qRecord = 0;
+	var sqlarray = [];
+	var out = 0;
+	var temp2 = 0;
+	//var qRelationList = 0;
+	//var subdatum = {};
+	//var sArgs = {};
+	var conflicttables = "";
+	var sCascadeDeletions = 0;
+	var ChangeUUID = CreateUUID();
+	var sAnnounceArgs = 0;
+	var sLog = 0;
+	var sEvent = 0;
 
-<cffunction name="deleteRecord" access="public" returntype="void" output="no" hint="I delete the record with the given Primary Key(s).">
-	<cfargument name="tablename" type="string" required="yes" hint="The name of the table from which to delete a record.">
-	<cfargument name="data" type="any" required="yes" hint="A structure indicating the record to delete. A key indicates a field. The structure should have a key for each primary key in the table.">
+	var pklist = getPrimaryKeyFieldNames(arguments.tablename);
 
-	<cfset var i = 0><!--- just a counter --->
-	<cfset var fields = getUpdateableFields(arguments.tablename)>
-	<cfset var pkfields = getPKFields(arguments.tablename)><!--- the primary key fields for this table --->
-	<cfset var rfields = getRelationFields(arguments.tablename)><!--- relation fields in table --->
-	<cfset var in = arguments.data><!--- The incoming data structure --->
-	<cfset var isLogicalDelete = isLogicalDeletion(arguments.tablename)>
-	<cfset var qRecord = 0>
-	<cfset var sqlarray = ArrayNew(1)>
-	<cfset var out = 0>
-	<cfset var temp2 = 0>
-	<!---<cfset var qRelationList = 0>--->
-	<!---<cfset var subdatum = StructNew()>--->
-	<!---<cfset var sArgs = StructNew()>--->
-	<cfset var conflicttables = "">
-	<cfset var sCascadeDeletions = 0>
-	<cfset var ChangeUUID = CreateUUID()>
+	// Throw exception if any pkfields are missing from incoming data
+	for ( i=1; i LTE ArrayLen(pkfields); i++ ) {
+		if ( NOT StructKeyExists(sData,pkfields[i].ColumnName) ) {
+			throwDMError("All Primary Key fields (#pklist#) must be used when deleting a record. (Passed = #StructKeyList(sData)#, Table=#arguments.tablename#)","RequiresAllPkFields");
+		}
+	}
 
-	<cfset var pklist = getPrimaryKeyFieldNames(arguments.tablename)>
+	// Only get records by primary key
+	for ( temp2 in sData ) {
+		if ( NOT ListFindNoCase(pklist,temp2) ) {
+			StructDelete(sData,temp2);
+		}
+	}
+	arguments.data = sData;
 
-	<!--- Throw exception if any pkfields are missing from incoming data --->
-	<cfloop index="i" from="1" to="#ArrayLen(pkfields)#" step="1">
-		<cfif NOT StructKeyExists(in,pkfields[i].ColumnName)>
-			<cfset throwDMError("All Primary Key fields (#pklist#) must be used when deleting a record. (Passed = #StructKeyList(in)#, Table=#arguments.tablename#)","RequiresAllPkFields")>
-		</cfif>
-	</cfloop>
+	// Get the record containing the given data
+	qRecord = getRecord(arguments.tablename,sData);
 
-	<!--- Only get records by primary key --->
-	<cfloop collection="#in#" item="temp2">
-		<cfif NOT ListFindNoCase(pklist,temp2)>
-			<cfset StructDelete(in,temp2)>
-		</cfif>
-	</cfloop>
-	<cfset arguments.data = in>
+	if ( qRecord.RecordCount EQ 1 ) {
+		// Look for onDelete errors
+		conflicttables = getDeletionConflicts(tablename=arguments.tablename,data=arguments.data,qRecord=qRecord);
+		if ( Len(conflicttables) ) {
+			throwDMError("You cannot delete a record in #arguments.tablename# when associated records exist in #conflicttables#.","NoDeletesWithRelated");
+		}
+		
+		sAnnounceArgs = {
+			tablename="#arguments.tablename#",
+			action="beforeDelete",
+			data="#arguments.data#",
+			Args="#Arguments#",
+			ChangeUUID="#ChangeUUID#",
+			method="deleteRecord"
+		};
+		if ( ArrayLen(pkfields) EQ 1 AND StructKeyExists(sData,pkfields[1].ColumnName) ) {
+			sAnnounceArgs["pkvalue"] = sData[pkfields[1].ColumnName];
+		}
+		announceEvent(ArgumentCollection=sAnnounceArgs);
 
-	<!--- Get the record containing the given data --->
-	<cfset qRecord = getRecord(arguments.tablename,in)>
+		// Look for onDelete cascade
+		sCascadeDeletions = getCascadeDeletions(tablename=arguments.tablename,data=arguments.data,qRecord=qRecord);
+		for ( temp2 in sCascadeDeletions ) {
+			deleteRecords(tablename=temp2,data=sCascadeDeletions[temp2]);
+		}
 
-	<cfif qRecord.RecordCount EQ 1>
-		<!--- Look for onDelete errors --->
-		<cfset conflicttables = getDeletionConflicts(tablename=arguments.tablename,data=arguments.data,qRecord=qRecord)>
-		<cfif Len(conflicttables)>
-			<cfset throwDMError("You cannot delete a record in #arguments.tablename# when associated records exist in #conflicttables#.","NoDeletesWithRelated")>
-		</cfif>
-		<cfinvoke
-			method="announceEvent"
-			tablename="#arguments.tablename#"
-			action="beforeDelete"
-			data="#arguments.data#"
-			Args="#Arguments#"
-			ChangeUUID="#ChangeUUID#"
-		>
-				<cfinvokeargument name="method" value="deleteRecord">
-			<cfif ArrayLen(pkfields) EQ 1 AND StructKeyExists(in,pkfields[1].ColumnName)>
-				<cfinvokeargument name="pkvalue" value="#in[pkfields[1].ColumnName]#">
-			</cfif>
-		</cfinvoke>
+		// Perform the delete
+		if ( isLogicalDelete ) {
+			// Look for DeletionMark field
+			for ( i=1; i LTE ArrayLen(fields); i++ ) {
+				if ( StructKeyExists(fields[i],"Special") AND fields[i].Special EQ "DeletionMark" ) {
+					if ( fields[i].CF_DataType EQ "CF_SQL_BIT" ) {
+						sData[fields[i].ColumnName] = 1;
+					} else if ( fields[i].CF_DataType EQ "CF_SQL_DATE" OR fields[i].CF_DataType EQ "CF_SQL_DATETIME" ) {
+						sData[fields[i].ColumnName] = now();
+					}
+				}
+			}
+			updateRecord(arguments.tablename,sData);
+		} else {
+			// Delete Record
+			sqlarray = ArrayNew(1);
+			ArrayAppend(sqlarray,"DELETE FROM	#escape(Variables.prefix & arguments.tablename)# WHERE	1 = 1");
+			ArrayAppend(sqlarray,getWhereSQL(argumentCollection=arguments));
 
-		<!--- Look for onDelete cascade --->
-		<cfset sCascadeDeletions = getCascadeDeletions(tablename=arguments.tablename,data=arguments.data,qRecord=qRecord)>
-		<cfloop item="temp2" collection="#sCascadeDeletions#">
-			<cfset deleteRecords(tablename=temp2,data=sCascadeDeletions[temp2])>
-		</cfloop>
+			runSQLArray(sqlarray);
 
-		<!--- Perform the delete --->
-		<cfif isLogicalDelete>
-			<!--- Look for DeletionMark field --->
-			<cfloop index="i" from="1" to="#ArrayLen(fields)#" step="1">
-				<cfif StructKeyExists(fields[i],"Special") AND fields[i].Special EQ "DeletionMark">
-					<cfif fields[i].CF_DataType EQ "CF_SQL_BIT">
-						<cfset in[fields[i].ColumnName] = 1>
-					<cfelseif fields[i].CF_DataType EQ "CF_SQL_DATE" OR fields[i].CF_DataType EQ "CF_SQL_DATETIME">
-						<cfset in[fields[i].ColumnName] = now()>
-					</cfif>
-				</cfif>
-			</cfloop>
-			<cfset updateRecord(arguments.tablename,in)>
-		<cfelse>
-			<!--- Delete Record --->
-			<cfset sqlarray = ArrayNew(1)>
-			<cfset ArrayAppend(sqlarray,"DELETE FROM	#escape(Variables.prefix & arguments.tablename)# WHERE	1 = 1")>
-			<cfset ArrayAppend(sqlarray,getWhereSQL(argumentCollection=arguments))>
+			//Log delete
+			if ( Variables.doLogging AND NOT arguments.tablename EQ variables.logtable ) {
+				sLog = {
+					"action":"delete",
+					"data":sData,
+					"sql":sqlarray
+				};
+				if ( ArrayLen(pkfields) EQ 1 AND StructKeyExists(sData,pkfields[1].ColumnName) ) {
+					sLog["pkval"] = "#sData[pkfields[1].ColumnName]#";
+				}
+				logAction(ArgumentCollection=sLog);
+			}
+		}
 
-			<cfset runSQLArray(sqlarray)>
+		sEvent = {
+			tablename="#arguments.tablename#",
+			action="afterDelete",
+			data="#arguments.data#",
+			Args="#Arguments#",
+			ChangeUUID="#ChangeUUID#",
+			method="deleteRecord"
+		};
+		if ( ArrayLen(pkfields) EQ 1 AND StructKeyExists(sData,pkfields[1].ColumnName) ) {
+			sEvent["pkvalue"] = sData[pkfields[1].ColumnName];
+		}
+		if ( isArray(sqlarray) AND ArrayLen(sqlarray) ) {
+			sEvent["sql"] = sqlarray;
+		}
+		announceEvent(ArgumentCollection=sEvent);
 
-			<!--- Log delete --->
-			<cfif variables.doLogging AND NOT arguments.tablename EQ variables.logtable>
-				<cfinvoke method="logAction">
-					<cfinvokeargument name="tablename" value="#arguments.tablename#">
-					<cfif ArrayLen(pkfields) EQ 1 AND StructKeyExists(in,pkfields[1].ColumnName)>
-						<cfinvokeargument name="pkval" value="#in[pkfields[1].ColumnName]#">
-					</cfif>
-					<cfinvokeargument name="action" value="delete">
-					<cfinvokeargument name="data" value="#in#">
-					<cfinvokeargument name="sql" value="#sqlarray#">
-				</cfinvoke>
-			</cfif>
+		setCacheDate();
+	}
+}
 
-		</cfif>
+/**
+* I delete the records with the given data.
+* @tablename The name of the table from which to delete a record.
+* @data A structure indicating the record to delete. A key indicates a field. The structure should have a key for each primary key in the table.
+*/
+public void function deleteRecords(
+	required string tablename,
+	required struct data={}
+) {
+	var qRecords = getRecords(tablename=arguments.tablename,data=arguments.data,fieldlist=getPrimaryKeyFieldNames(arguments.tablename));
+	var out = 0;
 
-		<cfinvoke
-			method="announceEvent"
-			tablename="#arguments.tablename#"
-			action="afterDelete"
-			data="#arguments.data#"
-			Args="#Arguments#"
-			ChangeUUID="#ChangeUUID#"
-		>
-				<cfinvokeargument name="method" value="deleteRecord">
-			<cfif ArrayLen(pkfields) EQ 1 AND StructKeyExists(in,pkfields[1].ColumnName)>
-				<cfinvokeargument name="pkvalue" value="#in[pkfields[1].ColumnName]#">
-			</cfif>
-			<cfif isArray(sqlarray) AND ArrayLen(sqlarray)>
-				<cfinvokeargument name="sql" value="#sqlarray#">
-			</cfif>
-		</cfinvoke>
+	for ( out in qRecords ) {
+		deleteRecord(arguments.tablename,out);
+	}
 
-		<cfset setCacheDate()>
-	</cfif>
+}
 
-</cffunction>
+public string function getBooleanSqlValue(required string value) {
+	var result = "NULL";
 
-<cffunction name="deleteRecords" access="public" returntype="void" output="no" hint="I delete the records with the given data.">
-	<cfargument name="tablename" type="string" required="yes" hint="The name of the table from which to delete a record.">
-	<cfargument name="data" type="struct" default="#StructNew()#" hint="A structure indicating the record to delete. A key indicates a field. The structure should have a key for each primary key in the table.">
+	if ( isBoolean(arguments.value) ) {
+		if ( arguments.value ) {
+			result = "1";
+		} else {
+			result = "0";
+		}
+	}
 
-	<cfset var qRecords = getRecords(tablename=arguments.tablename,data=arguments.data,fieldlist=getPrimaryKeyFieldNames(arguments.tablename))>
-	<cfset var out = StructNew()>
+	return result;
+}
 
-	<cfoutput query="qRecords">
-		<cfset out = QueryRowToStruct(qRecords,CurrentRow)>
-		<cfset deleteRecord(arguments.tablename,out)>
-	</cfoutput>
+/**
+* @tablename The name of the table from which to delete a record.
+* @data A structure indicating the record to delete. A key indicates a field. The structure should have a key for each primary key in the table.
+*/
+public struct function getCascadeDeletions(
+	required string tablename,
+	required struct data
+) {
+	var rfields = getRelationFields(arguments.tablename);// relation fields in table
+	var ii = 0;
+	var sResult = {};
 
-</cffunction>
+	if ( NOT StructKeyExists(arguments,"qRecord") ) {
+		arguments.qRecord = getRecord(tablename=arguments.tablename,data=arguments.data);
+	}
 
-<cffunction name="getBooleanSqlValue" access="public" returntype="string" output="no">
-	<cfargument name="value" type="string" required="yes">
-
-	<cfset var result = "NULL">
-
-	<cfif isBoolean(arguments.value)>
-		<cfif arguments.value>
-			<cfset result = "1">
-		<cfelse>
-			<cfset result = "0">
-		</cfif>
-	</cfif>
-
-	<cfreturn result>
-</cffunction>
-
-<cffunction name="getCascadeDeletions" access="public" returntype="struct" output="no">
-	<cfargument name="tablename" type="string" required="yes" hint="The name of the table from which to delete a record.">
-	<cfargument name="data" type="struct" required="yes" hint="A structure indicating the record to delete. A key indicates a field. The structure should have a key for each primary key in the table.">
-
-	<cfset var rfields = getRelationFields(arguments.tablename)><!--- relation fields in table --->
-	<cfset var ii = 0>
-	<cfset var sResult = StructNew()>
-
-	<cfif NOT StructKeyExists(arguments,"qRecord")>
-		<cfset arguments.qRecord = getRecord(tablename=arguments.tablename,data=arguments.data)>
-	</cfif>
-
-	<cfloop index="ii" from="1" to="#ArrayLen(rfields)#" step="1">
-		<cfif
+	for ( ii=1; ii LTE ArrayLen(rfields); ii++ ) {
+		if (
 				(
 						ListFindNoCase(variables.aggregates,rfields[ii].Relation["type"])
 					OR	rfields[ii].Relation["type"] EQ "list"
@@ -624,186 +675,203 @@
 						StructKeyExists(rfields[ii].Relation,"table")
 					AND	NOT StructKeyExists(sResult,rfields[ii].Relation["table"])
 				)
-		>
-			<cfif StructKeyExists(rfields[ii].Relation,"join-table")>
-				<cfset sResult[rfields[ii].Relation["join-table"]] = StructNew()>
-				<cfset sResult[rfields[ii].Relation["join-table"]][rfields[ii].Relation["join-table-field-local"]] = arguments.qRecord[rfields[ii].Relation["local-table-join-field"]][1]>
-			<cfelse>
-				<cfset sResult[rfields[ii].Relation["table"]] = StructNew()>
-				<cfset sResult[rfields[ii].Relation["table"]][rfields[ii].Relation["join-field-remote"]] = arguments.qRecord[rfields[ii].Relation["join-field-local"]][1]>
-			</cfif>
-		</cfif>
-	</cfloop>
+		) {
+			if ( StructKeyExists(rfields[ii].Relation,"join-table") ) {
+				sResult[rfields[ii].Relation["join-table"]] = {};
+				sResult[rfields[ii].Relation["join-table"]][rfields[ii].Relation["join-table-field-local"]] = arguments.qRecord[rfields[ii].Relation["local-table-join-field"]][1];
+			} else {
+				sResult[rfields[ii].Relation["table"]] = {};
+				sResult[rfields[ii].Relation["table"]][rfields[ii].Relation["join-field-remote"]] = arguments.qRecord[rfields[ii].Relation["join-field-local"]][1];
+			}
+		}
+	}
 
-	<cfreturn sResult>
-</cffunction>
+	return sResult;
+}
 
-<cffunction name="getCheckFields" access="public" returntype="string" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-
-	<cfif
+public string function getCheckFields(required string tablename) {
+	
+	if (
 		StructKeyExists(variables.tableprops,arguments.tablename)
 		AND
 		StructKeyExists(variables.tableprops[arguments.tablename],"checkfields")
-	>
-		<cfreturn variables.tableprops[arguments.tablename]["checkfields"]>
-	<cfelse>
-		<cfreturn "">
-	</cfif>
-</cffunction>
+	) {
+		return variables.tableprops[arguments.tablename]["checkfields"];
+	} else {
+		return "";
+	}
+}
 
-<cffunction name="getConstraintConflicts" access="public" returntype="any" output="no">
-	<cfargument name="tablename" type="string" required="true">
-	<cfargument name="ftable" type="string" required="false">
-	<cfargument name="field" type="string" required="false">
+public function getConstraintConflicts(
+	required string tablename,
+	string ftable,
+	string field
+) {
+	var result = 0;
 
-	<cfset var result = 0>
+	if ( StructKeyExists(Arguments,"ftable") ) {
+		result = getConstraintConflicts_Field(ArgumentCollection=Arguments);
+	} else {
+		result = getConstraintConflicts_Table(ArgumentCollection=Arguments);
+	}
 
-	<cfif StructKeyExists(Arguments,"ftable")>
-		<cfset result = getConstraintConflicts_Field(ArgumentCollection=Arguments)>
-	<cfelse>
-		<cfset result = getConstraintConflicts_Table(ArgumentCollection=Arguments)>
-	</cfif>
+	return result;
+}
 
-	<cfreturn result>
-</cffunction>
+/**
+* I return the database platform being used.
+*/
+public string function getDataBase() {
+	var connection = 0;
+	var db = "";
+	var type = "";
+	//var qDatabases = getSupportedDatabases();
 
-<cffunction name="getDataBase" access="public" returntype="string" output="no" hint="I return the database platform being used.">
+	if ( Len(variables.datasource) ) {
+		try {
+			connection = getConnection();
+		} catch ( any e) {
+			if ( StructKeyExists(variables,"defaultdatabase") ) {
+				type = variables.defaultdatabase;
+			} else {
+				try {
+					connection.close();
+				} catch ( any e2) {
 
-	<cfset var connection = 0>
-	<cfset var db = "">
-	<cfset var type = "">
-	<!---<cfset var qDatabases = getSupportedDatabases()>--->
+				}
+				if ( e.Message CONTAINS "Permission denied" ) {
+					throwDMError("DataMgr was unable to determine database type.","DatabaseTypeRequired","DataMgr was unable to determine database type. Please pass the database argument (second argument of init method) to DataMgr.");
+				} else {
+					rethrow;
+				}
+			}
+		}
+		db = connection.getMetaData().getDatabaseProductName();
+		connection.close();
 
-	<cfif Len(variables.datasource)>
-		<cftry>
-			<cfset connection = getConnection()>
-		<cfcatch>
-			<cfif StructKeyExists(variables,"defaultdatabase")>
-				<cfset type = variables.defaultdatabase>
-			<cfelse>
-				<cftry>
-					<cfset connection.close()>
-				<cfcatch>
-				</cfcatch>
-				</cftry>
-				<cfif cfcatch.Message CONTAINS "Permission denied">
-					<cfset throwDMError("DataMgr was unable to determine database type.","DatabaseTypeRequired","DataMgr was unable to determine database type. Please pass the database argument (second argument of init method) to DataMgr.")>
-				<cfelse>
-					<cfrethrow>
-				</cfif>
-			</cfif>
-		</cfcatch>
-		</cftry>
-		<cfset db = connection.getMetaData().getDatabaseProductName()>
-		<cfset connection.close()>
+		switch (db) {
+			case "Microsoft SQL Server":
+					type = "MSSQL";
+				break;
+			case "MySQL":
+					type = "MYSQL";
+				break;
+			case "PostgreSQL":
+					type = "PostGreSQL";
+				break;
+			case "Oracle":
+					type = "Oracle";
+				break;
+			case "MS Jet":
+					type = "Access";
+				break;
+			case "Apache Derby":
+					type = "Derby";
+				break;
+			default:
+					if ( ListFirst(db,"/") EQ "DB2" ) {
+						type = "DB2";
+					} else {
+						type = "unknown";
+						type = db;
+					}
+		}
+	} else {
+		type = "Sim";
+	}
 
-		<cfswitch expression="#db#">
-		<cfcase value="Microsoft SQL Server">
-			<cfset type = "MSSQL">
-		</cfcase>
-		<cfcase value="MySQL">
-			<cfset type = "MYSQL">
-		</cfcase>
-		<cfcase value="PostgreSQL">
-			<cfset type = "PostGreSQL">
-		</cfcase>
-		<cfcase value="Oracle">
-			<cfset type = "Oracle">
-		</cfcase>
-		<cfcase value="MS Jet">
-			<cfset type = "Access">
-		</cfcase>
-		<cfcase value="Apache Derby">
-			<cfset type = "Derby">
-		</cfcase>
-		<cfdefaultcase>
-			<cfif ListFirst(db,"/") EQ "DB2">
-				<cfset type = "DB2">
-			<cfelse>
-				<cfset type = "unknown">
-				<cfset type = db>
-			</cfif>
-		</cfdefaultcase>
-		</cfswitch>
-	<cfelse>
-		<cfset type = "Sim">
-	</cfif>
+	return type;
+}
 
-	<cfreturn type>
-</cffunction>
+/**
+* I return some properties about this database.
+*/
+public struct function getDatabaseProperties() {
+	var sProps = {};
 
-<cffunction name="getDatabaseProperties" access="public" returntype="struct" output="no" hint="I return some properties about this database">
+	return sProps;
+}
 
-	<cfset var sProps = StructNew()>
+/**
+ * I return the string that can be found in the driver or JDBC URL for the database platform being used.
+ */
+public string function getDatabaseShortString() {
+	return "unknown"; // This method will get overridden in database-specific DataMgr components
+}
 
-	<cfreturn sProps>
-</cffunction>
+/**
+ * I return the string that can be found in the driver or JDBC URL for the database platform being used.
+ */
+public string function getDatabaseDriver() {
+	return "";
+}
 
-<cffunction name="getDatabaseShortString" access="public" returntype="string" output="no" hint="I return the string that can be found in the driver or JDBC URL for the database platform being used.">
-	<cfreturn "unknown"><!--- This method will get overridden in database-specific DataMgr components --->
-</cffunction>
+/**
+ * I return the datasource used by this Data Manager.
+ * @return {string} The datasource.
+ */
+public string function getDatasource() {
+	return variables.datasource;
+}
 
-<cffunction name="getDatabaseDriver" access="public" returntype="string" output="no" hint="I return the string that can be found in the driver or JDBC URL for the database platform being used.">
-	<cfreturn "">
-</cffunction>
+/**
+ * I return a list of fields in the database for the given table.
+ * @param {string} tablename The name of the table.
+ * @return {string} The list of fields.
+ */
+public string function getDBFieldList(required string tablename) {
+	var qFields = runSQL("SELECT #getMaxRowsPrefix(1)# * FROM #escape(arguments.tablename)# #getMaxRowsSuffix(1)#");
+	
+	return qFields.ColumnList;
+}
 
-<cffunction name="getDatasource" access="public" returntype="string" output="no" hint="I return the datasource used by this Data Manager.">
-	<cfreturn variables.datasource>
-</cffunction>
+public struct function getDefaultValues(required string tablename) {
+	var sFields = 0;
+	var aFields = 0;
+	var ii = 0;
 
-<cffunction name="getDBFieldList" access="public" returntype="string" output="no" hint="I return a list of fields in the database for the given table.">
-	<cfargument name="tablename" type="string" required="yes">
+	// If fields data if stored
+	if ( StructKeyExists(variables.tableprops,arguments.tablename) AND StructKeyExists(variables.tableprops[arguments.tablename],"fielddefaults") ) {
+		sFields = variables.tableprops[arguments.tablename]["fielddefaults"];
+	} else {
+		aFields = getFields(arguments.tablename);
+		sFields = {};
+		// Get fields with length and set key appropriately
+		for ( ii=1; ii LTE ArrayLen(aFields); ii++ ) {
+			if ( StructKeyExists(aFields[ii],"Default") AND Len(aFields[ii].Default) ) {
+				sFields[aFields[ii].ColumnName] = aFields[ii].Default;
+			} else {
+				sFields[aFields[ii].ColumnName] = "";
+			}
+		}
+		variables.tableprops[arguments.tablename]["fielddefaults"] = sFields;
+	}
 
-	<cfset var qFields = runSQL("SELECT	#getMaxRowsPrefix(1)# * FROM #escape(arguments.tablename)# #getMaxRowsSuffix(1)#")>
+	return sFields;
+}
 
-	<cfreturn qFields.ColumnList>
-</cffunction>
+/**
+* I get any deletion conflicts for the given table and data.
+* @tablename The name of the table from which to delete a record.
+* @data A structure indicating the record to delete. A key indicates a field. The structure should have a key for each primary key in the table.
+*/
+public string function getDeletionConflicts(
+	required string tablename,
+	required struct data
+) {
+	var rfields = getRelationFields(arguments.tablename);// relation fields in table
+	var ii = 0;
+	var subdatum = 0;
+	var sArgs = 0;
+	var qRelationList = 0;
+	var result = "";
 
-<cffunction name="getDefaultValues" access="public" returntype="struct" output="false" hint="">
-	<cfargument name="tablename" type="string" required="yes">
+	if ( NOT StructKeyExists(arguments,"qRecord") ) {
+		arguments.qRecord = getRecord(tablename=arguments.tablename,data=arguments.data);
+	}
 
-	<cfset var sFields = 0>
-	<cfset var aFields = 0>
-	<cfset var ii = 0>
-
-	<!--- If fields data if stored --->
-	<cfif StructKeyExists(variables.tableprops,arguments.tablename) AND StructKeyExists(variables.tableprops[arguments.tablename],"fielddefaults")>
-		<cfset sFields = variables.tableprops[arguments.tablename]["fielddefaults"]>
-	<cfelse>
-		<cfset aFields = getFields(arguments.tablename)>
-		<cfset sFields = StructNew()>
-		<!--- Get fields with length and set key appropriately --->
-		<cfloop index="ii" from="1" to="#ArrayLen(aFields)#" step="1">
-			<cfif StructKeyExists(aFields[ii],"Default") AND Len(aFields[ii].Default)>
-				<cfset sFields[aFields[ii].ColumnName] = aFields[ii].Default>
-			<cfelse>
-				<cfset sFields[aFields[ii].ColumnName] = "">
-			</cfif>
-		</cfloop>
-		<cfset variables.tableprops[arguments.tablename]["fielddefaults"] = sFields>
-	</cfif>
-
-	<cfreturn sFields>
-</cffunction>
-
-<cffunction name="getDeletionConflicts" access="public" returntype="string" output="no">
-	<cfargument name="tablename" type="string" required="yes" hint="The name of the table from which to delete a record.">
-	<cfargument name="data" type="struct" required="yes" hint="A structure indicating the record to delete. A key indicates a field. The structure should have a key for each primary key in the table.">
-
-	<cfset var rfields = getRelationFields(arguments.tablename)><!--- relation fields in table --->
-	<cfset var ii = 0>
-	<cfset var subdatum = 0>
-	<cfset var sArgs = 0>
-	<cfset var qRelationList = 0>
-	<cfset var result = "">
-
-	<cfif NOT StructKeyExists(arguments,"qRecord")>
-		<cfset arguments.qRecord = getRecord(tablename=arguments.tablename,data=arguments.data)>
-	</cfif>
-
-	<cfloop index="ii" from="1" to="#ArrayLen(rfields)#" step="1">
-		<cfif
+	for ( ii=1; ii LTE ArrayLen(rfields); ii++ ) {
+		if (
 				(
 						StructKeyExists(rfields[ii].Relation,"onDelete")
 					AND	rfields[ii].Relation["onDelete"] EQ "Error"
@@ -816,62 +884,64 @@
 						rfields[ii].Relation["type"] EQ "list"
 					OR	ListFindNoCase(variables.aggregates,rfields[ii].Relation["type"])
 				)
-		>
-			<cfset sArgs = StructNew()>
-			<cfset subdatum = StructNew()>
-			<cfset subdatum.data = StructNew()>
-			<cfset subdatum.advsql = StructNew()>
+		) {
+			sArgs = {};
+			subdatum = {};
+			subdatum.data = {};
+			subdatum.advsql = {};
 
-			<cfif StructKeyExists(rfields[ii].Relation,"join-table")>
-				<cfset subdatum.subadvsql = StructNew()>
-				<cfset subdatum.subadvsql.WHERE = "#escape( rfields[ii].Relation['join-table'] & '.' & rfields[ii].Relation['join-table-field-remote'] )# = #escape( rfields[ii].Relation['table'] & '.' & rfields[ii].Relation['remote-table-join-field'] )#">
-				<cfset subdatum.data[rfields[ii].Relation["local-table-join-field"]] = arguments.qRecord[rfields[ii].Relation["join-table-field-local"]][1]>
-				<cfset subdatum.advsql.WHERE = ArrayNew(1)>
-				<cfset ArrayAppend(subdatum.advsql.WHERE,"EXISTS (")>
-				<cfset ArrayAppend(subdatum.advsql.WHERE,getRecordsSQL(tablename=rfields[ii].Relation["join-table"],data=subdatum.data,advsql=subdatum.subadvsql,isInExists=true))>
-				<cfset ArrayAppend(subdatum.advsql.WHERE,")")>
-			<cfelse>
-				<cfset subdatum.data[rfields[ii].Relation["join-field-remote"]] = arguments.qRecord[rfields[ii].Relation["join-field-local"]][1]>
-			</cfif>
+			if ( StructKeyExists(rfields[ii].Relation,"join-table") ) {
+				subdatum.subadvsql = {};
+				subdatum.subadvsql.WHERE = "#escape( rfields[ii].Relation['join-table'] & '.' & rfields[ii].Relation['join-table-field-remote'] )# = #escape( rfields[ii].Relation['table'] & '.' & rfields[ii].Relation['remote-table-join-field'] )#";
+				subdatum.data[rfields[ii].Relation["local-table-join-field"]] = arguments.qRecord[rfields[ii].Relation["join-table-field-local"]][1];
+				subdatum.advsql.WHERE = [];
+				ArrayAppend(subdatum.advsql.WHERE,"EXISTS (");
+				ArrayAppend(subdatum.advsql.WHERE,getRecordsSQL(tablename=rfields[ii].Relation["join-table"],data=subdatum.data,advsql=subdatum.subadvsql,isInExists=true));
+				ArrayAppend(subdatum.advsql.WHERE,")");
+			} else {
+				subdatum.data[rfields[ii].Relation["join-field-remote"]] = arguments.qRecord[rfields[ii].Relation["join-field-local"]][1];
+			}
 
-			<cfset sArgs["tablename"] = rfields[ii].Relation["table"]>
-			<cfset sArgs["data"] = subdatum.data>
-			<cfset sArgs["fieldlist"] = rfields[ii].Relation["field"]>
-			<cfset sArgs["advsql"] = subdatum.advsql>
-			<cfif StructKeyExists(rfields[ii].Relation,"filters") AND isArray(rfields[ii].Relation.filters)>
-				<cfset sArgs["filters"] = rfields[ii].Relation.filters>
-			</cfif>
+			sArgs["tablename"] = rfields[ii].Relation["table"];
+			sArgs["data"] = subdatum.data;
+			sArgs["fieldlist"] = rfields[ii].Relation["field"];
+			sArgs["advsql"] = subdatum.advsql;
+			if ( StructKeyExists(rfields[ii].Relation,"filters") AND isArray(rfields[ii].Relation.filters) ) {
+				sArgs["filters"] = rfields[ii].Relation.filters;
+			}
 
-			<cfset qRelationList = getRecords(argumentCollection=sArgs)>
+			qRelationList = getRecords(argumentCollection=sArgs);
 
-			<cfif qRelationList.RecordCount>
-				<cfset result = ListAppend(result,rfields[ii].Relation.table)>
-			</cfif>
-		</cfif>
-	</cfloop>
+			if ( qRelationList.RecordCount ) {
+				result = ListAppend(result,rfields[ii].Relation.table);
+			}
+		}
+	}
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="getIsDeletableSQL" access="public" returntype="array" output="no">
-	<cfargument name="tablename" type="string" required="yes" hint="The name of the table from which to delete a record.">
+/**
+* I return SQL that indicates if the given record in the given table is deletable.
+* @tablename The name of the table from which to delete a record.
+*/
+public array function getIsDeletableSQL(required string tablename) {
+	var rfields = getRelationFields(arguments.tablename);// relation fields in table
+	var ii = 0;
+	var sArgs = 0;
+	var aSQL = [];
+	var tables = "";
+	var hasNestedSQL = false;
 
-	<cfset var rfields = getRelationFields(arguments.tablename)><!--- relation fields in table --->
-	<cfset var ii = 0>
-	<cfset var sArgs = 0>
-	<cfset var aSQL = ArrayNew(1)>
-	<cfset var tables = "">
-	<cfset var hasNestedSQL = false>
+	if ( NOT StructKeyExists(arguments,"tablealias") ) {
+		arguments.tablealias = arguments.tablename;
+	}
 
-	<cfif NOT StructKeyExists(arguments,"tablealias")>
-		<cfset arguments.tablealias = arguments.tablename>
-	</cfif>
+	if ( StructKeyExists(arguments,"ignore") ) {
+		tables = arguments.ignore;
+	}
 
-	<cfif StructKeyExists(arguments,"ignore")>
-		<cfset tables = arguments.ignore>
-	</cfif>
-
-	<cfset ArrayAppend(
+	ArrayAppend(
 		aSQL,
 		"
 		(
@@ -879,9 +949,9 @@
 			WHEN (
 					1 = 1
 		"
-	)>
-	<cfloop index="ii" from="1" to="#ArrayLen(rfields)#" step="1">
-		<cfif
+	);
+	for ( ii=1; ii LTE ArrayLen(rfields); ii++ ) {
+		if (
 				(
 						StructKeyExists(rfields[ii].Relation,"table")
 					AND	NOT ListFindNoCase(tables,rfields[ii].Relation["table"])
@@ -897,16 +967,15 @@
 							OR	rfields[ii].Relation["onDelete"] EQ "Cascade"
 						)
 				)
-		>
-			<cfset tables = ListAppend(tables,rfields[ii].Relation["table"])>
-			<cfset sArgs = StructNew()>
-			<cfset sArgs["tablename"] = rfields[ii].Relation["table"]>
-			<cfset sArgs["tablealias"] = sArgs["tablename"]>
-			<cfif sArgs["tablealias"] EQ arguments.tablealias>
-				<cfset sArgs["tablealias"] = sArgs["tablealias"] & "_DataMgr_inner">
-			</cfif>
-			<cfif rfields[ii].Relation["onDelete"] EQ "Error"><!---  OR (  StructKeyExists(variables.tableprops[sArgs["tablename"]],"deletable") ) --->
-				<cfscript>
+		) {
+			tables = ListAppend(tables,rfields[ii].Relation["table"]);
+			sArgs = StructNew();
+			sArgs["tablename"] = rfields[ii].Relation["table"];
+			sArgs["tablealias"] = sArgs["tablename"];
+			if ( sArgs["tablealias"] EQ arguments.tablealias ) {
+				sArgs["tablealias"] = sArgs["tablealias"] & "_DataMgr_inner";
+			}
+			if ( rfields[ii].Relation["onDelete"] EQ "Error" ) {//  OR (  StructKeyExists(variables.tableprops[sArgs["tablename"]],"deletable") )
 				sArgs["isInExists"] = true;
 				sArgs["fieldlist"] = rfields[ii].Relation["field"];
 				sArgs["ignore"] = arguments.tablename;
@@ -936,9 +1005,7 @@
 				ArrayAppend(aSQL,"AND	NOT EXISTS (");
 					ArrayAppend(aSQL,getRecordsSQL(argumentCollection=sArgs));
 				ArrayAppend(aSQL,")");
-				</cfscript>
-			<cfelseif rfields[ii].Relation["onDelete"] NEQ "Ignore">
-				<cfscript>
+			} else if ( rfields[ii].Relation["onDelete"] NEQ "Ignore" ) {
 				sArgs["ignore"] = arguments.tablename;
 				ArrayAppend(aSQL,"	AND	(");
 				ArrayAppend(aSQL,"			NOT EXISTS (");
@@ -974,12 +1041,11 @@
 					ArrayAppend(aSQL,"						)");
 				ArrayAppend(aSQL,"			)");
 				ArrayAppend(aSQL,"		)");
-				</cfscript>
-			</cfif>
-			<cfset hasNestedSQL = true>
-		</cfif>
-	</cfloop>
-	<cfset ArrayAppend(
+			}
+			hasNestedSQL = true;
+		}
+	}
+	ArrayAppend(
 		aSQL,
 		"
 			)
@@ -988,464 +1054,554 @@
 			END
 		)
 		"
-	)>
+	);
 
-	<cfif NOT hasNestedSQL>
-		<cfset aSQL = ArrayNew(1)>
-		<cfset ArrayAppend(aSQL,getBooleanSqlValue(true))>
-	</cfif>
+	if ( NOT hasNestedSQL ) {
+		aSQL = [];
+		ArrayAppend(aSQL,getBooleanSqlValue(true));
+	}
 
-	<cfreturn aSQL>
-</cffunction>
+	return aSQL;
+}
 
-<cffunction name="getFieldList" access="public" returntype="string" output="no" hint="I get a list of fields in DataMgr for the given table.">
-	<cfargument name="tablename" type="string" required="yes">
+/*
+*I get a list of fields in DataMgr for the given table.
+*/
+public string function getFieldList(required string tablename) {
+	var ii = 0;
+	var fieldlist = "";
+	var bTable = checkTable(arguments.tablename);
 
-	<cfset var i = 0>
-	<cfset var fieldlist = "">
-	<cfset var bTable = checkTable(arguments.tablename)>
+	if ( StructKeyExists(variables.tableprops,arguments.tablename) AND StructKeyExists(variables.tableprops[arguments.tablename],"fieldlist") ) {
+		fieldlist = variables.tableprops[arguments.tablename]["fieldlist"];
+	} else {
+		// Loop over the fields in the table and make a list of them
+		if ( StructKeyExists(variables.tables,arguments.tablename) ) {
+			for ( ii=1; ii LTE ArrayLen(variables.tables[arguments.tablename]); ii++ ) {
+				fieldlist = ListAppend(fieldlist, variables.tables[arguments.tablename][ii].ColumnName);
+			}
+		}
+		variables.tableprops[arguments.tablename]["fieldlist"] = fieldlist;
+	}
 
-	<cfif StructKeyExists(variables.tableprops,arguments.tablename) AND StructKeyExists(variables.tableprops[arguments.tablename],"fieldlist")>
-		<cfset fieldlist = variables.tableprops[arguments.tablename]["fieldlist"]>
-	<cfelse>
-		<!--- Loop over the fields in the table and make a list of them --->
-		<cfif StructKeyExists(variables.tables,arguments.tablename)>
-			<cfloop index="i" from="1" to="#ArrayLen(variables.tables[arguments.tablename])#" step="1">
-				<cfset fieldlist = ListAppend(fieldlist, variables.tables[arguments.tablename][i].ColumnName)>
-			</cfloop>
-		</cfif>
-		<cfset variables.tableprops[arguments.tablename]["fieldlist"] = fieldlist>
-	</cfif>
+	return fieldlist;
+}
 
-	<cfreturn fieldlist>
-</cffunction>
+/**
+* I return a structure of the field lengths for fields where this is relevant.
+*/
+public struct function getFieldLengths(required string tablename) {
+	var sFields = 0;
+	var aFields = 0;
+	var ii = 0;
 
-<cffunction name="getFieldLengths" access="public" returntype="struct" output="no" hint="I return a structure of the field lengths for fields where this is relevant.">
-	<cfargument name="tablename" type="string" required="yes">
-
-	<cfset var sFields = 0>
-	<cfset var aFields = 0>
-	<cfset var ii = 0>
-
-	<!--- If fields data if stored --->
-	<cfif StructKeyExists(variables.tableprops,arguments.tablename) AND StructKeyExists(variables.tableprops[arguments.tablename],"fieldlengths")>
-		<cfset sFields = variables.tableprops[arguments.tablename]["fieldlengths"]>
-	<cfelse>
-		<cfset aFields = getFields(arguments.tablename)>
-		<cfset sFields = StructNew()>
-		<!--- Get fields with length and set key appropriately --->
-		<cfloop index="ii" from="1" to="#ArrayLen(aFields)#" step="1">
-			<cfif
+	// If fields data if stored
+	if ( StructKeyExists(variables.tableprops,arguments.tablename) AND StructKeyExists(variables.tableprops[arguments.tablename],"fieldlengths") ) {
+		sFields = variables.tableprops[arguments.tablename]["fieldlengths"];
+	} else {
+		aFields = getFields(arguments.tablename);
+		sFields = {};
+		// Get fields with length and set key appropriately
+		for ( ii=1; ii LTE ArrayLen(aFields); ii++ ) {
+			if (
 					StructKeyExists(aFields[ii],"Length")
 				AND	isNumeric(aFields[ii].Length)
 				AND	aFields[ii].Length GT 0
 				AND	FindNoCase("char",aFields[ii].CF_DataType)
 				AND NOT FindNoCase("long",aFields[ii].CF_DataType)
-			>
-				<cfset sFields[aFields[ii].ColumnName] = aFields[ii].Length>
-			</cfif>
-		</cfloop>
-		<cfset variables.tableprops[arguments.tablename]["fieldlengths"] = sFields>
-	</cfif>
-
-	<cfreturn sFields>
-</cffunction>
-
-<cffunction name="getFields" access="public" returntype="array" output="no" hint="I return an array of all real fields in the given table in DataMgr.">
-	<cfargument name="tablename" type="string" required="yes">
-
-	<cfset var ii = 0><!--- counter --->
-	<cfset var arrFields = ArrayNew(1)><!--- array of fields --->
-	<cfset var bTable = checkTable(arguments.tablename)><!--- Check whether table is loaded --->
-
-	<!--- If fields data if stored --->
-	<cfif StructKeyExists(variables.tableprops,arguments.tablename) AND StructKeyExists(variables.tableprops[arguments.tablename],"fields")>
-		<cfset arrFields = variables.tableprops[arguments.tablename]["fields"]>
-	<cfelse>
-		<!--- Loop over the fields and make an array of them --->
-		<cfloop index="ii" from="1" to="#ArrayLen(variables.tables[arguments.tablename])#" step="1">
-			<cfif StructKeyExists(variables.tables[arguments.tablename][ii],"CF_DataType") AND NOT StructKeyExists(variables.tables[arguments.tablename][ii],"Relation")>
-				<cfset ArrayAppend(arrFields, variables.tables[arguments.tablename][ii])>
-			</cfif>
-		</cfloop>
-		<cfset variables.tableprops[arguments.tablename]["fields"] = arrFields>
-	</cfif>
-
-	<cfreturn arrFields>
-</cffunction>
-
-<cffunction name="getMaxRowsPrefix" access="public" returntype="string" output="no" hint="I get the SQL before the field list in the select statement to limit the number of rows.">
-	<cfargument name="maxrows" type="numeric" required="yes">
-	<cfargument name="offset" type="numeric" default="0">
-
-	<cfreturn "TOP #arguments.maxrows+arguments.offset# ">
-</cffunction>
-
-<cffunction name="getMaxRowsSuffix" access="public" returntype="string" output="no" hint="I get the SQL after the query to limit the number of rows.">
-	<cfargument name="maxrows" type="numeric" required="yes">
-	<cfargument name="offset" type="numeric" default="0">
-
-	<cfreturn "">
-</cffunction>
-
-<cffunction name="getMaxRowsWhere" access="public" returntype="string" output="no" hint="I get the SQL in the where statement to limit the number of rows.">
-	<cfargument name="maxrows" type="numeric" required="yes">
-	<cfargument name="offset" type="numeric" default="0">
-
-	<cfreturn "1 = 1">
-</cffunction>
-
-<cffunction name="getNewSortNum" access="public" returntype="numeric" output="no" hint="I get the value an increment higher than the highest value in the given field to put a record at the end of the sort order.">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="sortfield" type="string" required="yes" hint="The field holding the sort order.">
-
-	<cfset var qLast = 0>
-	<cfset var result = 0>
-
-	<cfset qLast = runSQL("SELECT Max(#escape(arguments.sortfield)#) AS #escape(arguments.sortfield)# FROM #escape(arguments.tablename)#")>
-
-	<cfif qLast.RecordCount and isNumeric(qLast[arguments.sortfield][1])>
-		<cfset result = qLast[arguments.sortfield][1] + 1>
-	<cfelse>
-		<cfset result = 1>
-	</cfif>
-
-	<cfreturn result>
-</cffunction>
-
-<cffunction name="getPKFields" access="public" returntype="array" output="no" hint="I return an array of primary key fields.">
-	<cfargument name="tablename" type="string" required="yes">
-
-	<cfset var bTable = checkTable(arguments.tablename)><!--- Check whether table is loaded --->
-	<cfset var ii = 0><!--- counter --->
-	<cfset var arrFields = ArrayNew(1)><!--- array of primarykey fields --->
-
-	<!--- If pkfields data if stored --->
-	<cfif StructKeyExists(variables.tableprops,arguments.tablename) AND StructKeyExists(variables.tableprops[arguments.tablename],"pkfields")>
-		<cfset arrFields = variables.tableprops[arguments.tablename]["pkfields"]>
-	<cfelse>
-		<cfloop index="ii" from="1" to="#ArrayLen(variables.tables[arguments.tablename])#" step="1">
-			<cfif StructKeyExists(variables.tables[arguments.tablename][ii],"PrimaryKey") AND variables.tables[arguments.tablename][ii].PrimaryKey>
-				<cfset ArrayAppend(arrFields, variables.tables[arguments.tablename][ii])>
-			</cfif>
-		</cfloop>
-		<cfset variables.tableprops[arguments.tablename]["pkfields"] = arrFields>
-	</cfif>
-
-	<cfreturn arrFields>
-</cffunction>
-
-<cffunction name="getPrimaryKeyField" access="public" returntype="struct" output="no" hint="I return primary key field for this table.">
-	<cfargument name="tablename" type="string" required="yes" hint="The table from which to return a primary key.">
-
-	<cfset var aPKFields = getPKFields(arguments.tablename)>
-
-	<cfif ArrayLen(aPKFields) NEQ 1>
-		<cfset throwDMError("The #arguments.tablename# does not have a simple primary key and so it cannot be used for this purpose.","NoSimplePrimaryKey")>
-	</cfif>
-
-	<cfreturn aPKFields[1]>
-</cffunction>
-
-<cffunction name="getPrimaryKeyFieldName" access="public" returntype="string" output="no" hint="I return primary key field for this table.">
-	<cfargument name="tablename" type="string" required="yes" hint="The table from which to return a primary key.">
-
-	<cfset var sField = getPrimaryKeyField(arguments.tablename)>
-
-	<cfreturn sField.ColumnName>
-</cffunction>
-
-<cffunction name="getPrimaryKeyFieldNames" access="public" returntype="string" output="no" hint="I return a list of primary key field for this table.">
-	<cfargument name="tablename" type="string" required="yes" hint="The table from which to return a primary key.">
-
-	<cfset var pkfields = getPKFields(arguments.tablename)><!--- the primary key fields for this table --->
-	<cfset var result = "">
-	<cfset var ii = 0>
-
-	<!--- Make list of primary key fields --->
-	<cfloop index="ii" from="1" to="#ArrayLen(pkfields)#" step="1">
-		<cfset result = ListAppend(result,pkfields[ii].ColumnName)>
-	</cfloop>
-
-	<cfreturn result>
-</cffunction>
-
-<cffunction name="getPKFromData" access="public" returntype="string" output="no" hint="I get the primary key of the record matching the given data.">
-	<cfargument name="tablename" type="string" required="yes" hint="The table from which to return a primary key.">
-	<cfargument name="fielddata" type="struct" required="yes" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-
-	<cfset var qPK = 0><!--- The query used to get the primary key --->
-	<cfset var fields = getUpdateableFields(arguments.tablename)><!--- The (non-primarykey) fields for this table --->
-	<cfset var pkfields = getPKFields(arguments.tablename)><!--- The primary key field(s) for this table --->
-	<cfset var result = 0><!--- The result of this method --->
-
-	<!--- This method is only to be used on fields with one pkfield --->
-	<cfif ArrayLen(pkfields) NEQ 1>
-		<cfset throwDMError("This method can only be used on tables with exactly one primary key field.","NeedOnePKField")>
-	</cfif>
-	<!--- This method can only be used on tables with updateable fields --->
-	<cfif NOT ArrayLen(fields)>
-		<cfset throwDMError("This method can only be used on tables with updateable fields.","NeedUpdateableField")>
-	</cfif>
-
-	<!--- Run query to get primary key value from data fields --->
-	<cfset qPK = getRecords(tablename=arguments.tablename,data=arguments.fielddata,fieldlist=pkfields[1].ColumnName)>
-
-	<cfif qPK.RecordCount EQ 1>
-		<cfset result = qPK[pkfields[1].ColumnName][1]>
-	<cfelse>
-		<cfset throwDMError("Data Manager: A unique record could not be identified from the given data.","NoUniqueRecord")>
-	</cfif>
-
-	<cfreturn result>
-</cffunction>
-
-<cffunction name="getRecord" access="public" returntype="query" output="no" hint="I get a recordset based on the primary key value(s) given.">
-	<cfargument name="tablename" type="string" required="yes" hint="The table from which to return a record.">
-	<cfargument name="data" type="struct" required="yes" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key. Every primary key field should be included.">
-	<cfargument name="fieldlist" type="string" default="" hint="A list of fields to return. If left blank, all fields will be returned.">
-
-	<cfset var ii = 0><!--- A generic counter --->
-	<cfset var pkfields = getPKFields(arguments.tablename)>
-	<cfset var fields = getUpdateableFields(arguments.tablename)>
-	<cfset var in = arguments.data>
-	<cfset var totalfields = 0><!--- count of fields --->
-	<cfset var DataString = "">
-
-	<!--- Figure count of fields --->
-	<cfloop index="ii" from="1" to="#ArrayLen(pkfields)#" step="1">
-		<cfif StructKeyExists(in,pkfields[ii].ColumnName) AND isOfCFType(in[pkfields[ii].ColumnName],pkfields[ii].CF_DataType)>
-			<cfset totalfields = totalfields + 1>
-		</cfif>
-	</cfloop>
-	<cfloop index="ii" from="1" to="#ArrayLen(fields)#" step="1">
-		<cfif StructKeyExists(in,fields[ii].ColumnName) AND isOfCFType(in[fields[ii].ColumnName],fields[ii].CF_DataType)>
-			<cfset totalfields = totalfields + 1>
-		</cfif>
-	</cfloop>
-
-	<!--- Make sure at least one field is passed in --->
-	<cfif totalfields EQ 0>
-		<cfloop collection="#arguments.data#" item="ii">
-			<cfif isSimpleValue(arguments.data[ii])>
-				<cfset DataString = ListAppend(DataString,"#ii#=#arguments.data[ii]#",";")>
-			<cfelse>
-				<cfset DataString = ListAppend(DataString,"#ii#=(complex)",";")>
-			</cfif>
-		</cfloop>
-		<cfset throwDMError("The data argument of getRecord must contain at least one field from the #arguments.tablename# table. To get all records, use the getRecords method.","NeedWhereFields","(data passed in: #DataString#)")>
-	</cfif>
-
-	<cfif ArrayLen(pkfields)>
-		<cfset Arguments.orderBy = pkfields[1].ColumnName>
-	</cfif>
-	<cfset arguments.data = in>
-	<cfset arguments.maxrows = 1>
-
-	<cfreturn getRecords(argumentcollection=arguments)>
-</cffunction>
-
-<cffunction name="getRecords" access="public" returntype="query" output="no" hint="I get a recordset based on the data given.">
-	<cfargument name="tablename" type="string" required="yes" hint="The table from which to return a record.">
-	<cfargument name="data" type="any" required="no" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="orderBy" type="string" default="">
-	<cfargument name="maxrows" type="numeric" required="no">
-	<cfargument name="fieldlist" type="string" default="" hint="A list of fields to return. If left blank, all fields will be returned.">
-	<cfargument name="advsql" type="struct" hint="A structure of sqlarrays for each area of a query (SELECT,FROM,WHERE,ORDER BY).">
-	<cfargument name="filters" type="array">
-	<cfargument name="offset" type="numeric" default="0">
-	<cfargument name="function" type="string" default="" hint="A function to run against the results.">
-	<cfargument name="FunctionAlias" type="string" required="false" hint="An alias for the column returned by a function (only if function argument is used).">
-	<cfargument name="Distinct" type="boolean" default="false">
-	<cfargument name="WithDeletedRecords" type="boolean" default="false">
-	<cfargument name="noorder" type="string" default="false" hint="If true then skip any ordering in the query.">
-
-	<cfset var qRecords = 0><!--- The recordset to return --->
-	<cfset var aSQL = getRecordsSQL(argumentCollection=arguments)>
-
-	<!--- Get records --->
-	<cfinvoke returnvariable="qRecords" method="runSQLArray">
-		<cfinvokeargument name="sqlarray" value="#aSQL#">
-		<!--- We'll pass maxrows, but it will only be used for databases that don't support this in SQL (currently just Derby) --->
-		<cfif StructKeyExists(arguments,"maxrows") AND Val(arguments.maxrows)>
-			<cfinvokeargument name="maxrows" value="#arguments.maxrows#">
-		</cfif>
-		<cfif arguments.offset GT 0>
-			<cfinvokeargument name="offset" value="#arguments.offset#">
-		</cfif>
-	</cfinvoke>
-
-	<!---<cfset qRecords = applyConcatRelations(arguments.tablename,qRecords)>---><!--- Not sufficiently tested yet --->
-	<cfset qRecords = applyListRelations(arguments.tablename,qRecords)>
-
-	<!--- Manage offset --->
-	<cfif arguments.offset GT 0 AND NOT dbHasOffset()>
-		<cfif arguments.offset GTE qRecords.RecordCount>
-			<cfset qRecords = QueryNew(qRecords.ColumnList)>
-		<cfelse>
-			<cfset qRecords = QuerySliceAndDice(qRecords,arguments.offset+1,qRecords.RecordCount)>
-		</cfif>
-	</cfif>
-
-	<cfreturn qRecords>
-</cffunction>
-
-<cffunction name="getRecordsSQL" access="public" returntype="array" output="no" hint="I get the SQL to get a recordset based on the data given.">
-	<cfargument name="tablename" type="string" required="yes" hint="The table from which to return a record.">
-	<cfargument name="data" type="any" required="no" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="orderBy" type="string" default="">
-	<cfargument name="maxrows" type="numeric" default="0">
-	<cfargument name="fieldlist" type="string" default="" hint="A list of fields to return. If left blank, all fields will be returned.">
-	<cfargument name="function" type="string" default="" hint="A function to run against the results.">
-	<cfargument name="advsql" type="struct" hint="A structure of sqlarrays for each area of a query (SELECT,FROM,WHERE,ORDER BY).">
-	<cfargument name="filters" type="array">
-	<cfargument name="offset" type="numeric" default="0">
-	<cfargument name="FunctionAlias" type="string" required="false" hint="An alias for the column returned by a function (only if function argument is used).">
-	<cfargument name="noorder" type="string" default="false" hint="If true then skip any ordering in the query.">
-
-	<cfset var sqlarray = ArrayNew(1)>
-	<cfset var aOrderBySQL = 0>
-
-	<cfset arguments.fieldlist = Trim(arguments.fieldlist)>
-
-	<cfif NOT ( StructKeyExists(arguments,"isInExists") AND isBoolean(arguments.isInExists) )>
-		<cfset arguments.isInExists = false>
-	</cfif>
-	<cfif arguments.isInExists OR ( Len(arguments["function"]) AND NOT Len(arguments.fieldlist) )>
-		<cfset arguments.noorder = true>
-	</cfif>
-	<cfif NOT ( StructKeyExists(arguments,"noorder") AND isBoolean(arguments.noorder) )>
-		<cfset arguments.noorder = false>
-	</cfif>
-	<cfif NOT arguments.noorder>
-		<cfset aOrderBySQL = getOrderBySQL(argumentCollection=arguments)>
-	</cfif>
-
-	<!--- Get Records --->
-	<cfset ArrayAppend(sqlarray,"SELECT")>
-	<cfif arguments.isInExists IS true>
-		<cfset ArrayAppend(sqlarray," 1")>
-	<cfelse>
-
-		<cfset ArrayAppend(sqlarray,This.getSelectSQL(argumentCollection=arguments))>
-	</cfif>
-	<cfset ArrayAppend(sqlarray,"FROM")>
-	<cfset ArrayAppend(sqlarray,getFromSQL(argumentCollection=arguments))>
-	<cfif arguments.maxrows GT 0>
-		<cfset ArrayAppend(sqlarray,"WHERE		#getMaxRowsWhere(arguments.maxrows,arguments.offset)#")>
-	<cfelse>
-		<cfset ArrayAppend(sqlarray,"WHERE		1 = 1")>
-	</cfif>
-	<cfset ArrayAppend(sqlarray,getWhereSQL(argumentCollection=arguments))>
-	<cfif StructKeyExists(arguments,"advsql") AND StructKeyExists(arguments.advsql,"GROUP BY")>
-		<cfset ArrayAppend(sqlarray,"GROUP BY ")>
-		<cfset ArrayAppend(sqlarray,arguments.advsql["GROUP BY"])>
-	</cfif>
-	<cfif StructKeyExists(arguments,"advsql") AND StructKeyExists(arguments.advsql,"HAVING")>
-		<cfset ArrayAppend(sqlarray,"HAVING ")>
-		<cfset ArrayAppend(sqlarray,arguments.advsql["HAVING"])>
-	</cfif>
-	<cfif (NOT arguments.noorder) AND ArrayLen(aOrderBySQL)>
-		<cfset ArrayAppend(sqlarray,"ORDER BY ")>
-		<cfset ArrayAppend(sqlarray,aOrderBySQL)>
-	</cfif>
-	<cfif arguments.maxrows GT 0 OR arguments.offset GT 0>
-		<cfset ArrayAppend(sqlarray,"#getMaxRowsSuffix(arguments.maxrows,arguments.offset)#")>
-	</cfif>
-
-	<cfreturn sqlarray>
-</cffunction>
-
-<cffunction name="getFromSQL" access="public" returntype="array" output="no">
-	<cfargument name="tablename" type="string" required="yes" hint="The table from which to return a record.">
-	<cfargument name="data" type="any" required="no" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="orderBy" type="string" default="">
-	<cfargument name="maxrows" type="numeric" default="0">
-	<cfargument name="fieldlist" type="string" default="" hint="A list of fields to return. If left blank, all fields will be returned.">
-	<cfargument name="function" type="string" default="" hint="A function to run against the results.">
-	<cfargument name="advsql" type="struct" hint="A structure of sqlarrays for each area of a query (SELECT,FROM,WHERE,ORDER BY).">
-
-	<cfset var sqlarray = ArrayNew(1)>
-
-	<cfif NOT StructKeyExists(arguments,"tablealias")>
-		<cfset arguments.tablealias = arguments.tablename>
-	</cfif>
-
-	<cfset ArrayAppend(sqlarray,"#escape(Variables.prefix & arguments.tablename)#")>
-	<cfif arguments.tablealias NEQ arguments.tablename>
-		<cfset ArrayAppend(sqlarray," #escape(Variables.prefix & arguments.tablealias)#")>
-	</cfif>
-	<cfif StructKeyExists(arguments,"advsql") AND StructKeyExists(arguments.advsql,"FROM")>
-		<cfset ArrayAppend(sqlarray,arguments.advsql["FROM"])>
-	</cfif>
-	<cfif StructKeyExists(arguments,"join") AND StructKeyExists(arguments.join,"table")>
-		<cfif StructKeyExists(arguments.join,"type") AND ListFindNoCase("inner,left,right", arguments.join.type)>
-			<cfset ArrayAppend(sqlarray,"#UCase(arguments.join.type)# JOIN #escape(arguments.join.table)#")>
-		<cfelse>
-			<cfset ArrayAppend(sqlarray,"INNER JOIN #escape(arguments.join.table)#")>
-		</cfif>
-		<cfset ArrayAppend(sqlarray,"	ON		#escape( arguments.tablealias & '.' & arguments.join.onleft )# = #escape( arguments.join.table & '.' & arguments.join.onright )#")>
-	</cfif>
-
-	<cfreturn sqlarray>
-</cffunction>
-
-<cffunction name="getRelationTypes" access="public" returntype="struct" output="no">
-
-	<cfset var sTypes = StructNew()>
-
-	<cfset sTypes["label"] = StructNew()><cfset sTypes["label"]["atts_req"] = "table,field,join-field-local,join-field-remote"><cfset sTypes["label"]["atts_opt"] = ""><cfset sTypes["label"]["gentypes"] = ""><cfset sTypes["label"]["cfsqltype"] = "CF_SQL_VARCHAR">
-	<cfset sTypes["concat"] = StructNew()><cfset sTypes["concat"]["atts_req"] = "fields"><cfset sTypes["concat"]["atts_opt"] = "delimiter"><cfset sTypes["concat"]["gentypes"] = ""><cfset sTypes["concat"]["cfsqltype"] = "CF_SQL_VARCHAR">
-	<cfset sTypes["list"] = StructNew()><cfset sTypes["list"]["atts_req"] = "table,field"><cfset sTypes["list"]["atts_opt"] = "join-field-local,join-field-remote,delimiter,sort-field,bidirectional,join-table"><cfset sTypes["list"]["gentypes"] = ""><cfset sTypes["list"]["cfsqltype"] = "">
-	<cfset sTypes["avg"] = StructNew()><cfset sTypes["avg"]["atts_req"] = "table,field,join-field-local,join-field-remote"><cfset sTypes["avg"]["atts_opt"] = ""><cfset sTypes["avg"]["gentypes"] = "numeric"><cfset sTypes["avg"]["cfsqltype"] = "CF_SQL_FLOAT">
-	<cfset sTypes["count"] = StructNew()><cfset sTypes["count"]["atts_req"] = "table,field,join-field-local,join-field-remote"><cfset sTypes["count"]["atts_opt"] = ""><cfset sTypes["count"]["gentypes"] = ""><cfset sTypes["count"]["cfsqltype"] = "CF_SQL_BIGINT">
-	<cfset sTypes["max"] = StructNew()><cfset sTypes["max"]["atts_req"] = "table,field,join-field-local,join-field-remote"><cfset sTypes["max"]["atts_opt"] = ""><cfset sTypes["max"]["gentypes"] = "numeric,boolean,date"><cfset sTypes["max"]["cfsqltype"] = "CF_SQL_FLOAT">
-	<cfset sTypes["min"] = StructNew()><cfset sTypes["min"]["atts_req"] = "table,field,join-field-local,join-field-remote"><cfset sTypes["min"]["atts_opt"] = ""><cfset sTypes["min"]["gentypes"] = "numeric,boolean,date"><cfset sTypes["min"]["cfsqltype"] = "CF_SQL_FLOAT">
-	<cfset sTypes["sum"] = StructNew()><cfset sTypes["sum"]["atts_req"] = "table,field,join-field-local,join-field-remote"><cfset sTypes["sum"]["atts_opt"] = ""><cfset sTypes["sum"]["gentypes"] = "numeric,boolean"><cfset sTypes["sum"]["cfsqltype"] = "CF_SQL_FLOAT">
-	<cfset sTypes["has"] = StructNew()><cfset sTypes["has"]["atts_req"] = "field"><cfset sTypes["has"]["atts_opt"] = ""><cfset sTypes["has"]["gentypes"] = ""><cfset sTypes["has"]["cfsqltype"] = "CF_SQL_BIT">
-	<cfset sTypes["hasnot"] = StructNew()><cfset sTypes["hasnot"]["atts_req"] = "field"><cfset sTypes["hasnot"]["atts_opt"] = ""><cfset sTypes["hasnot"]["gentypes"] = ""><cfset sTypes["hasnot"]["cfsqltype"] = "CF_SQL_BIT">
-	<cfset sTypes["math"] = StructNew()><cfset sTypes["math"]["atts_req"] = "field1,field2,operator"><cfset sTypes["math"]["atts_opt"] = ""><cfset sTypes["math"]["gentypes"] = "numeric"><cfset sTypes["math"]["cfsqltype"] = "CF_SQL_FLOAT">
-	<cfset sTypes["now"] = StructNew()><cfset sTypes["now"]["atts_req"] = ""><cfset sTypes["now"]["atts_opt"] = ""><cfset sTypes["now"]["gentypes"] = ""><cfset sTypes["now"]["cfsqltype"] = "CF_SQL_DATE">
-	<cfset sTypes["custom"] = StructNew()><cfset sTypes["custom"]["atts_req"] = ""><cfset sTypes["custom"]["atts_opt"] = "sql,CF_Datatype"><cfset sTypes["custom"]["gentypes"] = ""><cfset sTypes["custom"]["cfsqltype"] = "">
-
-	<cfreturn sTypes>
-</cffunction>
-
-<cffunction name="getOrderBySQL" access="public" returntype="array" output="no">
-	<cfargument name="tablename" type="string" required="yes" hint="The table from which to return a record.">
-	<cfargument name="data" type="any" required="no" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="orderBy" type="string" default="">
-	<cfargument name="maxrows" type="numeric" default="0">
-	<cfargument name="fieldlist" type="string" default="" hint="A list of fields to return. If left blank, all fields will be returned.">
-	<cfargument name="function" type="string" default="" hint="A function to run against the results.">
-	<cfargument name="advsql" type="struct" default="#StructNew()#" hint="A structure of sqlarrays for each area of a query (SELECT,FROM,WHERE,ORDER BY).">
-
-	<cfset var aResults = ArrayNew(1)>
-	<cfset var fields = getUpdateableFields(arguments.tablename)><!--- non primary-key fields in table --->
-	<cfset var pkfields = getPKFields(arguments.tablename)><!--- primary key fields in table --->
-	<cfset var ii = 0>
-
-	<cfif NOT StructKeyExists(arguments,"tablealias")>
-		<cfset arguments.tablealias = arguments.tablename>
-	</cfif>
-
-	<cfif StructKeyExists(arguments,"noorder") AND arguments.noorder EQ true>
-		<cfset aResults = ArrayNew(1)>
-	<cfelseif StructKeyExists(arguments.advsql,"ORDER BY")>
-		<cfset aResults = arguments.advsql["ORDER BY"]>
-	<cfelse>
-		<!--- Check for Sorter --->
-		<cfloop index="ii" from="1" to="#ArrayLen(fields)#" step="1">
-			<cfif StructKeyExists(fields[ii],"Special") AND fields[ii].Special EQ "Sorter">
-				<cfif
+			) {
+				sFields[aFields[ii].ColumnName] = aFields[ii].Length;
+			}
+		}
+		variables.tableprops[arguments.tablename]["fieldlengths"] = sFields;
+	}
+
+	return sFields;
+}
+
+/**
+* I return an array of all real fields in the given table in DataMgr.
+*/
+public array function getFields(required string tablename) {
+	var ii = 0;// counter
+	var arrFields = [];// array of fields
+	var bTable = checkTable(arguments.tablename);// Check whether table is loaded
+
+	// If fields data if stored
+	if ( StructKeyExists(variables.tableprops,arguments.tablename) AND StructKeyExists(variables.tableprops[arguments.tablename],"fields") ) {
+		arrFields = variables.tableprops[arguments.tablename]["fields"];
+	} else {
+		// Loop over the fields and make an array of them
+		for ( ii=1; ii LTE ArrayLen(variables.tables[arguments.tablename]); ii++ ) {
+			if ( StructKeyExists(variables.tables[arguments.tablename][ii],"CF_DataType") AND NOT StructKeyExists(variables.tables[arguments.tablename][ii],"Relation") ) {
+				ArrayAppend(arrFields, variables.tables[arguments.tablename][ii]);
+			}
+		}
+		variables.tableprops[arguments.tablename]["fields"] = arrFields;
+	}
+
+	return arrFields;
+}
+
+/**
+* I get the SQL before the field list in the select statement to limit the number of rows.
+*/
+public string function getMaxRowsPrefix(
+	required numeric maxrows,
+	numeric offset=0
+) {
+	return "TOP #arguments.maxrows+arguments.offset# ";
+}
+
+/**
+* I get the SQL after the query to limit the number of rows.
+*/
+public string function getMaxRowsSuffix(
+	required numeric maxrows,
+	numeric offset=0
+) {
+	return "";
+}
+
+/**
+* I get the SQL in the where statement to limit the number of rows.
+*/
+public string function getMaxRowsWhere(
+	required numeric maxrows,
+	numeric offset=0
+) {
+	return "1 = 1";
+}
+
+/**
+* I get the value an increment higher than the highest value in the given field to put a record at the end of the sort order.
+* @sortfield The field holding the sort order.
+*/
+public numeric function getNewSortNum(
+	required string tablename,
+	required string sortfield
+) {
+	var qLast = 0;
+	var result = 0;
+
+	qLast = runSQL("SELECT Max(#escape(arguments.sortfield)#) AS #escape(arguments.sortfield)# FROM #escape(arguments.tablename)#");
+
+	if ( qLast.RecordCount and isNumeric(qLast[arguments.sortfield][1]) ) {
+		result = qLast[arguments.sortfield][1] + 1;
+	} else {
+		result = 1;
+	}
+
+	return result;
+}
+
+/**
+* I return an array of primary key fields.
+*/
+public array function getPKFields(required string tablename) {
+	var bTable = checkTable(arguments.tablename);// Check whether table is loaded
+	var ii = 0;// counter
+	var arrFields = [];// array of primarykey fields
+
+	// If pkfields data if stored
+	if ( StructKeyExists(variables.tableprops,arguments.tablename) AND StructKeyExists(variables.tableprops[arguments.tablename],"pkfields") ) {
+		arrFields = variables.tableprops[arguments.tablename]["pkfields"];
+	} else {
+		for ( ii=1; ii LTE ArrayLen(variables.tables[arguments.tablename]); ii++ ) {
+			if ( StructKeyExists(variables.tables[arguments.tablename][ii],"PrimaryKey") AND variables.tables[arguments.tablename][ii].PrimaryKey ) {
+				ArrayAppend(arrFields, variables.tables[arguments.tablename][ii]);
+			}
+		}
+		variables.tableprops[arguments.tablename]["pkfields"] = arrFields;
+	}
+
+	return arrFields;
+}
+
+/**
+* I return primary key field for this table.
+* @tablename The table from which to return a primary key.
+*/
+public struct function getPrimaryKeyField(required string tablename) {
+	var aPKFields = getPKFields(arguments.tablename);
+
+	if ( ArrayLen(aPKFields) NEQ 1 ) {
+		throwDMError("The #arguments.tablename# does not have a simple primary key and so it cannot be used for this purpose.","NoSimplePrimaryKey");
+	}
+
+	return aPKFields[1];
+}
+
+/**
+* I return primary key field for this table.
+* @tablename The table from which to return a primary key.
+*/
+public string function getPrimaryKeyFieldName(required string tablename) {
+	var sField = getPrimaryKeyField(arguments.tablename);
+
+	return sField.ColumnName;
+}
+
+/**
+* I return a list of primary key field for this table.
+* @tablename The table from which to return a primary key.
+*/
+public string function getPrimaryKeyFieldNames(required string tablename) {
+	var pkfields = getPKFields(arguments.tablename);// the primary key fields for this table
+	var result = "";
+	var ii = 0;
+
+	// Make list of primary key fields
+	for ( ii=1; ii LTE ArrayLen(pkfields); ii++ ) {
+		result = ListAppend(result,pkfields[ii].ColumnName);
+	}
+
+	return result;
+}
+
+/**
+* I get the primary key of the record matching the given data.
+* @tablename The table from which to return a primary key.
+* @fielddata A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+*/
+public string function getPKFromData(
+	required string tablename,
+	required struct fielddata
+) {
+	var qPK = 0;// The query used to get the primary key
+	var fields = getUpdateableFields(arguments.tablename);// The (non-primarykey) fields for this table
+	var pkfields = getPKFields(arguments.tablename);// The primary key field(s) for this table
+	var result = 0;// The result of this method
+
+	// This method is only to be used on fields with one pkfield
+	if ( ArrayLen(pkfields) NEQ 1 ) {
+		throwDMError("This method can only be used on tables with exactly one primary key field.","NeedOnePKField");
+	}
+	// This method can only be used on tables with updateable fields
+	if ( NOT ArrayLen(fields) ) {
+		throwDMError("This method can only be used on tables with updateable fields.","NeedUpdateableField");
+	}
+
+	// Run query to get primary key value from data fields
+	qPK = getRecords(tablename=arguments.tablename,data=arguments.fielddata,fieldlist=pkfields[1].ColumnName);
+
+	if ( qPK.RecordCount EQ 1 ) {
+		result = qPK[pkfields[1].ColumnName][1];
+	} else {
+		throwDMError("Data Manager: A unique record could not be identified from the given data.","NoUniqueRecord");
+	}
+
+	return result;
+}
+
+/**
+* I get a recordset based on the primary key value(s) given.
+* @tablename The table from which to return a record.
+* @data A structure with the data for the desired record. Each key/value indicates a value for the field matching that key. Every primary key field should be included.
+* @fieldlist A list of fields to return. If left blank, all fields will be returned.
+*/
+public query function getRecord(
+	required string tablename,
+	required struct data,
+	string fieldlist=""
+) {
+	var ii = 0;// A generic counter
+	var pkfields = getPKFields(arguments.tablename);
+	var fields = getUpdateableFields(arguments.tablename);
+	var sData = arguments.data;
+	var totalfields = 0;// count of fields
+	var DataString = "";
+
+	// Figure count of fields
+	for ( ii=1; ii LTE ArrayLen(pkfields); ii++ ) {
+		if ( StructKeyExists(sData,pkfields[ii].ColumnName) AND isOfCFType(sData[pkfields[ii].ColumnName],pkfields[ii].CF_DataType) ) {
+			totalfields = totalfields + 1;
+		}
+	}
+	for ( ii=1; ii LTE ArrayLen(fields); ii++ ) {
+		if ( StructKeyExists(sData,fields[ii].ColumnName) AND isOfCFType(sData[fields[ii].ColumnName],fields[ii].CF_DataType) ) {
+			totalfields = totalfields + 1;
+		}
+	}
+
+	// Make sure at least one field is passed in
+	if ( totalfields EQ 0 ) {
+		for ( ii in arguments.data ) {
+			if ( isSimpleValue(arguments.data[ii]) ) {
+				DataString = ListAppend(DataString,"#ii#=#arguments.data[ii]#",";");
+			} else {
+				DataString = ListAppend(DataString,"#ii#=(complex)",";");
+			}
+		}
+		throwDMError("The data argument of getRecord must contain at least one field from the #arguments.tablename# table. To get all records, use the getRecords method.","NeedWhereFields","(data passed in: #DataString#)");
+	}
+
+	if ( ArrayLen(pkfields) ) {
+		Arguments.orderBy = pkfields[1].ColumnName;
+	}
+	arguments.data = sData;
+	arguments.maxrows = 1;
+
+	return getRecords(argumentcollection=arguments);
+}
+
+/**
+* I get a recordset based on the data given.
+* @tablename The table from which to return a record.
+* @data A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+* @orderBy The field to order the results by.
+* @maxrows The maximum number of rows to return.
+* @fieldlist A list of fields to return. If left blank, all fields will be returned.
+* @advsql A structure of sqlarrays for each area of a query (SELECT,FROM,WHERE,ORDER BY).
+* @filters An array of filters to apply to the query.
+* @offset The number of records to skip.
+* @function A function to run against the results.
+* @FunctionAlias An alias for the column returned by a function (only if function argument is used).
+* @Distinct Whether to return distinct records.
+* @WithDeletedRecords Whether to include records that have been deleted.
+* @noorder If true then skip any ordering in the query.
+*/
+public query function getRecords(
+	required string tablename,
+	data,
+	string orderBy="",
+	numeric maxrows=0,
+	string fieldlist="",
+	struct advsql,
+	array filters,
+	numeric offset=0,
+	string functionName="",
+	string FunctionAlias,
+	boolean Distinct=false,
+	boolean WithDeletedRecords=false,
+	string noorder="false"
+) {
+	Arguments = ArgumentsFi(ArgumentCollection=Arguments);
+
+	var qRecords = 0;// The recordset to return
+	var aSQL = getRecordsSQL(argumentCollection=arguments);
+	var sArgs = {"sqlarray":aSQL};
+
+	// We'll pass maxrows, but it will only be used for databases that don't support this in SQL (currently just Derby)
+	if ( StructKeyExists(arguments,"maxrows") AND Val(arguments.maxrows) ) {
+		sArgs["maxrows"] = arguments.maxrows;
+	}
+	if ( arguments.offset GT 0 ) {
+		sArgs["offset" ] = arguments.offset;
+	}
+
+	// Get records
+	qRecords = runSQLArray(ArgumentCollection=sArgs);
+
+	//qRecords = applyConcatRelations(arguments.tablename,qRecords);// Not sufficiently tested yet
+	qRecords = applyListRelations(arguments.tablename,qRecords);
+
+	// Manage offset
+	if ( arguments.offset GT 0 AND NOT dbHasOffset() ) {
+		if ( arguments.offset GTE qRecords.RecordCount ) {
+			qRecords = QueryNew(qRecords.ColumnList);
+		} else {
+			qRecords = QuerySliceAndDice(qRecords,arguments.offset+1,qRecords.RecordCount);
+		}
+	}
+
+	return qRecords;
+}
+
+/**
+* I get the SQL to get a recordset based on the data given.
+* @tablename The table from which to return a record.
+* @data A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+* @orderBy The field to order the results by.
+* @maxrows The maximum number of rows to return.
+* @fieldlist A list of fields to return. If left blank, all fields will be returned.
+* @function A function to run against the results.
+* @advsql A structure of sqlarrays for each area of a query (SELECT,FROM,WHERE,ORDER BY).
+* @filters An array of filters to apply to the query.
+* @offset The number of records to skip.
+* @FunctionAlias An alias for the column returned by a function (only if function argument is used).
+* @noorder If true then skip any ordering in the query.
+*/
+public array function getRecordsSQL(
+	required string tablename,
+	data,
+	string orderBy="",
+	numeric maxrows=0,
+	string fieldlist="",
+	string functionName="",
+	struct advsql,
+	array filters,
+	numeric offset=0,
+	string FunctionAlias,
+	string noorder="false"
+) {
+	Arguments = ArgumentsFi(ArgumentCollection=Arguments);
+
+	var sqlarray = [];
+	var aOrderBySQL = 0;
+
+	arguments.fieldlist = Trim(arguments.fieldlist);
+
+	if ( NOT ( StructKeyExists(arguments,"isInExists") AND isBoolean(arguments.isInExists) ) ) {
+		arguments.isInExists = false;
+	}
+	if ( arguments.isInExists OR ( Len(arguments["function"]) AND NOT Len(arguments.fieldlist) ) ) {
+		arguments.noorder = true;
+	}
+	if ( NOT ( StructKeyExists(arguments,"noorder") AND isBoolean(arguments.noorder) ) ) {
+		arguments.noorder = false;
+	}
+	if ( NOT arguments.noorder ) {
+		aOrderBySQL = getOrderBySQL(argumentCollection=arguments);
+	}
+
+	// Get Records
+	ArrayAppend(sqlarray,"SELECT");
+	if ( arguments.isInExists IS true ) {
+		ArrayAppend(sqlarray," 1");
+	} else {
+		ArrayAppend(sqlarray,This.getSelectSQL(argumentCollection=arguments));
+	}
+
+	ArrayAppend(sqlarray,"FROM");
+	ArrayAppend(sqlarray,getFromSQL(argumentCollection=arguments));
+	if ( arguments.maxrows GT 0 ) {
+		ArrayAppend(sqlarray,"WHERE		#getMaxRowsWhere(arguments.maxrows,arguments.offset)#");
+	} else {
+		ArrayAppend(sqlarray,"WHERE		1 = 1");
+	}
+	ArrayAppend(sqlarray,getWhereSQL(argumentCollection=arguments));
+	if ( StructKeyExists(arguments,"advsql") AND StructKeyExists(arguments.advsql,"GROUP BY") ) {
+		ArrayAppend(sqlarray,"GROUP BY ");
+		ArrayAppend(sqlarray,arguments.advsql["GROUP BY"]);
+	}
+	if ( StructKeyExists(arguments,"advsql") AND StructKeyExists(arguments.advsql,"HAVING") ) {
+		ArrayAppend(sqlarray,"HAVING ");
+		ArrayAppend(sqlarray,arguments.advsql["HAVING"]);
+	}
+	if ( (NOT arguments.noorder) AND ArrayLen(aOrderBySQL) ) {
+		ArrayAppend(sqlarray,"ORDER BY ");
+		ArrayAppend(sqlarray,aOrderBySQL);
+	}
+	if ( arguments.maxrows GT 0 OR arguments.offset GT 0 ) {
+		ArrayAppend(sqlarray,"#getMaxRowsSuffix(arguments.maxrows,arguments.offset)#");
+	}
+
+	return sqlarray;
+}
+
+/*
+* I get the SQL for the FROM clause
+* @tablename The table from which to return a record.
+* @data A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+* @orderBy The field to order the results by.
+* @maxrows The maximum number of rows to return.
+* @fieldlist A list of fields to return. If left blank, all fields will be returned.
+* @function A function to run against the results.
+* @advsql A structure of sqlarrays for each area of a query (SELECT,FROM,WHERE,ORDER BY).
+*/
+public array function getFromSQL(
+	required string tablename,
+	data,
+	string orderBy="",
+	numeric maxrows=0,
+	string fieldlist="",
+	string functionName="",
+	struct advsql
+) {
+	Arguments = ArgumentsFi(ArgumentCollection=Arguments);
+
+	var sqlarray = [];
+
+	if ( NOT StructKeyExists(arguments,"tablealias") ) {
+		arguments.tablealias = arguments.tablename;
+	}
+
+	ArrayAppend(sqlarray,"#escape(Variables.prefix & arguments.tablename)#");
+	if ( arguments.tablealias NEQ arguments.tablename ) {
+		ArrayAppend(sqlarray," #escape(Variables.prefix & arguments.tablealias)#");
+	}
+	if ( StructKeyExists(arguments,"advsql") AND StructKeyExists(arguments.advsql,"FROM") ) {
+		ArrayAppend(sqlarray,arguments.advsql["FROM"]);
+	}
+	if ( StructKeyExists(arguments,"join") AND StructKeyExists(arguments.join,"table") ) {
+		if ( StructKeyExists(arguments.join,"type") AND ListFindNoCase("inner,left,right", arguments.join.type) ) {
+			ArrayAppend(sqlarray,"#UCase(arguments.join.type)# JOIN #escape(arguments.join.table)#");
+		} else {
+			ArrayAppend(sqlarray,"INNER JOIN #escape(arguments.join.table)#");
+		}
+		ArrayAppend(sqlarray,"	ON		#escape( arguments.tablealias & '.' & arguments.join.onleft )# = #escape( arguments.join.table & '.' & arguments.join.onright )#");
+	}
+
+	return sqlarray;
+}
+
+public struct function getRelationTypes() {
+	var sTypes = {
+		"label":{"atts_req":"table,field,join-field-local,join-field-remote","atts_opt":"","gentypes":"","cfsqltype":"CF_SQL_VARCHAR"},
+		"concat":{"atts_req":"fields","atts_opt":"delimiter","gentypes":"","cfsqltype":"CF_SQL_VARCHAR"},
+		"list":{"atts_req":"table,field","atts_opt":"join-field-local,join-field-remote,delimiter,sort-field,bidirectional,join-table","gentypes":"","cfsqltype":""},
+		"avg":{"atts_req":"table,field,join-field-local,join-field-remote","atts_opt":"","gentypes":"numeric","cfsqltype":"CF_SQL_FLOAT"},
+		"count":{"atts_req":"table,field,join-field-local,join-field-remote","atts_opt":"","gentypes":"","cfsqltype":"CF_SQL_BIGINT"},
+		"max":{"atts_req":"table,field,join-field-local,join-field-remote","atts_opt":"","gentypes":"numeric,boolean,date","cfsqltype":"CF_SQL_FLOAT"},
+		"min":{"atts_req":"table,field,join-field-local,join-field-remote","atts_opt":"","gentypes":"numeric,boolean,date","cfsqltype":"CF_SQL_FLOAT"},
+		"sum":{"atts_req":"table,field,join-field-local,join-field-remote","atts_opt":"","gentypes":"numeric,boolean","cfsqltype":"CF_SQL_FLOAT"},
+		"has":{"atts_req":"field","atts_opt":"","gentypes":"","cfsqltype":"CF_SQL_BIT"},
+		"hasnot":{"atts_req":"field","atts_opt":"","gentypes":"","cfsqltype":"CF_SQL_BIT"},
+		"math":{"atts_req":"field1,field2,operator","atts_opt":"","gentypes":"numeric","cfsqltype":"CF_SQL_FLOAT"},
+		"now":{"atts_req":"","atts_opt":"","gentypes":"","cfsqltype":"CF_SQL_DATE"},
+		"custom":{"atts_req":"","atts_opt":"sql,CF_Datatype","gentypes":"","cfsqltype":""}
+	};
+
+	return sTypes;
+}
+
+/**
+* I get the SQL for the ORDER BY clause
+* @tablename The table from which to return a record.
+* @orderBy The field to order the results by.
+* @maxrows The maximum number of rows to return.
+* @fieldlist A list of fields to return. If left blank, all fields will be returned.
+* @function A function to run against the results.
+* @advsql A structure of sqlarrays for each area of a query (SELECT,FROM,WHERE,ORDER BY).
+*/
+public array function getOrderBySQL(
+	required string tablename,
+	data,
+	string orderBy="",
+	numeric maxrows=0,
+	string fieldlist="",
+	string functionName="",
+	struct advsql={}
+) {
+	Arguments = ArgumentsFi(ArgumentCollection=Arguments);
+
+	var aResults = [];
+	var fields = getUpdateableFields(arguments.tablename);// non primary-key fields in table
+	var pkfields = getPKFields(arguments.tablename);// primary key fields in table
+	var ii = 0;
+
+	if ( NOT StructKeyExists(arguments,"tablealias") ) {
+		arguments.tablealias = arguments.tablename;
+	}
+
+	if ( StructKeyExists(arguments,"noorder") AND arguments.noorder EQ true ) {
+		aResults = [];
+	} else if ( StructKeyExists(arguments.advsql,"ORDER BY") ) {
+		aResults = arguments.advsql["ORDER BY"];
+	} else {
+		// Check for Sorter//
+		for ( ii=1; ii LTE ArrayLen(fields); ii++ ) {
+			if ( StructKeyExists(fields[ii],"Special") AND fields[ii].Special EQ "Sorter" ) {
+				if (
 						( NOT Len(arguments["function"]) AND NOT ( StructKeyExists(arguments,"Distinct") AND arguments.Distinct IS true ) )
 					OR	(
 								Len(arguments.fieldlist) EQ 0
 							OR	ListFindNoCase(arguments.fieldlist, fields[ii].ColumnName)
 						)
-				>
-					<!--- Load field in sort order, if not there already --->
-					<cfif NOT (
+				) {
+					// Load field in sort order, if not there already
+					if ( NOT (
 								ListFindNoCase(arguments.orderBy,fields[ii].ColumnName)
 							OR	ListFindNoCase(arguments.orderBy,escape(fields[ii].ColumnName))
 							OR	ListFindNoCase(arguments.orderBy,"#fields[ii].ColumnName# DESC")
@@ -1454,17 +1610,17 @@
 							OR	ListFindNoCase(arguments.orderBy,"#escape(fields[ii].ColumnName)# ASC")
 							OR	ListFindNoCase(arguments.orderBy,"#escape(arguments.tablealias & '.' & fields[ii].ColumnName)#")
 						)
-					>
-						<cfset arguments.orderBy = ListAppend(arguments.orderBy,"#escape(arguments.tablealias & '.' & fields[ii].ColumnName)#")>
-					</cfif>
-				</cfif>
-			</cfif>
-		</cfloop>
-		<!--- Continue with conditionals --->
-		<cfif Len(arguments.orderBy)>
-			<cfset aResults = getOrderByArray(arguments.tablename,arguments.orderby,arguments.tablealias)>
-		<!--- ** USE AT YOUR OWN RISK! **: This is highly experimental and not supported on all database --->
-		<cfelseif
+					) {
+						arguments.orderBy = ListAppend(arguments.orderBy,"#escape(arguments.tablealias & '.' & fields[ii].ColumnName)#");
+					}
+				}
+			}
+		}
+		// Continue with conditionals
+		if ( Len(arguments.orderBy) ) {
+			aResults = getOrderByArray(arguments.tablename,arguments.orderby,arguments.tablealias);
+		// ** USE AT YOUR OWN RISK! **: This is highly experimental and not supported on all database
+		} else if (
 				StructKeyExists(arguments,"sortfield")
 			AND	Len(Trim(arguments.sortfield))
 			AND	(
@@ -1474,230 +1630,269 @@
 							OR	ListFindNoCase(arguments.fieldlist, arguments.sortfield)
 						)
 				)
-		>
-			<cfset ArrayAppend(aResults,getFieldSelectSQL(tablename=arguments.tablename,field=arguments.sortfield,tablealias=arguments.tablealias,useFieldAlias=false))>
-			<cfif StructKeyExists(arguments,"sortdir") AND (arguments.sortdir EQ "ASC" OR arguments.sortdir EQ "DESC")>
-				<cfset ArrayAppend(aResults," #arguments.sortdir#")>
-			</cfif>
-			<!--- Fixing a bug in MS Access --->
-			<cfif getDatabase() EQ "Access" AND arguments.sortfield NEQ pkfields[1].ColumnName>
-				<cfset ArrayAppend(aResults,",")>
-				<cfset ArrayAppend(aResults,getFieldSelectSQL(tablename=arguments.tablename,field=pkfields[1].ColumnName,tablealias=arguments.tablealias,useFieldAlias=false))>
-			</cfif>
-		<cfelseif arguments.maxrows GT 0>
-			<cfset aResults = getDefaultOrderBySQL(argumentCollection=arguments)>
-		</cfif>
-	</cfif>
+		) {
+			ArrayAppend(aResults,getFieldSelectSQL(tablename=arguments.tablename,field=arguments.sortfield,tablealias=arguments.tablealias,useFieldAlias=false));
+			if ( StructKeyExists(arguments,"sortdir") AND (arguments.sortdir EQ "ASC" OR arguments.sortdir EQ "DESC") ) {
+				ArrayAppend(aResults," #arguments.sortdir#");
+			}
+			// Fixing a bug in MS Access
+			if ( getDatabase() EQ "Access" AND arguments.sortfield NEQ pkfields[1].ColumnName ) {
+				ArrayAppend(aResults,",");
+				ArrayAppend(aResults,getFieldSelectSQL(tablename=arguments.tablename,field=pkfields[1].ColumnName,tablealias=arguments.tablealias,useFieldAlias=false));
+			}
+		} else if ( arguments.maxrows GT 0 ) {
+			aResults = getDefaultOrderBySQL(argumentCollection=arguments);
+		}
+	}
 
-	<cfreturn aResults>
-</cffunction>
+	return aResults;
+}
 
-<cffunction name="getSelectSQL" access="public" returntype="array" output="no">
-	<cfargument name="tablename" type="string" required="yes" hint="The table from which to return a record.">
-	<cfargument name="data" type="any" required="no" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="orderBy" type="string" default="">
-	<cfargument name="maxrows" type="numeric" default="0">
-	<cfargument name="fieldlist" type="string" default="" hint="A list of fields to return. If left blank, all fields will be returned.">
-	<cfargument name="function" type="string" default="" hint="A function to run against the results.">
-	<cfargument name="advsql" type="struct" hint="A structure of sqlarrays for each area of a query (SELECT,FROM,WHERE,ORDER BY).">
-	<cfargument name="filters" type="array">
-	<cfargument name="offset" type="numeric" default="0">
-	<cfargument name="FunctionAlias" type="string" required="false" hint="An alias for the column returned by a function (only if function argument is used).">
+/**
+* I get the SQL for the SELECT clause
+* @tablename The table from which to return a record.
+* @data A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+* @orderBy The field to order the results by.
+* @maxrows The maximum number of rows to return.
+* @fieldlist A list of fields to return. If left blank, all fields will be returned.
+* @function A function to run against the results.
+* @advsql A structure of sqlarrays for each area of a query (SELECT,FROM,WHERE,ORDER BY).
+* @filters An array of filters to apply to the query.
+* @offset The number of records to skip.
+* @FunctionAlias An alias for the column returned by a function (only if function argument is used).
+*/
+public array function getSelectSQL(
+	required string tablename,
+	data,
+	string orderBy="",
+	numeric maxrows=0,
+	string fieldlist="",
+	string functionName="",
+	struct advsql,
+	array filters,
+	numeric offset=0,
+	string FunctionAlias
+) {
+	Arguments = ArgumentsFi(ArgumentCollection=Arguments);
 
-	<cfset var bTable = checkTable(arguments.tablename)><!--- Check whether table is loaded --->
-	<cfset var sqlarray = ArrayNew(1)>
-	<cfset var adjustedfieldlist = "">
-	<cfset var numcols = 0>
-	<cfset var ii = 0>
-	<cfset var aFields = variables.tables[arguments.tablename]>
-	<cfset var dbfields = "">
-	<cfset var temp = "">
-	<cfset var fields = "">
+	var bTable = checkTable(arguments.tablename);// Check whether table is loaded
+	var sqlarray = ArrayNew(1);
+	var adjustedfieldlist = "";
+	var numcols = 0;
+	var ii = 0;
+	var aFields = variables.tables[arguments.tablename];
+	var dbfields = "";
+	var temp = "";
+	var fields = "";
 
-	<cfif NOT StructKeyExists(arguments,"tablealias")>
-		<cfset arguments.tablealias = arguments.tablename>
-	</cfif>
+	if ( NOT StructKeyExists(arguments,"tablealias") ) {
+		arguments.tablealias = arguments.tablename;
+	}
 
-	<cfif NOT StructKeyExists(arguments,"FunctionAlias")>
-		<cfset arguments.FunctionAlias = "DataMgr_FunctionResult">
-	</cfif>
+	if ( NOT StructKeyExists(arguments,"FunctionAlias") ) {
+		arguments.FunctionAlias = "DataMgr_FunctionResult";
+	}
 
-	<cfif Len(arguments.fieldlist)>
-		<cfloop list="#arguments.fieldlist#" index="temp">
-			<cfset adjustedfieldlist = ListAppend(adjustedfieldlist,escape(arguments.tablealias & '.' & temp))>
-		</cfloop>
-	</cfif>
+	if ( Len(arguments.fieldlist) ) {
+		for ( temp in ListToArray(arguments.fieldlist) ) {
+			adjustedfieldlist = ListAppend(adjustedfieldlist,escape(arguments.tablealias & '.' & temp));
+		}
+	}
 
-	<cfif StructKeyExists(arguments,"distinct") AND arguments.distinct IS true>
-		<cfset ArrayAppend(sqlarray,"DISTINCT")>
-	</cfif>
-	<cfif arguments.maxrows GT 0>
-		<cfset ArrayAppend(sqlarray,getMaxRowsPrefix(arguments.maxrows,arguments.offset))>
-	</cfif>
-	<cfif Len(arguments.function)>
-		<cfif Len(arguments.fieldlist)>
-			<cfset ArrayAppend(sqlarray,"#arguments.function#(#adjustedfieldlist#) AS #arguments.FunctionAlias#")>
-		<cfelse>
-			<cfset ArrayAppend(sqlarray,"#arguments.function#(*) AS #arguments.FunctionAlias#")>
-		</cfif>
-		<cfset numcols = numcols + 1>
-	<cfelse>
-		<cfloop index="ii" from="1" to="#ArrayLen(aFields)#" step="1">
-			<cfif Len(aFields[ii]["ColumnName"]) AND ( NOT ListFindNoCase(fields,aFields[ii]["ColumnName"]) ) AND isFieldInSelect(aFields[ii],arguments.fieldlist,arguments.maxrows)>
-				<cfif numcols GT 0><cfset ArrayAppend(sqlarray,",")></cfif>
-				<cfset numcols = numcols + 1>
-				<cfset fields = ListAppend(fields,aFields[ii]["ColumnName"])>
-				<cfset ArrayAppend(sqlarray,getFieldSelectSQL(arguments.tablename,aFields[ii]["ColumnName"],arguments.tablealias))>
-			</cfif>
-		</cfloop>
-		<cfif
+	if ( StructKeyExists(arguments,"distinct") AND arguments.distinct IS true ) {
+		ArrayAppend(sqlarray,"DISTINCT");
+	}
+	if ( arguments.maxrows GT 0 ) {
+		ArrayAppend(sqlarray,getMaxRowsPrefix(arguments.maxrows,arguments.offset));
+	}
+	if ( Len(arguments.function) ) {
+		// Just defeating an editor bug for opening parents in a string.
+		temp = arguments.function & Chr(40);
+		if ( Len(arguments.fieldlist) ) {
+			temp &= adjustedfieldlist;
+		} else {
+			temp &= "*";
+		}
+		temp &= ") AS #arguments.FunctionAlias#";
+		ArrayAppend(sqlarray,temp);
+		numcols = numcols + 1;
+	}  else {
+		for ( ii=1; ii LTE ArrayLen(aFields); ii++ ) {
+				if (
+					Len(aFields[ii]["ColumnName"])
+					AND
+					(
+						NOT ListFindNoCase(fields,aFields[ii]["ColumnName"])
+					)
+					AND
+					isFieldInSelect(aFields[ii],arguments.fieldlist,arguments.maxrows)
+				) {
+					if ( numcols GT 0 ) {
+						ArrayAppend(sqlarray,",");
+					}
+					numcols = numcols + 1;
+					fields = ListAppend(fields,aFields[ii]["ColumnName"]);
+					ArrayAppend(sqlarray,getFieldSelectSQL(arguments.tablename,aFields[ii]["ColumnName"],arguments.tablealias));
+				}
+		}
+		if (
 				( StructKeyExists(variables.tableprops[arguments.tablename],"deletable") AND Len(variables.tableprops[arguments.tablename].deletable) )
 			AND	NOT ListFindNoCase(getFieldList(arguments.tablename),variables.tableprops[arguments.tablename].deletable)
 			AND	(
 						Len(arguments.fieldlist) EQ 0
 					OR	ListFindNoCase(arguments.fieldlist,variables.tableprops[arguments.tablename].deletable)
 				)
-		>
-			<cfif numcols GT 0><cfset ArrayAppend(sqlarray,",")></cfif>
-			<cfset numcols = numcols + 1>
-			<cfset ArrayAppend(sqlarray,getIsDeletableSQL(tablename=arguments.tablename,tablealias=arguments.tablealias))>
-			<cfset ArrayAppend(sqlarray," AS ")>
-			<cfset ArrayAppend(sqlarray,escape(variables.tableprops[arguments.tablename].deletable))>
-		</cfif>
-	</cfif>
-	<cfif
+		) {
+			if ( numcols GT 0 ) {
+				ArrayAppend(sqlarray,",");
+			}
+			numcols = numcols + 1;
+			ArrayAppend(sqlarray,getIsDeletableSQL(tablename=arguments.tablename,tablealias=arguments.tablealias));
+			ArrayAppend(sqlarray," AS ");
+			ArrayAppend(sqlarray,escape(variables.tableprops[arguments.tablename].deletable));
+		}
+	}
+	if (
 			StructKeyExists(arguments,"advsql") AND StructKeyExists(arguments.advsql,"SELECT")
 		AND	(
 					( isSimpleValue(arguments.advsql["SELECT"]) AND Len(Trim(arguments.advsql["SELECT"])) )
 				OR	( isArray(arguments.advsql["SELECT"]) AND ArrayLen(arguments.advsql["SELECT"]) )
 			)
-	>
-		<cfset ArrayAppend(sqlarray,",")><cfset numcols = numcols + 1>
-		<cfset ArrayAppend(sqlarray,arguments.advsql["SELECT"])>
-	</cfif>
+	) {
+		ArrayAppend(sqlarray,",");numcols = numcols + 1;
+		ArrayAppend(sqlarray,arguments.advsql["SELECT"]);
+	}
 
-	<!--- Make sure at least one field is retrieved --->
-	<cfif numcols EQ 0 AND NOT Len(fields)>
-		<cfset dbfields = getDBFieldList(arguments.tablename)>
-		<cfset throwDMError("At least one valid field must be retrieved from the #arguments.tablename# table (actual fields in table are: #dbfields#) (requested fields: #arguments.fieldlist#).","NeedSelectFields")>
-	</cfif>
+	// Make sure at least one field is retrieved
+	if ( numcols EQ 0 AND NOT Len(fields) ) {
+		dbfields = getDBFieldList(arguments.tablename);
+		throwDMError("At least one valid field must be retrieved from the #arguments.tablename# table (actual fields in table are: #dbfields#) (requested fields: #arguments.fieldlist#).","NeedSelectFields");
+	}
 
-	<cfreturn sqlarray>
-</cffunction>
+	return sqlarray;
+}
 
-<cffunction name="getWhereSQL" access="public" returntype="array" output="false" hint="">
-	<cfargument name="tablename" type="string" required="yes" hint="The table from which to return a record.">
-	<cfargument name="data" type="any" required="no" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="advsql" type="struct" hint="A structure of sqlarrays for each area of a query (SELECT,FROM,WHERE,ORDER BY).">
-	<cfargument name="filters" type="array">
+/**
+* I get the SQL for the WHERE clause
+* @tablename The table from which to return a record.
+* @data A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+* @advsql A structure of sqlarrays for each area of a query (SELECT,FROM,WHERE,ORDER BY).
+* @filters An array of filters to apply to the query.
+*/
+public array function getWhereSQL(
+	required string tablename,
+	data,
+	struct advsql,
+	array filters
+) {
+	var fields = getUpdateableFields(arguments.tablename);// non primary-key fields in table
+	var sData = 0;// holder for incoming data (just for readability)
+	var pkfields = getPKFields(arguments.tablename);// primary key fields in table
+	var rfields = getRelationFields(arguments.tablename);// relation fields in table
+	var sData = 0;// Generic counter
+	var sqlarray = [];
+	var sArgs = 0;
+	var temp = "";
+	var joiner = "AND";
+	var sOtherFields = {};
+	var ii = 0;
 
-	<cfset var fields = getUpdateableFields(arguments.tablename)><!--- non primary-key fields in table --->
-	<cfset var in = 0><!--- holder for incoming data (just for readability) --->
-	<cfset var pkfields = getPKFields(arguments.tablename)><!--- primary key fields in table --->
-	<cfset var rfields = getRelationFields(arguments.tablename)><!--- relation fields in table --->
-	<cfset var ii = 0><!--- Generic counter --->
-	<cfset var sqlarray = ArrayNew(1)>
-	<cfset var sArgs = 0>
-	<cfset var temp = "">
-	<cfset var joiner = "AND">
-	<cfset var sOtherFields = StructNew()>
+	// Convert data argument to "sData" struct
+	if ( StructKeyExists(arguments,"data") ) {
+		if ( isStruct(arguments.data) ) {
+			sData = arguments.data;
+		} else if ( isSimpleValue(arguments.data) ) {
+			if ( ArrayLen(pkfields) EQ 1 ) {
+				sData = {};
+				sData[pkfields[1].ColumnName] = arguments.data;
+			} else {
+				throwDMError("Data argument can only be a string for tables with simple (single column) primary keys.");
+			}
+		} else {
+			throwDMError("Data argument must be either a struct or a string.");
+		}
+	} else {
+		sData = {};
+	}
 
-	<!--- Convert data argument to "in" struct --->
-	<cfif StructKeyExists(arguments,"data")>
-		<cfif isStruct(arguments.data)>
-			<cfset in = arguments.data>
-		<cfelseif isSimpleValue(arguments.data)>
-			<cfif ArrayLen(pkfields) EQ 1>
-				<cfset in = StructNew()>
-				<cfset in[pkfields[1].ColumnName] = arguments.data>
-			<cfelse>
-				<cfset throwDMError("Data argument can only be a string for tables with simple (single column) primary keys.")>
-			</cfif>
-		<cfelse>
-			<cfset throwDMError("Data argument must be either a struct or a string.")>
-		</cfif>
-	<cfelse>
-		<cfset in = StructNew()>
-	</cfif>
-
-	<!--- "Other Field" handling --->
-	<cfloop index="ii" from="1" to="#ArrayLen(rfields)#" step="1">
-		<cfif
+	// "Other Field" handling
+	for ( ii=1; ii LTE ArrayLen(rfields); ii++ ) {
+		if (
 				StructKeyExists(rfields[ii].Relation,"other-field")
 			AND	Len(rfields[ii].Relation["other-field"])
-			AND	StructKeyExists(in,rfields[ii].Relation["other-field"])
-		>
-			<cfset sOtherFields[rfields[ii].Relation["other-field"]] = in[rfields[ii].Relation["other-field"]]>
-			<cfset StructDelete(in,rfields[ii].Relation["other-field"])>
-		</cfif>
-	</cfloop>
+			AND	StructKeyExists(sData,rfields[ii].Relation["other-field"])
+		) {
+			sOtherFields[rfields[ii].Relation["other-field"]] = sData[rfields[ii].Relation["other-field"]];
+			StructDelete(sData,rfields[ii].Relation["other-field"]);
+		}
+	}
 
 
-	<cfif NOT StructKeyExists(arguments,"filters")>
-		<cfset arguments.filters = ArrayNew(1)>
-	</cfif>
-	<!--- Named Filters --->
-	<cfif StructCount(variables.tableprops[arguments.tablename]["filters"])>
-		<cfloop collection="#variables.tableprops[arguments.tablename].filters#" item="ii">
-			<cfif StructKeyExists(in,ii)>
-				<cfset ArrayAppend(arguments.filters,StructCopy(variables.tableprops[arguments.tablename].filters[ii]))>
-				<cfset arguments.filters[ArrayLen(arguments.filters)].value = in[ii]>
-			</cfif>
-		</cfloop>
-	</cfif>
+	if ( NOT StructKeyExists(arguments,"filters") ) {
+		arguments.filters = ArrayNew(1);
+	}
+	// Named Filters
+	if ( StructCount(variables.tableprops[arguments.tablename]["filters"]) ) {
+		for ( ii in variables.tableprops[arguments.tablename].filters ) {
+			if ( StructKeyExists(sData,ii) ) {
+				ArrayAppend(arguments.filters,StructCopy(variables.tableprops[arguments.tablename].filters[ii]));
+				arguments.filters[ArrayLen(arguments.filters)].value = sData[ii];
+			}
+		}
+	}
 
-	<cfif NOT StructKeyExists(arguments,"tablealias")>
-		<cfset arguments.tablealias = arguments.tablename>
-	</cfif>
+	if ( NOT StructKeyExists(arguments,"tablealias") ) {
+		arguments.tablealias = arguments.tablename;
+	}
 
-	<!--- filter by primary keys --->
-	<cfloop index="ii" from="1" to="#ArrayLen(pkfields)#" step="1">
-		<cfif StructKeyExists(in,pkfields[ii].ColumnName) AND isOfCFType(in[pkfields[ii].ColumnName],pkfields[ii].CF_DataType)>
-			<cfset ArrayAppend(sqlarray,"#joiner#		#escape(arguments.tablealias & '.' & pkfields[ii].ColumnName)# = ")>
-			<cfset ArrayAppend(sqlarray,sval(pkfields[ii],in))>
-		</cfif>
-	</cfloop>
-	<!--- filter by updateable fields --->
-	<cfloop index="ii" from="1" to="#ArrayLen(fields)#" step="1">
-		<cfif NOT ListFindNoCase(variables.nocomparetypes,fields[ii].CF_DataType)>
-			<cfif useField(in,fields[ii]) OR ( StructKeyExists(in,fields[ii].ColumnName) AND isSimpleValue(in[fields[ii].ColumnName]) AND NOT Len(in[fields[ii].ColumnName]) )>
-				<cfset ArrayAppend(sqlarray,joiner)>
-				<cfset ArrayAppend(sqlarray,getFieldWhereSQL(tablename=arguments.tablename,field=fields[ii].ColumnName,value=in[fields[ii].ColumnName],tablealias=arguments.tablealias))>
-			<cfelseif StructKeyExists(in,fields[ii].ColumnName) AND isSimpleValue(in[fields[ii].ColumnName]) AND NOT Len(Trim(in[fields[ii].ColumnName]))>
-				<cfset ArrayAppend(sqlarray,"#joiner#		#escape(arguments.tablealias & '.' & fields[ii].ColumnName)# IS NULL")>
-			<cfelseif StructKeyExists(fields[ii],"Special") AND fields[ii].Special EQ "DeletionMark" AND NOT ( StructKeyExists(Arguments,"WithDeletedRecords") AND Arguments.WithDeletedRecords IS true )>
-				<!--- Make sure not to get records that have been logically deleted --->
-				<cfif fields[ii].CF_DataType EQ "CF_SQL_BIT">
-					<cfset ArrayAppend(sqlarray,"#joiner#		(#escape(arguments.tablealias & '.' & fields[ii].ColumnName)# = #getBooleanSqlValue(0)# OR #escape(arguments.tablealias & '.' & fields[ii].ColumnName)# IS NULL)")>
-				<cfelseif fields[ii].CF_DataType EQ "CF_SQL_DATE" OR fields[ii].CF_DataType EQ "CF_SQL_DATETIME">
-					<cfset ArrayAppend(sqlarray,"#joiner#		(#escape(arguments.tablealias & '.' & fields[ii].ColumnName)# = 0 OR #escape(arguments.tablealias & '.' & fields[ii].ColumnName)# IS NULL )")>
-				</cfif>
-			</cfif>
-		</cfif>
-	</cfloop>
-	<!--- Filter by relations --->
-	<cfloop index="ii" from="1" to="#ArrayLen(rfields)#" step="1">
-		<cfif useField(in,rfields[ii]) OR ( StructKeyExists(in,rfields[ii].ColumnName) AND isSimpleValue(in[rfields[ii].ColumnName]) AND NOT Len(in[rfields[ii].ColumnName]) )>
-			<cfset ArrayAppend(sqlarray," #joiner# ")>
-			<cfset sArgs = StructNew()>
-			<cfset sArgs["tablename"] = arguments.tablename>
-			<cfset sArgs["field"] = rfields[ii]["ColumnName"]>
-			<cfset sArgs["value"] = in[rfields[ii]["ColumnName"]]>
-			<cfset sArgs["tablealias"] = arguments.tablealias>
-			<cfif StructKeyExists(arguments,"join") AND StructKeyExists(arguments.join,"table")>
-				<cfset sArgs["joinedtable"] = arguments.join.table>
-			</cfif>
-			<cfif StructKeyExists(rfields[ii].Relation,"other-field") AND Len(rfields[ii].Relation["other-field"]) AND StructKeyExists(sOtherFields,rfields[ii].Relation["other-field"])>
-				<cfset sArgs["OtherVal"] = sOtherFields[rfields[ii].Relation["other-field"]]>
-			</cfif>
-			<cfset ArrayAppend(sqlarray,getFieldWhereSQL(argumentCollection=Duplicate(sArgs)))>
-		</cfif>
-	</cfloop>
-	<!--- Filter by filters --->
-	<cfif StructKeyExists(arguments,"filters") AND ArrayLen(arguments.filters)>
-		<cfloop index="ii" from="1" to="#ArrayLen(arguments.filters)#" step="1">
-			<!--- Make sure this is a valid filter (has a field and a value <which either has length or equality operator>) --->
-			<cfif
+	// filter by primary keys
+	for ( ii=1; ii LTE ArrayLen(pkfields); ii++ ) {
+		if ( StructKeyExists(sData,pkfields[ii].ColumnName) AND isOfCFType(sData[pkfields[ii].ColumnName],pkfields[ii].CF_DataType) ) {
+			ArrayAppend(sqlarray,"#joiner#		#escape(arguments.tablealias & '.' & pkfields[ii].ColumnName)# = ");
+			ArrayAppend(sqlarray,sval(pkfields[ii],sData));
+		}
+	}
+	// filter by updateable fields
+	for ( ii=1; ii LTE ArrayLen(fields); ii++ ) {
+		if ( NOT ListFindNoCase(variables.nocomparetypes,fields[ii].CF_DataType) ) {
+			if ( useField(sData,fields[ii]) OR ( StructKeyExists(sData,fields[ii].ColumnName) AND isSimpleValue(sData[fields[ii].ColumnName]) AND NOT Len(sData[fields[ii].ColumnName]) ) ) {
+				ArrayAppend(sqlarray,joiner);
+				ArrayAppend(sqlarray,getFieldWhereSQL(tablename=arguments.tablename,field=fields[ii].ColumnName,value=sData[fields[ii].ColumnName],tablealias=arguments.tablealias));
+			} else if ( StructKeyExists(sData,fields[ii].ColumnName) AND isSimpleValue(sData[fields[ii].ColumnName]) AND NOT Len(Trim(sData[fields[ii].ColumnName])) ) {
+				ArrayAppend(sqlarray,"#joiner#		#escape(arguments.tablealias & '.' & fields[ii].ColumnName)# IS NULL");
+			} else if ( StructKeyExists(fields[ii],"Special") AND fields[ii].Special EQ "DeletionMark" AND NOT ( StructKeyExists(Arguments,"WithDeletedRecords") AND Arguments.WithDeletedRecords IS true ) ) {
+				// Make sure not to get records that have been logically deleted
+				if ( fields[ii].CF_DataType EQ "CF_SQL_BIT" ) {
+					ArrayAppend(sqlarray,"#joiner#		(#escape(arguments.tablealias & '.' & fields[ii].ColumnName)# = #getBooleanSqlValue(0)# OR #escape(arguments.tablealias & '.' & fields[ii].ColumnName)# IS NULL)");
+				} else if ( fields[ii].CF_DataType EQ "CF_SQL_DATE" OR fields[ii].CF_DataType EQ "CF_SQL_DATETIME" ) {
+					ArrayAppend(sqlarray,"#joiner#		(#escape(arguments.tablealias & '.' & fields[ii].ColumnName)# = 0 OR #escape(arguments.tablealias & '.' & fields[ii].ColumnName)# IS NULL )");
+				}
+			}
+		}
+	}
+	// Filter by relations
+	for ( ii=1; ii LTE ArrayLen(rfields); ii++ ) {
+		if ( useField(sData,rfields[ii]) OR ( StructKeyExists(sData,rfields[ii].ColumnName) AND isSimpleValue(sData[rfields[ii].ColumnName]) AND NOT Len(sData[rfields[ii].ColumnName]) ) ) {
+			ArrayAppend(sqlarray," #joiner# ");
+			sArgs = StructNew();
+			sArgs["tablename"] = arguments.tablename;
+			sArgs["field"] = rfields[ii]["ColumnName"];
+			sArgs["value"] = sData[rfields[ii]["ColumnName"]];
+			sArgs["tablealias"] = arguments.tablealias;
+			if ( StructKeyExists(arguments,"join") AND StructKeyExists(arguments.join,"table") ) {
+				sArgs["joinedtable"] = arguments.join.table;
+			}
+			if ( StructKeyExists(rfields[ii].Relation,"other-field") AND Len(rfields[ii].Relation["other-field"]) AND StructKeyExists(sOtherFields,rfields[ii].Relation["other-field"]) ) {
+				sArgs["OtherVal"] = sOtherFields[rfields[ii].Relation["other-field"]];
+			}
+			ArrayAppend(sqlarray,getFieldWhereSQL(argumentCollection=Duplicate(sArgs)));
+		}
+	}
+	// Filter by filters
+	if ( StructKeyExists(arguments,"filters") AND ArrayLen(arguments.filters) ) {
+		for ( ii=1; ii LTE ArrayLen(arguments.filters); ii++ ) {
+			// Make sure this is a valid filter (has a field and a value <which either has length or equality operator>)
+			if (
 					StructKeyExists(arguments.filters[ii],"field")
 				AND	Len(arguments.filters[ii]["field"])
 				AND	(
@@ -1715,748 +1910,790 @@
 							)
 						OR	( StructKeyExists(arguments.filters[ii],"sql") AND Len(arguments.filters[ii]["sql"]) )
 					)
-			>
-				<!--- Determine the arguments of the where clause call --->
-				<cfset sArgs = StructNew()>
-				<cfif StructKeyExists(arguments.filters[ii],"table") AND Len(arguments.filters[ii]["table"])>
-					<cfset sArgs["tablename"] = arguments.filters[ii].table>
-				<cfelse>
-					<cfset sArgs["tablename"] = arguments.tablename>
-					<cfset sArgs["tablealias"] = arguments.tablealias>
-				</cfif>
-				<cfset sArgs["field"] = arguments.filters[ii].field>
-				<cfif StructKeyExists(arguments.filters[ii],"sql") AND Len(arguments.filters[ii]["sql"])>
-					<cfset sArgs["sql"] = arguments.filters[ii]["sql"]>
-					<cfset sArgs["value"] = "">
-				<cfelse>
-					<cfset sArgs["value"] = ToString(arguments.filters[ii].value)>
-				</cfif>
-				<cfif StructKeyExists(arguments.filters[ii],"operator") AND Len(arguments.filters[ii]["operator"])>
-					<cfset sArgs["operator"] = arguments.filters[ii].operator>
-				</cfif>
-				<cfif StructKeyExists(arguments,"join") AND StructKeyExists(arguments.join,"table")>
-					<cfset sArgs["joinedtable"] = arguments.join.table>
-				</cfif>
-				<!--- Only filter if the field is in the table --->
-				<cfif ListFindNoCase(getFieldList(sArgs["tablename"]),sArgs["field"])>
-					<cfinvoke returnvariable="temp" method="getFieldWhereSQL" argumentCollection="#Duplicate(sArgs)#">
-					</cfinvoke>
-					<!--- Only filter if the where clause returned something --->
-					<cfif ( isArray(temp) AND ArrayLen(temp) ) OR ( isSimpleValue(temp) AND Len(Trim(temp)) )>
-						<cfset ArrayAppend(sqlarray," #joiner# ")>
-						<cfset ArrayAppend(sqlarray,temp)>
-					</cfif>
-				</cfif>
-			</cfif>
-		</cfloop>
-	</cfif>
-	<!--- Filter by deletable property --->
-	<cfif
+			) {
+				// Determine the arguments of the where clause call
+				sArgs = StructNew();
+				if ( StructKeyExists(arguments.filters[ii],"table") AND Len(arguments.filters[ii]["table"]) ) {
+					sArgs["tablename"] = arguments.filters[ii].table;
+				} else {
+					sArgs["tablename"] = arguments.tablename;
+					sArgs["tablealias"] = arguments.tablealias;
+				}
+				sArgs["field"] = arguments.filters[ii].field;
+				if ( StructKeyExists(arguments.filters[ii],"sql") AND Len(arguments.filters[ii]["sql"]) ) {
+					sArgs["sql"] = arguments.filters[ii]["sql"];
+					sArgs["value"] = "";
+				} else {
+					sArgs["value"] = ToString(arguments.filters[ii].value);
+				}
+				if ( StructKeyExists(arguments.filters[ii],"operator") AND Len(arguments.filters[ii]["operator"]) ) {
+					sArgs["operator"] = arguments.filters[ii].operator;
+				}
+				if ( StructKeyExists(arguments,"join") AND StructKeyExists(arguments.join,"table") ) {
+					sArgs["joinedtable"] = arguments.join.table;
+				}
+				// Only filter if the field is in the table
+				if ( ListFindNoCase(getFieldList(sArgs["tablename"]),sArgs["field"]) ) {
+					temp = getFieldWhereSQL(argumentCollection=Duplicate(sArgs));
+					// Only filter if the where clause returned something
+					if ( ( isArray(temp) AND ArrayLen(temp) ) OR ( isSimpleValue(temp) AND Len(Trim(temp)) ) ) {
+						ArrayAppend(sqlarray," #joiner# ");
+						ArrayAppend(sqlarray,temp);
+					}
+				}
+			}
+		}
+	}
+	// Filter by deletable property
+	if (
 			( StructKeyExists(variables.tableprops[arguments.tablename],"deletable") AND Len(variables.tableprops[arguments.tablename].deletable) )
 		AND	NOT ListFindNoCase(getFieldList(arguments.tablename),variables.tableprops[arguments.tablename].deletable)
 		AND	NOT ( StructKeyExists(variables.tableprops[arguments.tablename],"filters") AND StructKeyExists(variables.tableprops[arguments.tablename]["filters"],variables.tableprops[arguments.tablename].deletable) )
 		AND	(
-					StructKeyExists(in,variables.tableprops[arguments.tablename].deletable)
-				AND	isBoolean(in[variables.tableprops[arguments.tablename].deletable])
+					StructKeyExists(sData,variables.tableprops[arguments.tablename].deletable)
+				AND	isBoolean(sData[variables.tableprops[arguments.tablename].deletable])
 			)
-	>
-		<cfset ArrayAppend(sqlarray," #joiner# ")>
-		<cfset ArrayAppend(sqlarray,getIsDeletableSQL(tablename=arguments.tablename,tablealias=arguments.tablealias))>
-		<cfset ArrayAppend(sqlarray," = ")>
-		<cfset ArrayAppend(sqlarray,getBooleanSQLValue(in[variables.tableprops[arguments.tablename].deletable]))>
-	</cfif>
-	<cfif StructKeyExists(arguments,"advsql") AND StructKeyExists(arguments.advsql,"WHERE") AND ( ( isArray(arguments.advsql["WHERE"]) AND ArrayLen(arguments.advsql["WHERE"]) ) OR ( isSimpleValue(arguments.advsql["WHERE"]) AND Len(Trim(arguments.advsql["WHERE"])) ) )>
-		<cfif NOT ( isSimpleValue(arguments.advsql["WHERE"]) AND Left(Trim(arguments.advsql["WHERE"]),3) EQ "AND" )>
-			<cfset ArrayAppend(sqlarray,joiner)>
-		</cfif>
-		<cfset ArrayAppend(sqlarray,arguments.advsql["WHERE"])>
-	</cfif>
-
-	<cfreturn sqlarray>
-</cffunction>
-
-<cffunction name="getFieldSelectSQL" access="public" returntype="any" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="field" type="string" required="yes">
-	<cfargument name="tablealias" type="string" required="no">
-	<cfargument name="useFieldAlias" type="boolean" default="true">
-
-	<cfset var ttemp = fillOutJoinTableRelations(arguments.tablename)>
-	<cfset var sField = 0>
-	<cfset var sField2 = 0>
-	<cfset var aSQL = ArrayNew(1)>
-	<cfset var sAdvSQL = StructNew()>
-	<cfset var sJoin = StructNew()>
-	<cfset var sArgs = StructNew()>
-	<cfset var temp = "">
-
-	<cfif isNumeric(arguments.field)>
-		<cfset aSQL = arguments.field>
-	<cfelseif NOT Len(Trim(arguments.field))>
-		<cfset ArrayAppend(aSQL,"''")>
-	<cfelse>
-		<cfset sField = getField(arguments.tablename,arguments.field)>
-
-		<cfif NOT StructKeyExists(arguments,"tablealias")>
-			<cfset arguments.tablealias = arguments.tablename>
-		</cfif>
-
-		<cfset sArgs["noorder"] = NOT variables.dbprops["areSubqueriesSortable"]>
-
-		<cfif StructKeyExists(sField,"Relation") AND StructKeyExists(sField.Relation,"type")>
-			<cfset sField.Relation = expandRelationStruct(sField.Relation,sField)>
-			<cfif StructKeyExists(sField["Relation"],"filters") AND isArray(sField["Relation"].filters)>
-				<cfset sArgs["filters"] = sField["Relation"].filters>
-			</cfif>
-			<cfset ArrayAppend(aSQL,"(")>
-			<cfswitch expression="#sField.Relation.type#">
-			<cfcase value="label">
-				<cfif StructKeyExists(sField.Relation,"sort-field")>
-					<cfset sArgs["sortfield"] = sField.Relation["sort-field"]>
-					<cfif StructKeyExists(sField.Relation,"sort-dir")>
-						<cfset sArgs["sortdir"] = sField.Relation["sort-dir"]>
-					</cfif>
-				<cfelseif getDatabase() EQ "Access">
-					<cfset sArgs["noorder"] = true>
-				</cfif>
-				<cfset sArgs["tablename"] = sField.Relation["table"]>
-				<cfset sArgs["fieldlist"] = sField.Relation["field"]>
-				<cfif arguments.tablealias EQ sField.Relation["table"]>
-					<cfset sArgs["tablealias"] = sField.Relation["table"] & "_DataMgr_inner">
-				<cfelse>
-					<cfset sArgs["tablealias"] = sField.Relation["table"]>
-				</cfif>
-				<!--- Only one record for fields in database (otherwise nesting will occur and it could cause trouble but not give any benefit) --->
-				<!--- <cfif ListFindNoCase(getDBFieldList(sField.Relation["table"]),sField.Relation["field"])> --->
-					<cfset sArgs["maxrows"] = 1>
-				<!--- </cfif> --->
-				<cfset sAdvSQL = StructNew()>
-				<cfset sAdvSQL["WHERE"] = ArrayNew(1)>
-				<cfset ArrayAppend(sAdvSQL["WHERE"], getFieldSelectSQL(tablename=sField.Relation['table'],field=sField.Relation['join-field-remote'],tablealias=sArgs.tablealias,useFieldAlias=false) )>
-				<cfset ArrayAppend(sAdvSQL["WHERE"], " = " )>
-				<cfset ArrayAppend(sAdvSQL["WHERE"], getFieldSelectSQL(tablename=arguments.tablename,field=sField.Relation['join-field-local'],tablealias=arguments.tablealias,useFieldAlias=false) )>
-				<cfset sArgs["advsql"] = sAdvSQL>
-				<cfset ArrayAppend(aSQL,getRecordsSQL(argumentCollection=sArgs))>
-			</cfcase>
-			<cfcase value="list">
-				<cfset ArrayAppend(aSQL,getFieldSQL_List(argumentCollection=arguments))>
-			</cfcase>
-			<cfcase value="concat">
-				<cfset ArrayAppend(aSQL,"#concatFields(arguments.tablename,sField.Relation['fields'],sField.Relation['delimiter'],arguments.tablealias)#")>
-			</cfcase>
-			<cfcase value="avg,count,max,min,sum" delimiters=",">
-				<cfset sAdvSQL = StructNew()>
-				<cfif arguments.tablename EQ sField.Relation["table"]>
-					<cfset sArgs["tablealias"] = sField.Relation["table"] & "_datamgr_inner_table">
-				<cfelse>
-					<cfset sArgs["tablealias"] = sField.Relation["table"]>
-				</cfif>
-				<cfif StructKeyExists(sField.Relation,"join-table")>
-					<cfset sJoin = StructNew()>
-					<cfset sJoin["table"] = sField.Relation["join-table"]>
-					<cfset sJoin["onLeft"] = sField.Relation["remote-table-join-field"]>
-					<cfset sJoin["onRight"] = sField.Relation["join-table-field-remote"]>
-					<cfset sAdvSQL["WHERE"] = ArrayNew(1)>
-					<cfset ArrayAppend(sAdvSQL["WHERE"],getFieldSelectSQL(sField.Relation['join-table'],sField.Relation['join-table-field-local'],sField.Relation['join-table'],false))>
-					<cfset ArrayAppend(sAdvSQL["WHERE"]," = ")>
-					<cfset ArrayAppend(sAdvSQL["WHERE"],getFieldSelectSQL(arguments.tablename,sField.Relation['local-table-join-field'],arguments.tablealias,false))>
-				<cfelse>
-					<cfset sAdvSQL["WHERE"] = ArrayNew(1)>
-					<cfset ArrayAppend(sAdvSQL["WHERE"],getFieldSelectSQL(sField.Relation['table'],sField.Relation['join-field-remote'],sArgs.tablealias,false))>
-					<cfset ArrayAppend(sAdvSQL["WHERE"]," = ")>
-					<cfset ArrayAppend(sAdvSQL["WHERE"],getFieldSelectSQL(arguments.tablename,sField.Relation['join-field-local'],arguments.tablealias,false))>
-				</cfif>
-				<cfif StructKeyExists(sField.Relation,"sort-field")>
-					<cfset sArgs["sortfield"] = sField.Relation["sort-field"]>
-					<cfif StructKeyExists(sField.Relation,"sort-dir")>
-						<cfset sArgs["sortdir"] = sField.Relation["sort-dir"]>
-					</cfif>
-				</cfif>
-				<cfset sArgs["tablename"] = sField.Relation["table"]>
-				<cfset sArgs["fieldlist"] = sField.Relation["field"]>
-				<cfset sArgs["function"] = sField.Relation["type"]>
-				<cfset sArgs["advsql"] = sAdvSQL>
-				<cfset sArgs["join"] = sJoin>
-				<cfif arguments.tablename EQ sField.Relation["table"]>
-					<cfset sArgs["tablealias"] = sField.Relation["table"]& "_datamgr_inner_table">
-				</cfif>
-				<cfset ArrayAppend(aSQL,getRecordsSQL(argumentCollection=sArgs))>
-			</cfcase>
-			<cfcase value="has">
-				<cfset ArrayAppend(aSQL,getFieldSQL_Has(argumentCollection=arguments))>
-			</cfcase>
-			<cfcase value="math">
-				<cfset ArrayAppend(aSQL,getFieldSQL_Math(argumentCollection=arguments))>
-			</cfcase>
-			<cfcase value="now">
-				<cfset ArrayAppend(aSQL,getNowSQL())>
-			</cfcase>
-			<cfcase value="custom">
-				<cfif StructKeyExists(sField.Relation,"sql") AND Len(sField.Relation.sql)>
-					<cfset ArrayAppend(aSQL,"#sField.Relation.sql#")>
-				<cfelse>
-					<cfset ArrayAppend(aSQL,"''")>
-				</cfif>
-			</cfcase>
-			<cfdefaultcase>
-				<cfset ArrayAppend(aSQL,"''")>
-			</cfdefaultcase>
-			</cfswitch>
-			<cfset ArrayAppend(aSQL,")")>
-			<cfif arguments.useFieldAlias AND Len(Trim(sField['ColumnName']))>
-				<cfset ArrayAppend(aSQL," AS #escape(sField['ColumnName'])#")>
-			</cfif>
-		<cfelse>
-			<cfset ArrayAppend(aSQL,escape(arguments.tablealias & "." & sField["ColumnName"]))>
-		</cfif>
-	</cfif>
-
-	<cfreturn aSQL>
-</cffunction>
-
-<cffunction name="getFieldSQL_Has" access="public" returntype="any" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="field" type="string" required="yes">
-	<cfargument name="tablealias" type="string" required="no">
-
-	<cfset var sField = getField(arguments.tablename,arguments.field)>
-	<cfset var aSQL = 0>
-
-	<cfinvoke returnvariable="aSQL" method="getHasFieldSQL">
-		<cfinvokeargument name="tablename" value="#arguments.tablename#">
-		<cfinvokeargument name="field" value="#sField.Relation.field#">
-		<cfif StructKeyExists(arguments,"tablealias")>
-			<cfinvokeargument name="tablealias" value="#arguments.tablealias#">
-		<cfelse>
-			<cfinvokeargument name="tablealias" value="#arguments.tablename#">
-		</cfif>
-	</cfinvoke>
-
-	<cfreturn aSQL>
-</cffunction>
-
-<cffunction name="getFieldSQL_List" access="public" returntype="any" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="field" type="string" required="yes">
-	<cfargument name="tablealias" type="string" required="no">
-
-	<cfset var sField = getField(arguments.tablename,arguments.field)>
-	<cfset var aSQL = []>
-	<cfset var temp = 0>
-	<cfset var sField2 = 0>
-
-	<cfif StructKeyExists(sField.Relation,"join-table")>
-		<cfset temp = getFieldSelectSQL(tablename=arguments.tablename,field=sField.Relation["local-table-join-field"],tablealias=arguments.tablealias,useFieldAlias=false)>
-		<cfif Len(sField.Relation["local-table-join-field"])>
-			<cfset sField2 = getField(arguments.tablename,sField.Relation["local-table-join-field"])>
-		<cfelse>
-			<cfset sField2 = StructNew()>
-		</cfif>
-	<cfelse>
-		<cfset temp = getFieldSelectSQL(tablename=arguments.tablename,field=sField.Relation["join-field-local"],tablealias=arguments.tablealias,useFieldAlias=false)>
-		<cfif Len(sField.Relation["join-field-local"])>
-			<cfset sField2 = getField(arguments.tablename,sField.Relation["join-field-local"])>
-		<cfelse>
-			<cfset sField2 = StructNew()>
-		</cfif>
-	</cfif>
-	<cfset temp = readableSQL(temp)>
-	<cfif Len(temp)>
-		<cfif StructKeyExists(sField2,"Relation") AND StructKeyExists(sField2.Relation,"type") AND sField2.Relation.type EQ "concat">
-			<cfset ArrayAppend(aSQL,temp)>
-		<cfelse>
-			<cfset ArrayAppend(aSQL,concat(temp))>
-		</cfif>
-	<cfelse>
-		<cfset ArrayAppend(aSQL,"''")>
-	</cfif>
-
-	<cfreturn aSQL>
-</cffunction>
-
-<cffunction name="getHasFieldSQL" access="public" returntype="any" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="field" type="string" required="yes">
-	<cfargument name="tablealias" type="string" required="no">
-
-	<cfset var dtype = getEffectiveDataType(arguments.tablename,arguments.field)>
-	<cfset var aSQL = ArrayNew(1)>
-	<cfset var sAdvSQL = StructNew()>
-	<cfset var sJoin = StructNew()>
-	<cfset var sArgs = StructNew()>
-	<cfset var temp = "">
-
-	<cfif NOT StructKeyExists(arguments,"tablealias")>
-		<cfset arguments.tablealias = arguments.tablename>
-	</cfif>
-
-	<cfswitch expression="#dtype#">
-	<cfcase value="numeric">
-		<cfset ArrayAppend(aSQL,"isnull(CASE WHEN (")>
-		<cfset ArrayAppend(aSQL, getFieldSelectSQL(tablename=arguments.tablename,field=arguments.field,tablealias=arguments.tablealias,useFieldAlias=false) )>
-		<cfset ArrayAppend(aSQL,") > 0 THEN 1 ELSE 0 END,0)")>
-	</cfcase>
-	<cfcase value="string">
-		<cfset ArrayAppend(aSQL,"isnull(len(")>
-		<cfset ArrayAppend(aSQL, getFieldSelectSQL(tablename=arguments.tablename,field=arguments.field,tablealias=arguments.tablealias,useFieldAlias=false) )>
-		<cfset ArrayAppend(aSQL,"),0)")>
-	</cfcase>
-	<cfcase value="date">
-		<cfset ArrayAppend(aSQL,"CASE WHEN (")>
-		<cfset ArrayAppend(aSQL, getFieldSelectSQL(tablename=arguments.tablename,field=arguments.field,tablealias=arguments.tablealias,useFieldAlias=false) )>
-		<cfset ArrayAppend(aSQL,") IS NULL THEN 0 ELSE 1 END")>
-	</cfcase>
-	<cfcase value="boolean">
-		<cfset ArrayAppend(aSQL,"isnull(")>
-		<cfset ArrayAppend(aSQL, getFieldSelectSQL(tablename=arguments.tablename,field=arguments.field,tablealias=arguments.tablealias,useFieldAlias=false) )>
-		<cfset ArrayAppend(aSQL,",0)")>
-	</cfcase>
-	</cfswitch>
-
-	<cfreturn aSQL>
-</cffunction>
-
-<cffunction name="getFieldWhereSQL" access="public" returntype="any" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="field" type="string" required="yes">
-	<cfargument name="value" type="string" required="yes">
-	<cfargument name="tablealias" type="string" required="no">
-	<cfargument name="operator" type="string" default="=">
-	<cfargument name="sql" type="any" required="no">
-
-	<cfset var sField = getField(arguments.tablename,arguments.field)>
-	<cfset var aSQL = ArrayNew(1)>
-	<cfset var sArgs = StructNew()>
-	<cfset var temp = 0>
-	<cfset var sAllField = 0>
-	<cfset var operators = "=,>,<,>=,<=,LIKE,NOT LIKE,<>,IN,NOT IN">
-	<cfset var operators_cf = "EQUAL,EQ,NEQ,GT,GTE,LT,LTE,IS,IS NOT,NOT">
-	<cfset var operators_sql = "=,=,<>,>,>=,<,<=,=,<>,<>">
-	<cfset var fieldval = arguments.value>
-	<cfset var sRelationTypes = getRelationTypes()>
-	<cfset var sAdvSQL = 0>
-	<cfset var inops = "IN,NOT IN">
-	<cfset var dtype = getEffectiveDataType(arguments.tablename,arguments.field)>
-	<cfset var hasOtherFieldVal = false>
-	<cfset var NegativeOperators = "<>,NOT LIKE,NOT IN">
-	<cfset var isNegativeOperator = false>
-	<cfset var isAll = false>
-
-	<cfif arguments.operator EQ "All">
-		<cfset isAll = true>
-		<cfset arguments.operator = "=">
-	</cfif>
-
-	<cfif NOT ( ListFindNoCase(operators,arguments.operator) OR ListFindNoCase(operators_cf,arguments.operator) )>
-		<cfset throwDMError("#arguments.operator# is not a valid operator. Valid operators are: #operators#,#operators_cf#","InvalidOperator")>
-	</cfif>
-
-	<cfif NOT StructKeyExists(arguments,"sql")>
-		<cfset arguments.sql = "">
-	</cfif>
-
-	<!--- Convert ColdFusion operator to SQL operator --->
-	<cfif ListFindNoCase(operators_cf,arguments.operator)>
-		<cfset arguments.operator = ListGetAt(operators_sql,ListFindNoCase(operators_cf,arguments.operator))>
-	</cfif>
-
-	<cfset isNegativeOperator = ( ListFindNoCase(NegativeOperators,arguments.operator) GT 0 )>
-
-	<cfif arguments.operator CONTAINS "LIKE" AND dtype NEQ "string">
-		<cfset throwDMError("LIKE comparisons are only valid on string fields","LikeOnlyOnStrings")>
-	</cfif>
-
-	<cfif arguments.operator CONTAINS "LIKE" AND NOT ( fieldval CONTAINS "%" )>
-		<cfset fieldval = "%#fieldval#%">
-	</cfif>
-
-	<cfif NOT StructKeyExists(arguments,"tablealias")>
-		<cfset arguments.tablealias = arguments.tablename>
-	</cfif>
-
-	<cfset sArgs["noorder"] = NOT variables.dbprops["areSubqueriesSortable"]>
-
-	<cfif StructKeyExists(sField,"Relation") AND StructKeyExists(sField.Relation,"type")>
-		<cfset sField.Relation = expandRelationStruct(sField.Relation,sField)>
-		<cfif StructKeyExists(sField["Relation"],"filters") AND isArray(sField["Relation"].filters)>
-			<cfset sArgs["filters"] = sField["Relation"].filters>
-		<cfelse>
-			<cfset sArgs["filters"] = ArrayNew(1)>
-		</cfif>
-		<cfswitch expression="#sField.Relation.type#">
-		<cfcase value="label">
-			<cfset sArgs.tablename = sField.Relation["table"]>
-			<cfset sArgs.fieldlist = sField.Relation["field"]>
-			<cfset sArgs.maxrows = 1>
-			<cfset sArgs.advsql = StructNew()>
-			<cfset sArgs.data = StructNew()>
-
-			<cfset ArrayAppend(aSQL,"EXISTS (")>
-				<cfset sArgs.operator = arguments.operator>
-				<cfset sArgs.noorder = true>
-				<cfset sArgs.isInExists = true>
-				<cfset temp = StructNew()>
-				<cfset temp.field = sField.Relation["field"]>
-				<cfset temp.value = fieldval>
-				<cfset temp.operator = arguments.operator>
-				<cfif arguments.tablealias EQ sField.Relation["table"]>
-					<cfset sArgs["tablealias"] = sField.Relation["table"] & "_datamgr_inner">
-				<cfelse>
-					<cfset sArgs["tablealias"] = sField.Relation["table"]>
-				</cfif>
-				<cfset ArrayAppend(sArgs.filters,temp)>
-				<cfset sArgs.advsql["WHERE"] = ArrayNew(1)>
-				<cfset ArrayAppend(sArgs.advsql["WHERE"],getFieldSelectSQL(sField.Relation['table'],sField.Relation['join-field-remote'],sArgs.tablealias,false))>
-				<cfset ArrayAppend(sArgs.advsql["WHERE"]," = ")>
-				<cfif StructKeyExists(arguments,"joinedtable") AND Len(arguments.joinedtable)>
-					<cfset ArrayAppend(sArgs.advsql["WHERE"],getFieldSelectSQL(arguments.joinedtable,sField.Relation['join-field-local'],arguments.joinedtable,false))>
-				<cfelse>
-					<cfset ArrayAppend(sArgs.advsql["WHERE"],getFieldSelectSQL(arguments.tablename,sField.Relation['join-field-local'],arguments.tablealias,false))>
-				</cfif>
-				<cfset ArrayAppend(aSQL,getRecordsSQL(argumentCollection=sArgs))>
-			<cfset ArrayAppend(aSQL,")")>
-		</cfcase>
-		<cfcase value="list">
-			<cfset hasOtherFieldVal = (
-					StructKeyExists(arguments,"OtherVal")
-				AND	StructKeyExists(sField.Relation,"other-field")
-				AND	Len(sField.Relation["other-field"])
-				AND	(
-						Len(arguments.OtherVal) EQ 0
-					OR	isOfCFType(arguments.OtherVal,getEffectiveFieldDataType(getField(arguments.tablename,sField.Relation["other-field"]),true))
-				)
-			)>
-
-			<cfif isAll>
-				<cfset sArgs.function = "count">
-
-			<cfelse>
-				<cfset sArgs.isInExists = true>
-				<cfset sArgs.fieldlist = sField.Relation["field"]>
-			</cfif>
-
-			<cfset sArgs.noorder = true>
-			<cfset sArgs.tablename = sField.Relation["table"]>
-			<cfset sArgs.maxrows = 1>
-			<cfset sArgs.join = StructNew()>
-			<cfset sArgs.advsql = StructNew()>
-			<cfset sArgs.advsql.WHERE = ArrayNew(1)>
-			<cfset temp = ArrayNew(1)>
-
-			<cfif StructKeyExists(sField.Relation,"join-table")>
-				<cfset sArgs.join.table = sField.Relation["join-table"]>
-				<cfset sArgs.join.onLeft = sField.Relation["remote-table-join-field"]>
-				<cfset sArgs.join.onRight = sField.Relation["join-table-field-remote"]>
-
-				<cfset ArrayAppend(sArgs.advsql.WHERE,getFieldSelectSQL(sField.Relation['join-table'],sField.Relation['join-table-field-local'],sField.Relation['join-table'],false))>
-				<cfset ArrayAppend(sArgs.advsql.WHERE," = ")>
-				<cfset ArrayAppend(sArgs.advsql.WHERE,getFieldSelectSQL(arguments.tablename,sField.Relation['local-table-join-field'],arguments.tablealias,false))>
-			<cfelse>
-				<cfset ArrayAppend(sArgs.advsql.WHERE,getFieldSelectSQL(sField.Relation['table'],sField.Relation['join-field-remote'],sField.Relation['table'],false))>
-				<cfset ArrayAppend(sArgs.advsql.WHERE," = ")>
-				<cfset ArrayAppend(sArgs.advsql.WHERE,getFieldSelectSQL(arguments.tablename,sField.Relation['join-field-local'],arguments.tablealias,false))>
-			</cfif>
-			<cfif Len(arguments.value)>
-				<cfset ArrayAppend(sArgs.advsql.WHERE,"			AND		(")>
-				<cfset ArrayAppend(sArgs.advsql.WHERE,"							1 = 0")>
-				<cfloop index="temp" list="#fieldval#">
-					<cfset ArrayAppend(sArgs.advsql.WHERE,"					OR")>
-					<cfset ArrayAppend(sArgs.advsql.WHERE,"#getFieldSelectSQL(sField.Relation['table'],sField.Relation['field'],sField.Relation['table'],false)#")>
-					<cfset ArrayAppend(sArgs.advsql.WHERE," = ")><!--- %%TODO: Needs to work for any operator --->
-					<cfset ArrayAppend(sArgs.advsql.WHERE,sval(getField(sField.Relation["table"],sField.Relation["field"]),temp))>
-				</cfloop>
-				<cfset ArrayAppend(sArgs.advsql.WHERE,"					)")>
-			</cfif>
-
-			<cfif hasOtherFieldVal>
-				<cfset ArrayAppend(aSQL,"(")>
-				<cfset ArrayAppend(aSQL,getFieldWhereSQL(tablename=arguments.tablename,field=sField.Relation["other-field"],value=arguments.OtherVal,tablealias=arguments.tablealias))>
-				<cfset ArrayAppend(aSQL," OR ")>
-			</cfif>
-			<cfif isNegativeOperator OR NOT Len(arguments.value)>
-				<cfset ArrayAppend(aSQL," NOT ")>
-			</cfif>
-			<cfif NOT isAll>
-				<cfset ArrayAppend(aSQL,"EXISTS")>
-			</cfif>
-			<cfset ArrayAppend(aSQL," (")>
-				<cfset ArrayAppend(aSQL,getRecordsSQL(argumentCollection=sArgs))>
-			<cfset ArrayAppend(aSQL,"		)")>
-			<cfif isAll>
-				<cfset ArrayAppend(aSQL," = #ListLen(fieldval)#")>
-			</cfif>
-			<cfif hasOtherFieldVal>
-				<cfset ArrayAppend(aSQL,")")>
-			</cfif>
-		</cfcase>
-		<cfcase value="concat">
-			<cfset ArrayAppend(aSQL,getFieldSelectSQL(arguments.tablename,arguments.field,arguments.tablealias,false))>
-			<cfset ArrayAppend(aSQL,getComparatorSQL(fieldval,"CF_SQL_VARCHAR",arguments.operator,true,arguments.sql))>
-		</cfcase>
-		<cfcase value="avg,count,max,min,sum" delimiters=",">
-			<cfset sArgs.tablename = sField.Relation["table"]>
-			<cfset sArgs.fieldlist = sField.Relation["field"]>
-			<cfset sArgs.advsql = StructNew()>
-			<cfset sArgs.join = StructNew()>
-
-			<cfset sAdvSQL = StructNew()>
-			<cfif StructKeyExists(sField.Relation,"join-table")>
-				<cfset sArgs.join["table"] = sField.Relation["join-table"]>
-				<cfset sArgs.join["onLeft"] = sField.Relation["remote-table-join-field"]>
-				<cfset sArgs.join["onRight"] = sField.Relation["join-table-field-remote"]>
-				<cfset sArgs.advsql["WHERE"] = ArrayNew(1)>
-				<cfset ArrayAppend(sArgs.advsql["WHERE"],getFieldSelectSQL(sField.Relation['join-table'],sField.Relation['join-table-field-local'],sField.Relation['join-table'],false))>
-				<cfset ArrayAppend(sArgs.advsql["WHERE"]," = ")>
-				<cfset ArrayAppend(sArgs.advsql["WHERE"],getFieldSelectSQL(arguments.tablename,sField.Relation['local-table-join-field'],arguments.tablealias,false))>
-			<cfelse>
-				<cfset sArgs.advsql["WHERE"] = ArrayNew(1)>
-				<cfset ArrayAppend(sArgs.advsql["WHERE"],getFieldSelectSQL(sField.Relation['table'],sField.Relation['join-field-remote'],sField.Relation['table'],false))>
-				<cfset ArrayAppend(sArgs.advsql["WHERE"]," = ")>
-				<cfset ArrayAppend(sArgs.advsql["WHERE"],getFieldSelectSQL(arguments.tablename,sField.Relation['join-field-local'],arguments.tablealias,false))>
-			</cfif>
-			<cfset sArgs["function"] = sField.Relation["type"]>
-			<cfif arguments.tablename EQ sField.Relation["table"]>
-				<cfset sArgs["tablealias"] = sField.Relation["table"] & "_datamgr_inner_table">
-			</cfif>
-			<cfset ArrayAppend(aSQL,"(")>
-				<cfset ArrayAppend(aSQL,getRecordsSQL(argumentCollection=sArgs))>
-			<cfset ArrayAppend(aSQL,")")>
-			<cfset ArrayAppend(aSQL,getComparatorSQL(fieldval,"CF_SQL_NUMERIC",arguments.operator,true,arguments.sql))>
-		</cfcase>
-		<cfcase value="custom">
-			<cfif StructKeyExists(sField.Relation,"sql") AND Len(sField.Relation.sql) AND StructKeyExists(sField.Relation,"CF_DataType")>
-				<cfset ArrayAppend(aSQL,"(")>
-				<cfset ArrayAppend(aSQL,"#sField.Relation.sql#")>
-				<cfset ArrayAppend(aSQL,")")>
-				<cfset ArrayAppend(aSQL,getComparatorSQL(fieldval,sField.Relation["CF_DataType"],arguments.operator,true,arguments.sql))>
-			<cfelse>
-				<cfset ArrayAppend(aSQL,"1 = 1")>
-			</cfif>
-		</cfcase>
-		<cfdefaultcase>
-			<cfset ArrayAppend(aSQL, getFieldSelectSQL(tablename=arguments.tablename,field=arguments.field,tablealias=arguments.tablealias,useFieldAlias=false) )>
-			<cfif StructKeyExists(sRelationTypes,sField.Relation.type) AND Len(sRelationTypes[sField.Relation.type].cfsqltype)>
-				<cfset ArrayAppend(aSQL,getComparatorSQL(fieldval,sRelationTypes[sField.Relation.type].cfsqltype,arguments.operator,true,arguments.sql))>
-			<cfelse>
-				<cfset ArrayAppend(aSQL,getComparatorSQL(Val(fieldval),"CF_SQL_NUMERIC",arguments.operator,true,arguments.sql))>
-			</cfif>
-		</cfdefaultcase>
-		</cfswitch>
-		<cfif StructKeyExists(sField.Relation,"all-field")>
-			<cfset sAllField = getField(arguments.tablename,sField.Relation["all-field"])>
-			<cfset sArgs = arguments>
-			<cfset sArgs.field = sField.Relation["all-field"]>
-			<cfset sArgs.value = 1>
-			<cfif isStruct(sAllField)>
-				<cfset ArrayPrepend(aSQL," OR ")>
-				<cfset ArrayPrepend(aSQL,getFieldWhereSQL(argumentCollection=sArgs))>
-				<cfset ArrayPrepend(aSQL,"(")>
-				<cfset ArrayAppend(aSQL,")")>
-			</cfif>
-		</cfif>
-	<cfelse>
-		<cfif getDatabase() EQ "Access" AND sField.CF_Datatype EQ "CF_SQL_BIT">
-			<cfset ArrayAppend(aSQL,"abs(#escape(arguments.tablealias & '.' & sField.ColumnName)#)")>
-		<cfelse>
-			<cfset ArrayAppend(aSQL,"#escape(arguments.tablealias & '.' & sField.ColumnName)#")>
-		</cfif>
-		<cfif getDatabase() EQ "Derby" AND arguments.operator CONTAINS "LIKE">
-			<cfset ArrayPrepend(aSQL,"LOWER(")>
-			<cfset ArrayAppend(aSQL,")")>
-			<cfset fieldval = LCase(fieldval)>
-		</cfif>
-		<cfset ArrayAppend(aSQL,getComparatorSQL(fieldval,sField.CF_Datatype,arguments.operator,true,arguments.sql))>
-	</cfif>
-
-	<cfreturn aSQL>
-</cffunction>
-
-<cffunction name="getMatchingRecordKeys" access="public" returntype="struct" output="no">
-	<cfargument name="tablename" type="string" required="yes" hint="The table in which to insert data.">
-	<cfargument name="data" type="struct" required="yes" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="pksonly" type="boolean" default="true">
-
-	<cfset var aPKFields = getPKFields(arguments.tablename)>
-	<cfset var ii = 0>
-	<cfset var in = arguments.data><!--- holder for incoming data (just for readability) --->
-	<cfset var inPK = StructNew()><!--- holder for incoming pk data (just for readability) --->
-	<cfset var qGetRecords = 0>
-	<cfset var sResult = StructNew()>
-	<cfset var pkfields = "">
-
-	<cfif ArrayLen(aPKFields)>
-		<!--- Load up all primary key fields in temp structure --->
-		<cfloop index="ii" from="1" to="#ArrayLen(aPKFields)#" step="1">
-			<cfset pkfields = ListAppend(pkfields,aPKFields[ii].ColumnName)>
-			<cfif StructKeyHasLen(in,aPKFields[ii].ColumnName)>
-				<cfset inPK[aPKFields[ii].ColumnName] = in[aPKFields[ii].ColumnName]>
-			</cfif>
-		</cfloop>
-	</cfif>
-
-	<!--- Try to get existing record with given data --->
-	<cfif NOT arguments.pksonly>
-		<!--- Use only aPKFields if all are passed in, otherwise use all data available --->
-		<cfif ArrayLen(aPKFields)>
-			<cfif StructCount(inPK) EQ ArrayLen(aPKFields)>
-				<cfset qGetRecords = getRecords(tablename=arguments.tablename,data=inPK,fieldlist=pkfields,MaxRows=1)>
-			<cfelse>
-				<cfset qGetRecords = getRecords(tablename=arguments.tablename,data=in,fieldlist=pkfields,MaxRows=1)>
-			</cfif>
-		<cfelse>
-			<cfset qGetRecords = getRecords(tablename=arguments.tablename,data=in,fieldlist=pkfields,MaxRows=1)>
-		</cfif>
-	</cfif>
-
-	<!--- If no matching records by all fields, Check for existing record by primary keys --->
-	<cfif arguments.pksonly OR NOT qGetRecords.RecordCount>
-		<cfif ArrayLen(aPKFields)>
-			<!--- All all primary key fields exist, check for record --->
-			<cfif StructCount(inPK) EQ ArrayLen(aPKFields)>
-				<cfset qGetRecords = getRecords(tablename=arguments.tablename,data=inPK,fieldlist=pkfields,MaxRows=1)>
-			</cfif>
-		</cfif>
-	</cfif>
-
-	<cfif isQuery(qGetRecords) AND qGetRecords.RecordCount>
-		<cfloop list="#qGetRecords.ColumnList#" index="ii">
-			<cfset sResult[ii] = qGetRecords[ii][1]>
-		</cfloop>
-	</cfif>
-
-	<cfreturn sResult>
-</cffunction>
-
-<cffunction name="getStringTypes" access="public" returntype="string" output="no" hint="I return a list of datypes that hold strings / character values."><cfreturn ""></cffunction>
-
-<cffunction name="getSupportedDatabases" access="public" returntype="query" output="no" hint="I return the databases supported by this installation of DataMgr.">
-
-	<cfset var qComponents = 0>
-	<cfset var aComps = ArrayNew(1)>
-	<cfset var i = 0>
-	<cfset var qDatabases = QueryNew("Database,DatabaseName,shortstring,driver")>
-
-	<cfif StructKeyExists(variables,"databases") AND isQuery(variables.databases)>
-		<cfset qDatabases = variables.databases>
-	<cfelse>
-		<cfdirectory action="LIST" directory="#GetDirectoryFromPath(GetCurrentTemplatePath())#" name="qComponents" filter="*.cfc">
-		<cfloop query="qComponents">
-			<cfif name CONTAINS "DataMgr_">
-				<cftry>
-					<cfset ArrayAppend(aComps,CreateObject("component","#ListFirst(name,'.')#").init(""))>
-					<cfset QueryAddRow(qDatabases)>
-					<cfset QuerySetCell(qDatabases, "Database", ReplaceNoCase(ListFirst(name,"."),"DataMgr_","") )>
-					<cfset QuerySetCell(qDatabases, "DatabaseName", aComps[ArrayLen(aComps)].getDatabase() )>
-					<cfset QuerySetCell(qDatabases, "shortstring", aComps[ArrayLen(aComps)].getDatabaseShortString() )>
-					<cfset QuerySetCell(qDatabases, "driver", aComps[ArrayLen(aComps)].getDatabaseDriver() )>
-					<cfcatch>
-					</cfcatch>
-				</cftry>
-			</cfif>
-		</cfloop>
-		<cfset variables.databases = qDatabases>
-	</cfif>
-
-	<cfreturn qDatabases>
-</cffunction>
-
-<cffunction name="getTableData" access="public" returntype="struct" output="no" hint="I return information about all of the tables currently loaded into this instance of Data Manager.">
-	<cfargument name="tablename" type="string" required="no">
-
-	<cfset var sResult = 0>
-
-	<cfif StructKeyExists(arguments,"tablename") AND Len(arguments.tablename)>
-		<cfset checkTable(arguments.tablename)><!--- Check whether table is loaded --->
-		<cfset sResult = StructNew()>
-		<cfif ListFindNoCase(StructKeyList(variables.tables),arguments.tablename)>
-			<cfset sResult[arguments.tablename] = variables.tables[arguments.tablename]>
-		</cfif>
-	<cfelse>
-		<cfset sResult = variables.tables>
-	</cfif>
-
-	<cfreturn sResult>
-</cffunction>
-
-<cffunction name="getUpdateableFields" access="public" returntype="array" output="no" hint="I return an array of fields that can be updated.">
-	<cfargument name="tablename" type="string" required="yes">
-
-	<cfset var bTable = checkTable(arguments.tablename)><!--- Check whether table is loaded --->
-	<cfset var ii = 0><!--- counter --->
-	<cfset var arrFields = ArrayNew(1)><!--- array of udateable fields --->
-
-	<cfif StructKeyExists(variables.tableprops,arguments.tablename) AND StructKeyExists(variables.tableprops[arguments.tablename],"updatefields")>
-		<cfset arrFields = variables.tableprops[arguments.tablename]["updatefields"]>
-	<cfelse>
-		<cfloop index="ii" from="1" to="#ArrayLen(variables.tables[arguments.tablename])#" step="1">
-			<!--- Make sure field isn't a relation --->
-			<cfif StructKeyExists(variables.tables[arguments.tablename][ii],"CF_Datatype") AND NOT StructKeyExists(variables.tables[arguments.tablename][ii],"Relation")>
-				<!--- Make sure field isn't a primary key --->
-				<cfif NOT StructKeyExists(variables.tables[arguments.tablename][ii],"PrimaryKey") OR NOT variables.tables[arguments.tablename][ii].PrimaryKey>
-					<cfset ArrayAppend(arrFields, variables.tables[arguments.tablename][ii])>
-				</cfif>
-			</cfif>
-		</cfloop>
-		<cfset variables.tableprops[arguments.tablename]["updatefields"] = arrFields>
-	</cfif>
-
-	<cfreturn arrFields>
-</cffunction>
-
-<cffunction name="getVersion" access="public" returntype="string" output="no">
-	<cfreturn variables.DataMgrVersion>
-</cffunction>
-
-<cffunction name="hasRecords" access="public" returntype="boolean" output="no">
-	<cfargument name="tablename" type="string" required="yes" hint="The table from which to return a record.">
-	<cfargument name="data" type="any" required="no" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="advsql" type="struct" hint="A structure of sqlarrays for each area of a query (SELECT,FROM,WHERE,ORDER BY).">
-	<cfargument name="filters" type="array">
-
-	<cfset var aSQL = ArrayNew(1)>
-	<cfset var qHasRecords = 0>
-	<cfset var result = false>
-
-	<cfset ArrayAppend(aSQL,"SELECT	CASE WHEN EXISTS ( ")>
-		<cfset ArrayAppend(aSQL,"SELECT	1 ")>
-		<cfset ArrayAppend(aSQL,"FROM")>
-		<cfset ArrayAppend(aSQL,getFromSQL(argumentCollection=arguments))>
-		<cfset ArrayAppend(aSQL,"WHERE		1 = 1")>
-		<cfset ArrayAppend(aSQL,getWhereSQL(argumentCollection=arguments))>
-	<cfset ArrayAppend(aSQL," ) THEN #getBooleanSqlValue(1)# ELSE #getBooleanSqlValue(0)# END AS hasRecords")>
-
-	<cfset qHasRecords = runSQLArray(aSQL)>
-
-	<cfreturn qHasRecords.hasRecords>
-</cffunction>
-
-<cffunction name="insertRecord" access="public" returntype="string" output="no" hint="I insert a record into the given table with the provided data and do my best to return the primary key of the inserted record.">
-	<cfargument name="tablename" type="string" required="yes" hint="The table in which to insert data.">
-	<cfargument name="data" type="struct" required="yes" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="OnExists" type="string" default="insert" hint="The action to take if a record with the given values exists. Possible values: insert (inserts another record), error (throws an error), update (updates the matching record), skip (performs no action), save (updates only for matching primary key)).">
-	<cfargument name="fieldlist" type="string" default="" hint="A list of insertable fields. If left blank, any field can be inserted.">
-	<cfargument name="truncate" type="boolean" default="false" hint="Should the field values be automatically truncated to fit in the available space for each field?">
-	<cfargument name="checkfields" type="string" default="" hint="Only for OnExists=update. A list of fields to use to check for existing records (default to checking all updateable fields for update).">
-
-	<cfset var OnExistsValues = "insert,error,update,skip"><!--- possible values for OnExists argument --->
-	<cfset var ii = 0><!--- generic counter --->
-	<cfset var pkfields = 0>
-	<cfset var in = arguments.data><!--- holder for incoming data (just for readability) --->
-	<cfset var qGetRecords = QueryNew('none')>
-	<cfset var result = ""><!--- will hold primary key --->
-	<cfset var qCheckKey = 0><!--- Used to get primary key --->
-	<cfset var sqlarray = ArrayNew(1)>
-	<cfset var aInsertSQL = ArrayNew(1)>
-	<cfset var sMatchingKeys = 0>
-	<cfset var sCheckData = 0>
-	<cfset var ChangeUUID = CreateUUID()>
-	<cfset var sTable = {table=Arguments.tablename}>
-	<cfset var isTiming = false AND (Arguments.tablename EQ "secProfiles")>
-	<cfset var pklist = getPrimaryKeyFieldNames(arguments.tablename)>
-
-	<cfset in = getRelationValues(arguments.tablename,in)>
-
-	<cfif
+	) {
+		ArrayAppend(sqlarray," #joiner# ");
+		ArrayAppend(sqlarray,getIsDeletableSQL(tablename=arguments.tablename,tablealias=arguments.tablealias));
+		ArrayAppend(sqlarray," = ");
+		ArrayAppend(sqlarray,getBooleanSQLValue(sData[variables.tableprops[arguments.tablename].deletable]));
+	}
+	if ( StructKeyExists(arguments,"advsql") AND StructKeyExists(arguments.advsql,"WHERE") AND ( ( isArray(arguments.advsql["WHERE"]) AND ArrayLen(arguments.advsql["WHERE"]) ) OR ( isSimpleValue(arguments.advsql["WHERE"]) AND Len(Trim(arguments.advsql["WHERE"])) ) ) ) {
+		if ( NOT ( isSimpleValue(arguments.advsql["WHERE"]) AND Left(Trim(arguments.advsql["WHERE"]),3) EQ "AND" ) ) {
+			ArrayAppend(sqlarray,joiner);
+		}
+		ArrayAppend(sqlarray,arguments.advsql["WHERE"]);
+	}
+
+	return sqlarray;
+}
+
+/**
+* I get the SQL for the SELECT clause for the given field.
+* @tablename The table from which to return a record.
+* @field The field to return.
+* @tablealias The alias for the table.
+* @useFieldAlias Whether to use the field alias.
+*/
+public function getFieldSelectSQL(
+	required string tablename,
+	required string field,
+	string tablealias,
+	boolean useFieldAlias=true
+) {
+	var ttemp = fillOutJoinTableRelations(arguments.tablename);
+	var sField = 0;
+	var sField2 = 0;
+	var aSQL = [];
+	var sAdvSQL = {};
+	var sJoin = {};
+	var sArgs = {};
+	var temp = "";
+
+	if ( isNumeric(arguments.field) ) {
+		aSQL = arguments.field;
+	} else if ( NOT Len(Trim(arguments.field)) ) {
+		ArrayAppend(aSQL,"''");
+	} else {
+		sField = getField(arguments.tablename,arguments.field);
+
+		if ( NOT StructKeyExists(arguments,"tablealias") ) {
+			arguments.tablealias = arguments.tablename;
+		}
+
+		sArgs["noorder"] = NOT variables.dbprops["areSubqueriesSortable"];
+
+		if ( StructKeyExists(sField,"Relation") AND StructKeyExists(sField.Relation,"type") ) {
+			sField.Relation = expandRelationStruct(sField.Relation,sField);
+			if ( StructKeyExists(sField["Relation"],"filters") AND isArray(sField["Relation"].filters) ) {
+				sArgs["filters"] = sField["Relation"].filters;
+			}
+			ArrayAppend(aSQL,"(");
+			switch (sField.Relation.type) {
+				case "label":
+						if ( StructKeyExists(sField.Relation,"sort-field") ) {
+							sArgs["sortfield"] = sField.Relation["sort-field"];
+							if ( StructKeyExists(sField.Relation,"sort-dir") ) {
+								sArgs["sortdir"] = sField.Relation["sort-dir"];
+							}
+						} else if ( getDatabase() EQ "Access" ) {
+							sArgs["noorder"] = true;
+						}
+						sArgs["tablename"] = sField.Relation["table"];
+						sArgs["fieldlist"] = sField.Relation["field"];
+						if ( arguments.tablealias EQ sField.Relation["table"] ) {
+							sArgs["tablealias"] = sField.Relation["table"] & "_DataMgr_inner";
+						} else {
+							sArgs["tablealias"] = sField.Relation["table"];
+						}
+						// Only one record for fields in database (otherwise nesting will occur and it could cause trouble but not give any benefit)
+						// if ( ListFindNoCase(getDBFieldList(sField.Relation["table"]),sField.Relation["field"]) ) {
+							sArgs["maxrows"] = 1;
+						// }
+						sAdvSQL = StructNew();
+						sAdvSQL["WHERE"] = ArrayNew(1);
+						ArrayAppend(sAdvSQL["WHERE"], getFieldSelectSQL(tablename=sField.Relation['table'],field=sField.Relation['join-field-remote'],tablealias=sArgs.tablealias,useFieldAlias=false) );
+						ArrayAppend(sAdvSQL["WHERE"], " = " );
+						ArrayAppend(sAdvSQL["WHERE"], getFieldSelectSQL(tablename=arguments.tablename,field=sField.Relation['join-field-local'],tablealias=arguments.tablealias,useFieldAlias=false) );
+						sArgs["advsql"] = sAdvSQL;
+						ArrayAppend(aSQL,getRecordsSQL(argumentCollection=sArgs));
+					break;
+				case "list":
+						ArrayAppend(aSQL,getFieldSQL_List(argumentCollection=arguments));
+					break;
+				case "concat":
+						ArrayAppend(aSQL,"#concatFields(arguments.tablename,sField.Relation['fields'],sField.Relation['delimiter'],arguments.tablealias)#");
+					break;
+				case "avg":
+				case "count":
+				case "max":
+				case "min":
+				case "sum":
+						sAdvSQL = StructNew();
+						if ( arguments.tablename EQ sField.Relation["table"] ) {
+							sArgs["tablealias"] = sField.Relation["table"] & "_datamgr_inner_table";
+						} else {
+							sArgs["tablealias"] = sField.Relation["table"];
+						}
+						if ( StructKeyExists(sField.Relation,"join-table") ) {
+							sJoin = StructNew();
+							sJoin["table"] = sField.Relation["join-table"];
+							sJoin["onLeft"] = sField.Relation["remote-table-join-field"];
+							sJoin["onRight"] = sField.Relation["join-table-field-remote"];
+							sAdvSQL["WHERE"] = ArrayNew(1);
+							ArrayAppend(sAdvSQL["WHERE"],getFieldSelectSQL(sField.Relation['join-table'],sField.Relation['join-table-field-local'],sField.Relation['join-table'],false));
+							ArrayAppend(sAdvSQL["WHERE"]," = ");
+							ArrayAppend(sAdvSQL["WHERE"],getFieldSelectSQL(arguments.tablename,sField.Relation['local-table-join-field'],arguments.tablealias,false));
+						} else {
+							sAdvSQL["WHERE"] = ArrayNew(1);
+							ArrayAppend(sAdvSQL["WHERE"],getFieldSelectSQL(sField.Relation['table'],sField.Relation['join-field-remote'],sArgs.tablealias,false));
+							ArrayAppend(sAdvSQL["WHERE"]," = ");
+							ArrayAppend(sAdvSQL["WHERE"],getFieldSelectSQL(arguments.tablename,sField.Relation['join-field-local'],arguments.tablealias,false));
+						}
+						if ( StructKeyExists(sField.Relation,"sort-field") ) {
+							sArgs["sortfield"] = sField.Relation["sort-field"];
+							if ( StructKeyExists(sField.Relation,"sort-dir") ) {
+								sArgs["sortdir"] = sField.Relation["sort-dir"];
+							}
+						}
+						sArgs["tablename"] = sField.Relation["table"];
+						sArgs["fieldlist"] = sField.Relation["field"];
+						sArgs["function"] = sField.Relation["type"];
+						sArgs["advsql"] = sAdvSQL;
+						sArgs["join"] = sJoin;
+						if ( arguments.tablename EQ sField.Relation["table"] ) {
+							sArgs["tablealias"] = sField.Relation["table"]& "_datamgr_inner_table";
+						}
+						ArrayAppend(aSQL,getRecordsSQL(argumentCollection=sArgs));
+					break;
+				case "has":
+						ArrayAppend(aSQL,getFieldSQL_Has(argumentCollection=arguments));
+					break;
+				case "math":
+						ArrayAppend(aSQL,getFieldSQL_Math(argumentCollection=arguments));
+					break;
+				case "now":
+						ArrayAppend(aSQL,getNowSQL());
+					break;
+				case "custom":
+						if ( StructKeyExists(sField.Relation,"sql") AND Len(sField.Relation.sql) ) {
+							ArrayAppend(aSQL,"#sField.Relation.sql#");
+						} else {
+							ArrayAppend(aSQL,"''");
+						}
+					break;
+				default:
+					ArrayAppend(aSQL,"''");
+			}
+			ArrayAppend(aSQL,")");
+			if ( arguments.useFieldAlias AND Len(Trim(sField['ColumnName'])) ) {
+				ArrayAppend(aSQL," AS #escape(sField['ColumnName'])#");
+			}
+		} else {
+			ArrayAppend(aSQL,escape(arguments.tablealias & "." & sField["ColumnName"]));
+		}
+	}
+
+	return aSQL;
+}
+
+public function getFieldSQL_Has(
+	required string tablename,
+	required string field,
+	string tablealias
+) {
+	var sField = getField(arguments.tablename,arguments.field);
+	var aSQL = 0;
+	var sArgs = {tablename=arguments.tablename,field=sField.Relation.field};
+
+	if ( StructKeyExists(arguments,"tablealias") ) {
+		sArgs["tablealias"] = "#arguments.tablealias#";
+	} else {
+		sArgs["tablealias"] = "#arguments.tablename#";
+	}
+
+	aSQL = getHasFieldSQL(ArgumentCollection=sArgs);
+
+	return aSQL;
+}
+
+public function getFieldSQL_List(
+	required string tablename,
+	required string field,
+	string tablealias
+) {
+	var sField = getField(arguments.tablename,arguments.field);
+	var aSQL = [];
+	var temp = 0;
+	var sField2 = 0;
+
+	if ( StructKeyExists(sField.Relation,"join-table") ) {
+		temp = getFieldSelectSQL(tablename=arguments.tablename,field=sField.Relation["local-table-join-field"],tablealias=arguments.tablealias,useFieldAlias=false);
+		if ( Len(sField.Relation["local-table-join-field"]) ) {
+			sField2 = getField(arguments.tablename,sField.Relation["local-table-join-field"]);
+		} else {
+			sField2 = StructNew();
+		}
+	} else {
+		temp = getFieldSelectSQL(tablename=arguments.tablename,field=sField.Relation["join-field-local"],tablealias=arguments.tablealias,useFieldAlias=false);
+		if ( Len(sField.Relation["join-field-local"]) ) {
+			sField2 = getField(arguments.tablename,sField.Relation["join-field-local"]);
+		} else {
+			sField2 = StructNew();
+		}
+	}
+	temp = readableSQL(temp);
+	if ( Len(temp) ) {
+		if ( StructKeyExists(sField2,"Relation") AND StructKeyExists(sField2.Relation,"type") AND sField2.Relation.type EQ "concat" ) {
+			ArrayAppend(aSQL,temp);
+		} else {
+			ArrayAppend(aSQL,concat(temp));
+		}
+	} else {
+		ArrayAppend(aSQL,"''");
+	}
+
+	return aSQL;
+}
+
+public function getHasFieldSQL(
+	required string tablename,
+	required string field,
+	string tablealias
+) {
+	var dtype = getEffectiveDataType(arguments.tablename,arguments.field);
+	var aSQL = ArrayNew(1);
+	var sAdvSQL = StructNew();
+	var sJoin = StructNew();
+	var sArgs = StructNew();
+	var temp = "";
+
+	if ( NOT StructKeyExists(arguments,"tablealias") ) {
+		arguments.tablealias = arguments.tablename;
+	}
+
+	switch (dtype) {
+		case "numeric":
+				ArrayAppend(aSQL,"isnull(CASE WHEN (");
+				ArrayAppend(aSQL, getFieldSelectSQL(tablename=arguments.tablename,field=arguments.field,tablealias=arguments.tablealias,useFieldAlias=false) );
+				ArrayAppend(aSQL,") > 0 THEN 1 ELSE 0 END,0)");
+			break;
+		case "string":
+				ArrayAppend(aSQL,"isnull(len(");
+				ArrayAppend(aSQL, getFieldSelectSQL(tablename=arguments.tablename,field=arguments.field,tablealias=arguments.tablealias,useFieldAlias=false) );
+				ArrayAppend(aSQL,"),0)");
+			break;
+		case "date":
+				ArrayAppend(aSQL,"CASE WHEN (");
+				ArrayAppend(aSQL, getFieldSelectSQL(tablename=arguments.tablename,field=arguments.field,tablealias=arguments.tablealias,useFieldAlias=false) );
+				ArrayAppend(aSQL,") IS NULL THEN 0 ELSE 1 END");
+			break;
+		case "boolean":
+				ArrayAppend(aSQL,"isnull(");
+				ArrayAppend(aSQL, getFieldSelectSQL(tablename=arguments.tablename,field=arguments.field,tablealias=arguments.tablealias,useFieldAlias=false) );
+				ArrayAppend(aSQL,",0)");
+			break;
+	}
+
+	return aSQL;
+}
+
+public function getFieldWhereSQL(
+	required string tablename,
+	required string field,
+	required string value,
+	string tablealias,
+	string operator="=",
+	any sql
+) {
+	var sField = getField(arguments.tablename,arguments.field);
+	var aSQL = [];
+	var sArgs = {};
+	var temp = 0;
+	var sAllField = 0;
+	var operators = "=,>,<,>=,<=,LIKE,NOT LIKE,<>,IN,NOT IN";
+	var operators_cf = "EQUAL,EQ,NEQ,GT,GTE,LT,LTE,IS,IS NOT,NOT";
+	var operators_sql = "=,=,<>,>,>=,<,<=,=,<>,<>";
+	var fieldval = arguments.value;
+	var sRelationTypes = getRelationTypes();
+	var sAdvSQL = 0;
+	var inops = "IN,NOT IN";
+	var dtype = getEffectiveDataType(arguments.tablename,arguments.field);
+	var hasOtherFieldVal = false;
+	var NegativeOperators = "<>,NOT LIKE,NOT IN";
+	var isNegativeOperator = false;
+	var isAll = false;
+
+	if ( arguments.operator EQ "All" ) {
+		isAll = true;
+		arguments.operator = "=";
+	}
+
+	if ( NOT ( ListFindNoCase(operators,arguments.operator) OR ListFindNoCase(operators_cf,arguments.operator) ) ) {
+		throwDMError("#arguments.operator# is not a valid operator. Valid operators are: #operators#,#operators_cf#","InvalidOperator");
+	}
+
+	if ( NOT StructKeyExists(arguments,"sql") ) {
+		arguments.sql = "";
+	}
+
+	// Convert ColdFusion operator to SQL operator
+	if ( ListFindNoCase(operators_cf,arguments.operator) ) {
+		arguments.operator = ListGetAt(operators_sql,ListFindNoCase(operators_cf,arguments.operator));
+	}
+
+	isNegativeOperator = ( ListFindNoCase(NegativeOperators,arguments.operator) GT 0 );
+
+	if ( arguments.operator CONTAINS "LIKE" AND dtype NEQ "string" ) {
+		throwDMError("LIKE comparisons are only valid on string fields","LikeOnlyOnStrings");
+	}
+
+	if ( arguments.operator CONTAINS "LIKE" AND NOT ( fieldval CONTAINS "%" ) ) {
+		fieldval = "%#fieldval#%";
+	}
+
+	if ( NOT StructKeyExists(arguments,"tablealias") ) {
+		arguments.tablealias = arguments.tablename;
+	}
+
+	sArgs["noorder"] = NOT variables.dbprops["areSubqueriesSortable"];
+
+	if ( StructKeyExists(sField,"Relation") AND StructKeyExists(sField.Relation,"type") ) {
+		sField.Relation = expandRelationStruct(sField.Relation,sField);
+		if ( StructKeyExists(sField["Relation"],"filters") AND isArray(sField["Relation"].filters) ) {
+			sArgs["filters"] = sField["Relation"].filters;
+		} else {
+			sArgs["filters"] = ArrayNew(1);
+		}
+		switch (sField.Relation.type) {
+			case "label":
+					sArgs.tablename = sField.Relation["table"];
+					sArgs.fieldlist = sField.Relation["field"];
+					sArgs.maxrows = 1;
+					sArgs.advsql = StructNew();
+					sArgs.data = StructNew();
+
+					ArrayAppend(aSQL,"EXISTS (");
+						sArgs.operator = arguments.operator;
+						sArgs.noorder = true;
+						sArgs.isInExists = true;
+						temp = StructNew();
+						temp.field = sField.Relation["field"];
+						temp.value = fieldval;
+						temp.operator = arguments.operator;
+						if ( arguments.tablealias EQ sField.Relation["table"] ) {
+							sArgs["tablealias"] = sField.Relation["table"] & "_datamgr_inner";
+						} else {
+							sArgs["tablealias"] = sField.Relation["table"];
+						}
+						ArrayAppend(sArgs.filters,temp);
+						sArgs.advsql["WHERE"] = ArrayNew(1);
+						ArrayAppend(sArgs.advsql["WHERE"],getFieldSelectSQL(sField.Relation['table'],sField.Relation['join-field-remote'],sArgs.tablealias,false));
+						ArrayAppend(sArgs.advsql["WHERE"]," = ");
+						if ( StructKeyExists(arguments,"joinedtable") AND Len(arguments.joinedtable) ) {
+							ArrayAppend(sArgs.advsql["WHERE"],getFieldSelectSQL(arguments.joinedtable,sField.Relation['join-field-local'],arguments.joinedtable,false));
+						} else {
+							ArrayAppend(sArgs.advsql["WHERE"],getFieldSelectSQL(arguments.tablename,sField.Relation['join-field-local'],arguments.tablealias,false));
+						}
+						ArrayAppend(aSQL,getRecordsSQL(argumentCollection=sArgs));
+					ArrayAppend(aSQL,")");
+				break;
+			case "list":
+					hasOtherFieldVal = (
+							StructKeyExists(arguments,"OtherVal")
+						AND	StructKeyExists(sField.Relation,"other-field")
+						AND	Len(sField.Relation["other-field"])
+						AND	(
+								Len(arguments.OtherVal) EQ 0
+							OR	isOfCFType(arguments.OtherVal,getEffectiveFieldDataType(getField(arguments.tablename,sField.Relation["other-field"]),true))
+						)
+					);
+
+					if ( isAll ) {
+						sArgs["function"] = "count";
+
+					} else {
+						sArgs.isInExists = true;
+						sArgs.fieldlist = sField.Relation["field"];
+					}
+
+					sArgs.noorder = true;
+					sArgs.tablename = sField.Relation["table"];
+					sArgs.maxrows = 1;
+					sArgs.join = StructNew();
+					sArgs.advsql = StructNew();
+					sArgs.advsql.WHERE = ArrayNew(1);
+					temp = ArrayNew(1);
+
+					if ( StructKeyExists(sField.Relation,"join-table") ) {
+						sArgs.join.table = sField.Relation["join-table"];
+						sArgs.join.onLeft = sField.Relation["remote-table-join-field"];
+						sArgs.join.onRight = sField.Relation["join-table-field-remote"];
+
+						ArrayAppend(sArgs.advsql.WHERE,getFieldSelectSQL(sField.Relation['join-table'],sField.Relation['join-table-field-local'],sField.Relation['join-table'],false));
+						ArrayAppend(sArgs.advsql.WHERE," = ");
+						ArrayAppend(sArgs.advsql.WHERE,getFieldSelectSQL(arguments.tablename,sField.Relation['local-table-join-field'],arguments.tablealias,false));
+					} else {
+						ArrayAppend(sArgs.advsql.WHERE,getFieldSelectSQL(sField.Relation['table'],sField.Relation['join-field-remote'],sField.Relation['table'],false));
+						ArrayAppend(sArgs.advsql.WHERE," = ");
+						ArrayAppend(sArgs.advsql.WHERE,getFieldSelectSQL(arguments.tablename,sField.Relation['join-field-local'],arguments.tablealias,false));
+					}
+					if ( Len(arguments.value) ) {
+						ArrayAppend(sArgs.advsql.WHERE,"			AND		(");
+						ArrayAppend(sArgs.advsql.WHERE,"							1 = 0");
+						for ( temp in ListToArray(fieldval) ) {
+							ArrayAppend(sArgs.advsql.WHERE,"					OR");
+							ArrayAppend(sArgs.advsql.WHERE,"#getFieldSelectSQL(sField.Relation['table'],sField.Relation['field'],sField.Relation['table'],false)#");
+							ArrayAppend(sArgs.advsql.WHERE," = ");// %%TODO: Needs to work for any operator
+							ArrayAppend(sArgs.advsql.WHERE,sval(getField(sField.Relation["table"],sField.Relation["field"]),temp));
+						}
+						ArrayAppend(sArgs.advsql.WHERE,"					)");
+					}
+
+					if ( hasOtherFieldVal ) {
+						ArrayAppend(aSQL,"(");
+						ArrayAppend(aSQL,getFieldWhereSQL(tablename=arguments.tablename,field=sField.Relation["other-field"],value=arguments.OtherVal,tablealias=arguments.tablealias));
+						ArrayAppend(aSQL," OR ");
+					}
+					if ( isNegativeOperator OR NOT Len(arguments.value) ) {
+						ArrayAppend(aSQL," NOT ");
+					}
+					if ( NOT isAll ) {
+						ArrayAppend(aSQL,"EXISTS");
+					}
+					ArrayAppend(aSQL," (");
+						ArrayAppend(aSQL,getRecordsSQL(argumentCollection=sArgs));
+					ArrayAppend(aSQL,"		)");
+					if ( isAll ) {
+						ArrayAppend(aSQL," = #ListLen(fieldval)#");
+					}
+					if ( hasOtherFieldVal ) {
+						ArrayAppend(aSQL,")");
+					}
+				break;
+			case "concat":
+					ArrayAppend(aSQL,getFieldSelectSQL(arguments.tablename,arguments.field,arguments.tablealias,false));
+					ArrayAppend(aSQL,getComparatorSQL(fieldval,"CF_SQL_VARCHAR",arguments.operator,true,arguments.sql));
+				break;
+			case "avg":
+			case "count":
+			case "max":
+			case "min":
+			case "sum":
+					sArgs.tablename = sField.Relation["table"];
+					sArgs.fieldlist = sField.Relation["field"];
+					sArgs.advsql = StructNew();
+					sArgs.join = StructNew();
+
+					sAdvSQL = StructNew();
+					if ( StructKeyExists(sField.Relation,"join-table") ) {
+						sArgs.join["table"] = sField.Relation["join-table"];
+						sArgs.join["onLeft"] = sField.Relation["remote-table-join-field"];
+						sArgs.join["onRight"] = sField.Relation["join-table-field-remote"];
+						sArgs.advsql["WHERE"] = ArrayNew(1);
+						ArrayAppend(sArgs.advsql["WHERE"],getFieldSelectSQL(sField.Relation['join-table'],sField.Relation['join-table-field-local'],sField.Relation['join-table'],false));
+						ArrayAppend(sArgs.advsql["WHERE"]," = ");
+						ArrayAppend(sArgs.advsql["WHERE"],getFieldSelectSQL(arguments.tablename,sField.Relation['local-table-join-field'],arguments.tablealias,false));
+					} else {
+						sArgs.advsql["WHERE"] = ArrayNew(1);
+						ArrayAppend(sArgs.advsql["WHERE"],getFieldSelectSQL(sField.Relation['table'],sField.Relation['join-field-remote'],sField.Relation['table'],false));
+						ArrayAppend(sArgs.advsql["WHERE"]," = ");
+						ArrayAppend(sArgs.advsql["WHERE"],getFieldSelectSQL(arguments.tablename,sField.Relation['join-field-local'],arguments.tablealias,false));
+					}
+					sArgs["function"] = sField.Relation["type"];
+					if ( arguments.tablename EQ sField.Relation["table"] ) {
+						sArgs["tablealias"] = sField.Relation["table"] & "_datamgr_inner_table";
+					}
+					ArrayAppend(aSQL,"(");
+						ArrayAppend(aSQL,getRecordsSQL(argumentCollection=sArgs));
+					ArrayAppend(aSQL,")");
+					ArrayAppend(aSQL,getComparatorSQL(fieldval,"CF_SQL_NUMERIC",arguments.operator,true,arguments.sql));
+				break;
+			case "custom":
+					if ( StructKeyExists(sField.Relation,"sql") AND Len(sField.Relation.sql) AND StructKeyExists(sField.Relation,"CF_DataType") ) {
+						ArrayAppend(aSQL,"(");
+						ArrayAppend(aSQL,"#sField.Relation.sql#");
+						ArrayAppend(aSQL,")");
+						ArrayAppend(aSQL,getComparatorSQL(fieldval,sField.Relation["CF_DataType"],arguments.operator,true,arguments.sql));
+					} else {
+						ArrayAppend(aSQL,"1 = 1");
+					}
+				break;
+			default:
+					ArrayAppend(aSQL, getFieldSelectSQL(tablename=arguments.tablename,field=arguments.field,tablealias=arguments.tablealias,useFieldAlias=false) );
+					if ( StructKeyExists(sRelationTypes,sField.Relation.type) AND Len(sRelationTypes[sField.Relation.type].cfsqltype) ) {
+						ArrayAppend(aSQL,getComparatorSQL(fieldval,sRelationTypes[sField.Relation.type].cfsqltype,arguments.operator,true,arguments.sql));
+					} else {
+						ArrayAppend(aSQL,getComparatorSQL(Val(fieldval),"CF_SQL_NUMERIC",arguments.operator,true,arguments.sql));
+					}
+		}
+		if ( StructKeyExists(sField.Relation,"all-field") ) {
+			sAllField = getField(arguments.tablename,sField.Relation["all-field"]);
+			sArgs = arguments;
+			sArgs.field = sField.Relation["all-field"];
+			sArgs.value = 1;
+			if ( isStruct(sAllField) ) {
+				ArrayPrepend(aSQL," OR ");
+				ArrayPrepend(aSQL,getFieldWhereSQL(argumentCollection=sArgs));
+				ArrayPrepend(aSQL,"(");
+				ArrayAppend(aSQL,")");
+			}
+		}
+	} else {
+		if ( getDatabase() EQ "Access" AND sField.CF_Datatype EQ "CF_SQL_BIT" ) {
+			ArrayAppend(aSQL,"abs(#escape(arguments.tablealias & '.' & sField.ColumnName)#)");
+		} else {
+			ArrayAppend(aSQL,"#escape(arguments.tablealias & '.' & sField.ColumnName)#");
+		}
+		if ( getDatabase() EQ "Derby" AND arguments.operator CONTAINS "LIKE" ) {
+			ArrayPrepend(aSQL,"LOWER(");
+			ArrayAppend(aSQL,")");
+			fieldval = LCase(fieldval);
+		}
+		ArrayAppend(aSQL,getComparatorSQL(fieldval,sField.CF_Datatype,arguments.operator,true,arguments.sql));
+	}
+
+	return aSQL;
+}
+
+/**
+* @tablename The table in which to insert data.
+* @data A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+*/
+public struct function getMatchingRecordKeys(
+	required string tablename,
+	required struct data,
+	boolean pksonly=true
+) {
+	var aPKFields = getPKFields(arguments.tablename);
+	var ii = 0;
+	var sData = arguments.data;// holder for incoming data (just for readability)
+	var inPK = StructNew();// holder for incoming pk data (just for readability)
+	var qGetRecords = 0;
+	var sResult = StructNew();
+	var pkfields = "";
+
+	if ( ArrayLen(aPKFields) ) {
+		// Load up all primary key fields in temp structure
+		for ( ii=1; ii LTE ArrayLen(aPKFields); ii++ ) {
+			pkfields = ListAppend(pkfields,aPKFields[ii].ColumnName);
+			if ( StructKeyHasLen(sData,aPKFields[ii].ColumnName) ) {
+				inPK[aPKFields[ii].ColumnName] = sData[aPKFields[ii].ColumnName];
+			}
+		}
+	}
+
+	// Try to get existing record with given data
+	if ( NOT arguments.pksonly ) {
+		// Use only aPKFields if all are passed in, otherwise use all data available
+		if ( ArrayLen(aPKFields) ) {
+			if ( StructCount(inPK) EQ ArrayLen(aPKFields) ) {
+				qGetRecords = getRecords(tablename=arguments.tablename,data=inPK,fieldlist=pkfields,MaxRows=1);
+			} else {
+				qGetRecords = getRecords(tablename=arguments.tablename,data=sData,fieldlist=pkfields,MaxRows=1);
+			}
+		} else {
+			qGetRecords = getRecords(tablename=arguments.tablename,data=sData,fieldlist=pkfields,MaxRows=1);
+		}
+	}
+
+	// If no matching records by all fields, Check for existing record by primary keys
+	if ( arguments.pksonly OR NOT qGetRecords.RecordCount ) {
+		if ( ArrayLen(aPKFields) ) {
+			// All all primary key fields exist, check for record
+			if ( StructCount(inPK) EQ ArrayLen(aPKFields) ) {
+				qGetRecords = getRecords(tablename=arguments.tablename,data=inPK,fieldlist=pkfields,MaxRows=1);
+			}
+		}
+	}
+
+	if ( isQuery(qGetRecords) AND qGetRecords.RecordCount ) {
+		for ( ii in ListToArray(qGetRecords.ColumnList) ) {
+			sResult[ii] = qGetRecords[ii][1];
+		}
+	}
+
+	return sResult;
+}
+
+/**
+* I return a list of datypes that hold strings / character values.
+*/
+public string function getStringTypes() {
+	return "";
+}
+
+/**
+* I return the databases supported by this installation of DataMgr.
+*/
+public query function getSupportedDatabases() {
+	var qComponents = 0;
+	var aComps = ArrayNew(1);
+	var i = 0;
+	var qDatabases = QueryNew("Database,DatabaseName,shortstring,driver");
+	var sComponent = 0;
+
+	if ( StructKeyExists(variables,"databases") AND isQuery(variables.databases) ) {
+		qDatabases = variables.databases;
+	} else {
+		qComponents = directoryList(path=getDirectoryFromPath(GetCurrentTemplatePath()),filter = "*.cfc");
+		for ( sComponent in qComponents ) {
+			if ( sComponent.name CONTAINS "DataMgr_" ) {
+				try {
+					ArrayAppend(aComps,CreateObject("component","#ListFirst(sComponent.name,'.')#").init(""));
+					QueryAddRow(qDatabases);
+					QuerySetCell(qDatabases, "Database", ReplaceNoCase(ListFirst(sComponent.name,"."),"DataMgr_","") );
+					QuerySetCell(qDatabases, "DatabaseName", aComps[ArrayLen(aComps)].getDatabase() );
+					QuerySetCell(qDatabases, "shortstring", aComps[ArrayLen(aComps)].getDatabaseShortString() );
+					QuerySetCell(qDatabases, "driver", aComps[ArrayLen(aComps)].getDatabaseDriver() );
+				} catch (any e) {
+
+				}
+			}
+		}
+		variables.databases = qDatabases;
+	}
+
+	return qDatabases;
+}
+
+/**
+* I return information about all of the tables currently loaded into this instance of Data Manager.
+*/
+public struct function getTableData(string tablename) {
+
+	var sResult = 0;
+
+	if ( StructKeyExists(arguments,"tablename") AND Len(arguments.tablename) ) {
+		checkTable(arguments.tablename);// Check whether table is loaded
+		sResult = StructNew();
+		if ( ListFindNoCase(StructKeyList(variables.tables),arguments.tablename) ) {
+			sResult[arguments.tablename] = variables.tables[arguments.tablename];
+		}
+	} else {
+		sResult = variables.tables;
+	}
+
+	return sResult;
+}
+
+/**
+* I return an array of fields that can be updated.
+*/
+public array function getUpdateableFields(required string tablename) {
+	var bTable = checkTable(arguments.tablename);// Check whether table is loaded
+	var ii = 0;// counter
+	var arrFields = ArrayNew(1);// array of udateable fields
+
+	if ( StructKeyExists(variables.tableprops,arguments.tablename) AND StructKeyExists(variables.tableprops[arguments.tablename],"updatefields") ) {
+		arrFields = variables.tableprops[arguments.tablename]["updatefields"];
+	} else {
+		for ( ii=1; ii LTE ArrayLen(variables.tables[arguments.tablename]); ii++ ) {
+			// Make sure field isn't a relation
+			if ( StructKeyExists(variables.tables[arguments.tablename][ii],"CF_Datatype") AND NOT StructKeyExists(variables.tables[arguments.tablename][ii],"Relation") ) {
+				// Make sure field isn't a primary key
+				if ( NOT StructKeyExists(variables.tables[arguments.tablename][ii],"PrimaryKey") OR NOT variables.tables[arguments.tablename][ii].PrimaryKey ) {
+					ArrayAppend(arrFields, variables.tables[arguments.tablename][ii]);
+				}
+			}
+		}
+		variables.tableprops[arguments.tablename]["updatefields"] = arrFields;
+	}
+
+	return arrFields;
+}
+
+public string function getVersion() {
+	return variables.DataMgrVersion;
+}
+
+/**
+* @tablename The table from which to return a record.
+* @data A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+* @advsql A structure of sqlarrays for each area of a query (SELECT,FROM,WHERE,ORDER BY).
+* @filters An array of filters to apply to the query.
+*/
+public boolean function hasRecords(
+	required string tablename,
+	any data,
+	struct advsql,
+	array filters
+) {
+	var aSQL = [];
+	var qHasRecords = 0;
+	var result = false;
+
+	ArrayAppend(aSQL,"SELECT	CASE WHEN EXISTS ( ");
+		ArrayAppend(aSQL,"SELECT	1 ");
+		ArrayAppend(aSQL,"FROM");
+		ArrayAppend(aSQL,getFromSQL(argumentCollection=arguments));
+		ArrayAppend(aSQL,"WHERE		1 = 1");
+		ArrayAppend(aSQL,getWhereSQL(argumentCollection=arguments));
+	ArrayAppend(aSQL," ) THEN #getBooleanSqlValue(1)# ELSE #getBooleanSqlValue(0)# END AS hasRecords");
+
+	qHasRecords = runSQLArray(aSQL);
+
+	return qHasRecords.hasRecords;
+}
+
+/**
+* I insert a record into the given table with the provided data and do my best to return the primary key of the inserted record.
+* @tablename The table in which to insert data.
+* @data A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+* @OnExists The action to take if a record with the given values exists. Possible values: insert (inserts another record), error (throws an error), update (updates the matching record), skip (performs no action), save (updates only for matching primary key)).
+* @fieldlist A list of insertable fields. If left blank, any field can be inserted.
+* @truncate Should the field values be automatically truncated to fit in the available space for each field?
+* @checkfields Only for OnExists=update. A list of fields to use to check for existing records (default to checking all updateable fields for update).
+*/
+public string function insertRecord(
+	required string tablename,
+	required struct data,
+	string OnExists="insert",
+	string fieldlist="",
+	boolean truncate=false,
+	string checkfields=""
+) {
+	var OnExistsValues = "insert,error,update,skip";// possible values for OnExists argument
+	var ii = 0;// generic counter
+	var pkfields = 0;
+	var sData = arguments.data;// holder for incoming data (just for readability)
+	var qGetRecords = QueryNew('none');
+	var result = "";// will hold primary key
+	var qCheckKey = 0;// Used to get primary key
+	var sqlarray = ArrayNew(1);
+	var aInsertSQL = ArrayNew(1);
+	var sMatchingKeys = 0;
+	var sCheckData = 0;
+	var ChangeUUID = CreateUUID();
+	var sTable = {table=Arguments.tablename};
+	var isTiming = false AND (Arguments.tablename EQ "secProfiles");
+	var pklist = getPrimaryKeyFieldNames(arguments.tablename);
+	var sLog = 0;
+
+	sData = getRelationValues(arguments.tablename,sData);
+
+	if (
 		(
 			Arguments.OnExists EQ "update"
 			OR
@@ -2464,416 +2701,434 @@
 		)
 		AND
 		NOT Len(Arguments.checkfields)
-	>
-		<cfset Arguments.checkfields = getCheckFields(Arguments.tablename)>
-		<cfif Len(Arguments.checkfields)>
-			<cfset Arguments.OnExists = "update">
-		</cfif>
-	</cfif>
+	) {
+		Arguments.checkfields = getCheckFields(Arguments.tablename);
+		if ( Len(Arguments.checkfields) ) {
+			Arguments.OnExists = "update";
+		}
+	}
 
-	<cfif NOT StructKeyExists(Arguments,"log")>
-		<cfset Arguments.log = variables.doLogging>
-	</cfif>
-	<cfif Arguments.log>
-		<cfif arguments.tablename EQ variables.logtable>
-			<cfset Arguments.log = false>
-		</cfif>
-	</cfif>
+	if ( NOT StructKeyExists(Arguments,"log") ) {
+		Arguments.log = variables.doLogging;
+	}
+	if ( Arguments.log ) {
+		if ( arguments.tablename EQ variables.logtable ) {
+			Arguments.log = false;
+		}
+	}
 
-	<cfset pkfields = getPKFields(arguments.tablename)>
+	pkfields = getPKFields(arguments.tablename);
 
-	<cfif arguments.truncate>
-		<cfset in = variables.truncate(arguments.tablename,in)>
-	</cfif>
+	if ( arguments.truncate ) {
+		sData = variables.truncate(arguments.tablename,sData);
+	}
 
-	<cfset sCheckData = StructCopy(in)>
+	sCheckData = StructCopy(sData);
 
-	<cfif ListLen(arguments.checkfields)>
-		<cfset arguments.checkfields = ListAppend(pklist,arguments.checkfields)>
-		<cfloop item="ii" collection="#sCheckData#">
-			<cfif NOT ListFindNoCase(arguments.checkfields,ii)>
-				<cfset StructDelete(sCheckData,ii)>
-			</cfif>
-		</cfloop>
-	</cfif>
+	if ( ListLen(arguments.checkfields) ) {
+		arguments.checkfields = ListAppend(pklist,arguments.checkfields);
+		for ( ii in sCheckData ) {
+			if ( NOT ListFindNoCase(arguments.checkfields,ii) ) {
+				StructDelete(sCheckData,ii);
+			}
+		}
+	}
 
-	<!--- Check for existing records if an action other than insert should be take if one exists --->
-	<cfif arguments.OnExists NEQ "insert">
-		<cfset sMatchingKeys = getMatchingRecordKeys(tablename=arguments.tablename,data=sCheckData,pksonly=(arguments.OnExists EQ "save"))>
-		<cfif StructCount(sMatchingKeys)>
-			<cfswitch expression="#arguments.OnExists#">
-			<cfcase value="error">
-				<cfset throwDMError("#arguments.tablename#: A record with these criteria already exists.")>
-			</cfcase>
-			<cfcase value="update,save">
-				<cfset StructAppend(in,sMatchingKeys,"yes")>
-				<cfset result = updateRecord(arguments.tablename,in)>
-				<cfreturn result>
-			</cfcase>
-			<cfcase value="skip">
-				<cfif ArrayLen(pkfields)>
-					<cfreturn sMatchingKeys[pkfields[1].ColumnName]>
-				<cfelse>
-					<cfreturn 0>
-				</cfif>
-			</cfcase>
-			</cfswitch>
-		</cfif>
-	</cfif>
+	// Check for existing records if an action other than insert should be take if one exists
+	if ( arguments.OnExists NEQ "insert" ) {
+		sMatchingKeys = getMatchingRecordKeys(tablename=arguments.tablename,data=sCheckData,pksonly=(arguments.OnExists EQ "save"));
+		if ( StructCount(sMatchingKeys) ) {
+			switch (arguments.OnExists) {
+				case "error":
+						throwDMError("#arguments.tablename#: A record with these criteria already exists.");
+					break;
+				case "update":
+				case "save":
+						StructAppend(sData,sMatchingKeys,"yes");
+						result = updateRecord(arguments.tablename,sData);
+						return result;
+					break;
+				case "skip":
+						if ( ArrayLen(pkfields) ) {
+							return sMatchingKeys[pkfields[1].ColumnName];
+						} else {
+							return 0;
+						}
+					break;
+			}
+		}
+	}
 
-	<!--- Perform insert --->
-	<cfset aInsertSQL = insertRecordSQL(tablename=arguments.tablename,data=in,fieldlist=arguments.fieldlist)>
-	<cfif ArrayLen(aInsertSQL)>
-		<cfset announceEvent(tablename=arguments.tablename,action="beforeInsert",method="insertRecord",data=in,fieldlist=Arguments.fieldlist,Args=Arguments,sql=aInsertSQL,ChangeUUID=ChangeUUID)>
-		<cfset qCheckKey = runSQLArray(aInsertSQL)>
-	</cfif>
+	// Perform insert
+	aInsertSQL = insertRecordSQL(tablename=arguments.tablename,data=sData,fieldlist=arguments.fieldlist);
+	if ( ArrayLen(aInsertSQL) ) {
+		announceEvent(tablename=arguments.tablename,action="beforeInsert",method="insertRecord",data=sData,fieldlist=Arguments.fieldlist,Args=Arguments,sql=aInsertSQL,ChangeUUID=ChangeUUID);
+		qCheckKey = runSQLArray(aInsertSQL);
+	}
 
-	<cfif isDefined("qCheckKey") AND isQuery(qCheckKey) AND qCheckKey.RecordCount AND ListFindNoCase(qCheckKey.ColumnList,"NewID")>
-		<cfset result = qCheckKey.NewID>
-	</cfif>
+	if ( isDefined("qCheckKey") AND isQuery(qCheckKey) AND qCheckKey.RecordCount AND ListFindNoCase(qCheckKey.ColumnList,"NewID") ) {
+		result = qCheckKey.NewID;
+	}
 
-	<!--- Get primary key --->
-	<cfif Len(result) EQ 0>
-		<cfif ArrayLen(pkfields) AND StructKeyExists(in,pkfields[1].ColumnName) AND useField(in,pkfields[1]) AND NOT isIdentityField(pkfields[1])>
-			<cfset result = in[pkfields[1].ColumnName]>
-		<cfelseif ArrayLen(pkfields) AND StructKeyExists(pkfields[1],"Increment") AND isBoolean(pkfields[1].Increment) AND pkfields[1].Increment>
-			<cfset result = getInsertedIdentity(arguments.tablename,pkfields[1].ColumnName)>
-		<cfelse>
-			<cftry>
-				<cfset result = getPKFromData(arguments.tablename,in)>
-			<cfcatch>
-				<cfset result = "">
-			</cfcatch>
-			</cftry>
-		</cfif>
-	</cfif>
+	// Get primary key
+	if ( Len(result) EQ 0 ) {
+		if ( ArrayLen(pkfields) AND StructKeyExists(sData,pkfields[1].ColumnName) AND useField(sData,pkfields[1]) AND NOT isIdentityField(pkfields[1]) ) {
+			result = sData[pkfields[1].ColumnName];
+		} else if ( ArrayLen(pkfields) AND StructKeyExists(pkfields[1],"Increment") AND isBoolean(pkfields[1].Increment) AND pkfields[1].Increment ) {
+			result = getInsertedIdentity(arguments.tablename,pkfields[1].ColumnName);
+		} else {
+			try {
+				result = getPKFromData(arguments.tablename,sData);
+			} catch (any e) {
+				result = "";
+			}
+		}
+	}
 
-	<!--- set pkfield so that we can save relation data --->
-	<cfif ArrayLen(pkfields)>
-		<cfif ArrayLen(pkfields) EQ 1 AND NOT Len(result)>
-			<cfset result = getPKFromData(arguments.tablename,in)>
-		</cfif>
-		<cfset in[pkfields[1].ColumnName] = result>
-		<cfif Len(Trim(result))>
-			<cfset saveRelations(arguments.tablename,in,pkfields[1],result)>
-		</cfif>
-	</cfif>
+	// set pkfield so that we can save relation data
+	if ( ArrayLen(pkfields) ) {
+		if ( ArrayLen(pkfields) EQ 1 AND NOT Len(result) ) {
+			result = getPKFromData(arguments.tablename,sData);
+		}
+		sData[pkfields[1].ColumnName] = result;
+		if ( Len(Trim(result)) ) {
+			saveRelations(arguments.tablename,sData,pkfields[1],result);
+		}
+	}
 
-	<!--- Log insert --->
-	<cfif Arguments.log>
-		<cfinvoke method="logAction">
-			<cfinvokeargument name="tablename" value="#arguments.tablename#">
-			<cfif ArrayLen(pkfields) EQ 1 AND StructKeyExists(in,pkfields[1].ColumnName)>
-				<cfinvokeargument name="pkval" value="#in[pkfields[1].ColumnName]#">
-			</cfif>
-			<cfinvokeargument name="action" value="insert">
-			<cfinvokeargument name="data" value="#in#">
-			<cfinvokeargument name="sql" value="#sqlarray#">
-		</cfinvoke>
-	</cfif>
+	// Log insert
+	if ( Arguments.log ) {
+		sLog = {action="insert",data=sData,sql=sqlarray};
+		if ( ArrayLen(pkfields) EQ 1 AND StructKeyExists(sData,pkfields[1].ColumnName) ) {
+			sLog["pkval"] = sData[pkfields[1].ColumnName];
+		}
+		logAction(ArgumentCollection=sLog);
+	}
 
-	<cfset announceEvent(tablename=arguments.tablename,action="afterInsert",method="insertRecord",data=in,fieldlist=Arguments.fieldlist,Args=Arguments,sql=aInsertSQL,pkvalue=result,ChangeUUID=ChangeUUID)>
+	announceEvent(tablename=arguments.tablename,action="afterInsert",method="insertRecord",data=sData,fieldlist=Arguments.fieldlist,Args=Arguments,sql=aInsertSQL,pkvalue=result,ChangeUUID=ChangeUUID);
 
-	<cfset setCacheDate()>
+	setCacheDate();
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="insertRecordSQL" access="public" returntype="array" output="no" hint="I insert a record into the given table with the provided data and do my best to return the primary key of the inserted record.">
-	<cfargument name="tablename" type="string" required="yes" hint="The table in which to insert data.">
-	<cfargument name="data" type="struct" required="yes" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="fieldlist" type="string" default="" hint="A list of insertable fields. If left blank, any field can be inserted.">
+/**
+* I insert a record into the given table with the provided data and do my best to return the primary key of the inserted record.
+* @tablename The table in which to insert data.
+* @data A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+* @fieldlist A list of insertable fields. If left blank, any field can be inserted.
+*/
+public array function insertRecordSQL(
+	required string tablename,
+	required struct data,
+	string fieldlist=""
+) {
 
-	<cfreturn insertRecordsSQL(tablename=arguments.tablename,data_set=arguments.data,fieldlist=arguments.fieldlist)>
-</cffunction>
+	return insertRecordsSQL(tablename=arguments.tablename,data_set=arguments.data,fieldlist=arguments.fieldlist);
+}
 
-<cffunction name="insertRecordsSQL" access="public" returntype="array" output="false" hint="">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data_set" type="struct" required="yes" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="data_where" type="struct" required="no" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="fieldlist" type="string" default="" hint="A list of insertable fields. If left blank, any field can be inserted.">
-	<cfargument name="filters" type="array" default="#ArrayNew(1)#">
+/**
+* @data_set A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+* @data_where A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+* @fieldlist A list of insertable fields. If left blank, any field can be inserted.
+* @filters An array of filters to apply to the query.
+*/
+public array function insertRecordsSQL(
+	required string tablename,
+	required struct data_set,
+	struct data_where,
+	string fieldlist="",
+	array filters=[]
+) {
+	var bSetGuid = false;
+	var bGetNewSeqId = false;// Alternate set GUID approach for newsequentialid() support (SQL Server specific)
+	var GuidVar = "";
+	var sqlarray = ArrayNew(1);
+	var ii = 0;
+	var fieldcount = 0;
+	var bUseSubquery = false;
+	var fields = getUpdateableFields(arguments.tablename);
+	var pkfields = getPKFields(arguments.tablename);
+	var sData = clean(arguments.data_set);// holder for incoming data (just for readability)
+	var inf = "";
+	var Specials = "CreationDate,LastUpdatedDate,Sorter,UUID";
 
-	<cfset var bSetGuid = false>
-	<cfset var bGetNewSeqId = false><!--- Alternate set GUID approach for newsequentialid() support (SQL Server specific) --->
-	<cfset var GuidVar = "">
-	<cfset var sqlarray = ArrayNew(1)>
-	<cfset var ii = 0>
-	<cfset var fieldcount = 0>
-	<cfset var bUseSubquery = false>
-	<cfset var fields = getUpdateableFields(arguments.tablename)>
-	<cfset var pkfields = getPKFields(arguments.tablename)>
-	<cfset var in = clean(arguments.data_set)><!--- holder for incoming data (just for readability) --->
-	<cfset var inf = "">
-	<cfset var Specials = "CreationDate,LastUpdatedDate,Sorter,UUID">
+	// Restrict data to fieldlist
+	if ( Len(Trim(arguments.fieldlist)) ) {
+		for ( ii in sData ) {
+			if ( NOT ListFindNoCase(arguments.fieldlist,ii) ) {
+				StructDelete(sData,ii);
+			}
+		}
+	}
 
-	<!--- Restrict data to fieldlist --->
-	<cfif Len(Trim(arguments.fieldlist))>
-		<cfloop item="ii" collection="#in#">
-			<cfif NOT ListFindNoCase(arguments.fieldlist,ii)>
-				<cfset StructDelete(in,ii)>
-			</cfif>
-		</cfloop>
-	</cfif>
+	sData = getRelationValues(arguments.tablename,sData);
 
-	<cfset in = getRelationValues(arguments.tablename,in)>
+	// Create GUID for insert SQL Server where the table has on primary key field and it is a GUID
+	if ( ArrayLen(pkfields) EQ 1 AND pkfields[1].CF_Datatype EQ "CF_SQL_IDSTAMP" AND getDatabase() EQ "MS SQL" AND NOT StructKeyExists(sData,pkfields[1].ColumnName) ) {
+		if ( StructKeyExists(pkfields[1], "default") and pkfields[1].Default contains "newsequentialid" ) {
+			bGetNewSeqId = true;
+		} else {
+			bSetGuid = true;
+		}
+	}
 
-	<!--- Create GUID for insert SQL Server where the table has on primary key field and it is a GUID --->
-	<cfif ArrayLen(pkfields) EQ 1 AND pkfields[1].CF_Datatype EQ "CF_SQL_IDSTAMP" AND getDatabase() EQ "MS SQL" AND NOT StructKeyExists(in,pkfields[1].ColumnName)>
-		<cfif StructKeyExists(pkfields[1], "default") and pkfields[1].Default contains "newsequentialid">
-			<cfset bGetNewSeqId = true>
-		<cfelse>
-			<cfset bSetGuid = true>
-		</cfif>
-	</cfif>
+	if ( StructKeyExists(arguments,"data_where") AND StructCount(arguments.data_where) ) {
+		bUseSubquery = true;
+	}
 
-	<cfif StructKeyExists(arguments,"data_where") AND StructCount(arguments.data_where)>
-		<cfset bUseSubquery = true>
-	</cfif>
+	// Create variable to hold GUID for SQL Server GUID inserts
+	if ( bSetGuid OR bGetNewSeqId ) {
+		lock timeout = 30 name = "DataMgr_GuidNum" type = "EXCLUSIVE" throwontimeout = "No" {
+			// %%I cant figure out a way to safely increment the variable to make it unique for a transaction w/0 the use of request scope
+			if ( isDefined("request.DataMgr_GuidNum")) {
+				request.DataMgr_GuidNum = Val(request.DataMgr_GuidNum) + 1;
+			} else {
+				request.DataMgr_GuidNum = 1;
+			}
+			GuidVar = "GUID#request.DataMgr_GuidNum#";
+		}
+	}
 
-	<!--- Create variable to hold GUID for SQL Server GUID inserts --->
-	<cfif bSetGuid OR bGetNewSeqId>
-		<cflock timeout="30" throwontimeout="No" name="DataMgr_GuidNum" type="EXCLUSIVE">
-			<!--- %%I cant figure out a way to safely increment the variable to make it unique for a transaction w/0 the use of request scope --->
-			<cfif isDefined("request.DataMgr_GuidNum")>
-				<cfset request.DataMgr_GuidNum = Val(request.DataMgr_GuidNum) + 1>
-			<cfelse>
-				<cfset request.DataMgr_GuidNum = 1>
-			</cfif>
-			<cfset GuidVar = "GUID#request.DataMgr_GuidNum#">
-		</cflock>
-	</cfif>
+	// Insert record
+	if ( bSetGuid ) {
+		ArrayAppend(sqlarray,"DECLARE @#GuidVar# uniqueidentifier");
+		ArrayAppend(sqlarray,"SET @#GuidVar# = NEWID()");
+	} else if ( bGetNewSeqId ) {
+		ArrayAppend(sqlarray, "DECLARE @#GuidVar# TABLE (inserted_guid uniqueidentifier);");
+	}
+	ArrayAppend(sqlarray,"INSERT INTO #escape(Variables.prefix & arguments.tablename)# (");
 
-	<!--- Insert record --->
-	<cfif bSetGuid>
-		<cfset ArrayAppend(sqlarray,"DECLARE @#GuidVar# uniqueidentifier")>
-		<cfset ArrayAppend(sqlarray,"SET @#GuidVar# = NEWID()")>
-	<cfelseif bGetNewSeqId>
-		<cfset ArrayAppend(sqlarray, "DECLARE @#GuidVar# TABLE (inserted_guid uniqueidentifier);")>
-	</cfif>
-	<cfset ArrayAppend(sqlarray,"INSERT INTO #escape(Variables.prefix & arguments.tablename)# (")>
-
-	<!--- Loop through all updateable fields --->
-	<cfloop index="ii" from="1" to="#ArrayLen(fields)#" step="1">
-		<cfif
-				( useField(in,fields[ii]) OR (StructKeyExists(fields[ii],"Default") AND Len(fields[ii].Default) AND getDatabase() EQ "Access") )
-			OR	NOT ( useField(in,fields[ii]) OR StructKeyExists(fields[ii],"Default") OR fields[ii].AllowNulls )
+	// Loop through all updateable fields
+	for ( ii=1; ii LTE ArrayLen(fields); ii++ ) {
+		if (
+				( useField(sData,fields[ii]) OR (StructKeyExists(fields[ii],"Default") AND Len(fields[ii].Default) AND getDatabase() EQ "Access") )
+			OR	NOT ( useField(sData,fields[ii]) OR StructKeyExists(fields[ii],"Default") OR fields[ii].AllowNulls )
 			OR	( StructKeyExists(fields[ii],"Special") AND Len(fields[ii].Special) AND ListFindNoCase(Specials,fields[ii]["Special"]) )
-		><!--- Include the field in SQL if it has appropriate data --->
-			<cfset fieldcount = fieldcount + 1>
-			<cfif fieldcount GT 1>
-				<cfset ArrayAppend(sqlarray,",")><!--- put a comma before every field after the first --->
-			</cfif>
-			<cfset ArrayAppend(sqlarray,escape(fields[ii].ColumnName))>
-		</cfif>
-	</cfloop>
-	<cfloop index="ii" from="1" to="#ArrayLen(pkfields)#" step="1">
-		<cfif ( useField(in,pkfields[ii]) AND NOT isIdentityField(pkfields[ii]) ) OR ( pkfields[ii].CF_Datatype EQ "CF_SQL_IDSTAMP" AND bSetGuid )><!--- Include the field in SQL if it has appropriate data --->
-			<cfset fieldcount = fieldcount + 1>
-			<cfif fieldcount GT 1>
-				<cfset ArrayAppend(sqlarray,",")><!--- put a comma before every field after the first --->
-			</cfif>
-			<cfset ArrayAppend(sqlarray,"#escape(pkfields[ii].ColumnName)#")>
-		</cfif>
-	</cfloop>
-	<cfset ArrayAppend(sqlarray,")")>
-	<cfif bGetNewSeqId>
-		<cfset ArrayAppend(sqlarray, "OUTPUT INSERTED.#escape(pkfields[1].ColumnName)# INTO @#GuidVar#")>
-	</cfif>
-	<cfif bUseSubquery>
-		<cfset ArrayAppend(sqlarray,"SELECT ")>
-	<cfelse>
-		<cfset ArrayAppend(sqlarray,"VALUES (")>
-	</cfif>
-	<cfset fieldcount = 0>
-	<!--- Loop through all updateable fields --->
-	<cfloop index="ii" from="1" to="#ArrayLen(fields)#" step="1">
-		<cfif useField(in,fields[ii])><!--- Include the field in SQL if it has appropriate data --->
-			<cfset checkLength(fields[ii],in[fields[ii].ColumnName])>
-			<cfset fieldcount = fieldcount + 1>
-			<cfif fieldcount GT 1>
-				<cfset ArrayAppend(sqlarray,",")><!--- put a comma before every field after the first --->
-			</cfif>
-			<cfset ArrayAppend(sqlarray,sval(fields[ii],in))>
-		<cfelseif StructKeyExists(fields[ii],"Special") AND Len(fields[ii].Special) AND ListFindNoCase(Specials,fields[ii]["Special"])>
-			<!--- Set fields based on specials --->
-			<cfset fieldcount = fieldcount + 1>
-			<cfif fieldcount GT 1>
-				<cfset ArrayAppend(sqlarray,",")><!--- put a comma before every field after the first --->
-			</cfif>
-			<cfswitch expression="#fields[ii].Special#">
-			<cfcase value="CreationDate">
-				<cfset ArrayAppend(sqlarray,getFieldNowValue(arguments.tablename,fields[ii]))>
-			</cfcase>
-			<cfcase value="LastUpdatedDate">
-				<cfset ArrayAppend(sqlarray,getFieldNowValue(arguments.tablename,fields[ii]))>
-			</cfcase>
-			<cfcase value="Sorter">
-				<cfset ArrayAppend(sqlarray,getNewSortNum(arguments.tablename,fields[ii].ColumnName))>
-			</cfcase>
-			<cfcase value="UUID">
-				<cfif structKeyExists(fields[ii],"CF_DataType")>
-					<cfset ArrayAppend(sqlarray,queryparam(cfsqltype=fields[ii].CF_DataType,value=CreateUUID()))>
-				<cfelse>
-					<cfset ArrayAppend(sqlarray,queryparam(cfsqltype="CF_SQL_VARCHAR",value=CreateUUID()))>
-				</cfif>
-			</cfcase>
-			</cfswitch>
-		<cfelseif StructKeyExists(fields[ii],"Default") AND Len(fields[ii].Default) AND getDatabase() EQ "Access">
-			<cfset fieldcount = fieldcount + 1>
-			<cfif fieldcount GT 1>
-				<cfset ArrayAppend(sqlarray,",")><!--- put a comma before every field after the first --->
-			</cfif>
-			<cfset ArrayAppend(sqlarray,fields[ii].Default)>
-		<cfelseif NOT ( useField(in,fields[ii]) OR StructKeyExists(fields[ii],"Default") OR fields[ii].AllowNulls )>
-			<cfset fieldcount = fieldcount + 1>
-			<cfif fieldcount GT 1>
-				<cfset ArrayAppend(sqlarray,",")><!--- put a comma before every field after the first --->
-			</cfif>
-			<cfset ArrayAppend(sqlarray,"''")>
-		</cfif>
-	</cfloop>
-	<cfloop index="ii" from="1" to="#ArrayLen(pkfields)#" step="1">
-		<cfif useField(in,pkfields[ii]) AND NOT isIdentityField(pkfields[ii])><!--- Include the field in SQL if it has appropriate data --->
-			<cfset checkLength(pkfields[ii],in[pkfields[ii].ColumnName])>
-			<cfset fieldcount = fieldcount + 1>
-			<cfif fieldcount GT 1>
-				<cfset ArrayAppend(sqlarray,",")><!--- put a comma before every field after the first --->
-			</cfif>
-			<cfset ArrayAppend(sqlarray,sval(pkfields[ii],in))>
-		<cfelseif pkfields[ii].CF_Datatype EQ "CF_SQL_IDSTAMP" AND bSetGuid>
-			<cfset fieldcount = fieldcount + 1>
-			<cfif fieldcount GT 1>
-				<cfset ArrayAppend(sqlarray,",")><!--- put a comma before every field after the first --->
-			</cfif>
-			<cfset ArrayAppend(sqlarray,"@#GuidVar#")>
-		</cfif>
-	</cfloop>
-	<cfif fieldcount EQ 0>
-		<!---<cfsavecontent variable="inf"><cfdump var="#in#"></cfsavecontent>--->
-		<cfset throwDMError("You must pass in at least one field that can be inserted into the database. Fields: #StructKeyList(in)#","NeedInsertFields")>
-	</cfif>
-	<cfif bUseSubquery>
-		<cfset ArrayAppend(sqlarray,"WHERE NOT EXISTS (")>
-			<cfset ArrayAppend(sqlarray,"SELECT 1")>
-			<cfset ArrayAppend(sqlarray,"FROM #escape(arguments.tablename)#")>
-			<cfset ArrayAppend(sqlarray,"WHERE 1 = 1")>
-			<cfset ArrayAppend(sqlarray,getWhereSQL(tablename=arguments.tablename,data=arguments.data_where,filters=arguments.filters))>
-		<cfset ArrayAppend(sqlarray,")")>
-	<cfelse>
-		<cfset ArrayAppend(sqlarray,")")>
-	</cfif>
-	<cfif bSetGuid>
-		<cfset ArrayAppend(sqlarray,";")>
-		<cfset ArrayAppend(sqlarray,"SELECT @#GuidVar# AS NewID")>
-	<cfelseif bGetNewSeqId>
-		<cfset ArrayAppend(sqlarray,";")>
-		<cfset ArrayAppend(sqlarray, "SELECT inserted_guid AS NewID FROM @#GuidVar#;")>
-	</cfif>
+		) {// Include the field in SQL if it has appropriate data
+			fieldcount = fieldcount + 1;
+			if ( fieldcount GT 1 ) {
+				ArrayAppend(sqlarray,",");// put a comma before every field after the first
+			}
+			ArrayAppend(sqlarray,escape(fields[ii].ColumnName));
+		}
+	}
+	for ( ii=1; ii LTE ArrayLen(pkfields); ii++ ) {
+		if ( ( useField(sData,pkfields[ii]) AND NOT isIdentityField(pkfields[ii]) ) OR ( pkfields[ii].CF_Datatype EQ "CF_SQL_IDSTAMP" AND bSetGuid ) ) {// Include the field in SQL if it has appropriate data ---
+			fieldcount = fieldcount + 1;
+			if ( fieldcount GT 1 ) {
+				ArrayAppend(sqlarray,",");// put a comma before every field after the first
+			}
+			ArrayAppend(sqlarray,"#escape(pkfields[ii].ColumnName)#");
+		}
+	}
+	ArrayAppend(sqlarray,")");
+	if ( bGetNewSeqId ) {
+		ArrayAppend(sqlarray, "OUTPUT INSERTED.#escape(pkfields[1].ColumnName)# INTO @#GuidVar#");
+	}
+	if ( bUseSubquery) {
+		ArrayAppend(sqlarray,"SELECT ");
+	} else {
+		ArrayAppend(sqlarray,"VALUES (");
+	}
+	fieldcount = 0;
+	// Loop through all updateable fields
+	for ( ii=1; ii LTE ArrayLen(fields); ii++ ) {
+		if ( useField(sData,fields[ii]) ) {// Include the field in SQL if it has appropriate data
+			checkLength(fields[ii],sData[fields[ii].ColumnName]);
+			fieldcount = fieldcount + 1;
+			if ( fieldcount GT 1 ) {
+				ArrayAppend(sqlarray,",");// put a comma before every field after the first
+			}
+			ArrayAppend(sqlarray,sval(fields[ii],sData));
+		} else if ( StructKeyExists(fields[ii],"Special") AND Len(fields[ii].Special) AND ListFindNoCase(Specials,fields[ii]["Special"]) ) {
+			// Set fields based on specials
+			fieldcount = fieldcount + 1;
+			if ( fieldcount GT 1 ) {
+				ArrayAppend(sqlarray,",");// put a comma before every field after the first
+			}
+			switch (fields[ii].Special) {
+				case "CreationDate":
+						ArrayAppend(sqlarray,getFieldNowValue(arguments.tablename,fields[ii]));
+					break;
+				case "LastUpdatedDate":
+						ArrayAppend(sqlarray,getFieldNowValue(arguments.tablename,fields[ii]));
+					break;
+				case "Sorter":
+						ArrayAppend(sqlarray,getNewSortNum(arguments.tablename,fields[ii].ColumnName));
+					break;
+				case "UUID":
+						if ( structKeyExists(fields[ii],"CF_DataType") ) {
+							ArrayAppend(sqlarray,queryparam(cfsqltype=fields[ii].CF_DataType,value=CreateUUID()));
+						} else {
+							ArrayAppend(sqlarray,queryparam(cfsqltype="CF_SQL_VARCHAR",value=CreateUUID()));
+						}
+					break;
+			}
+		} else if ( StructKeyExists(fields[ii],"Default") AND Len(fields[ii].Default) AND getDatabase() EQ "Access" ) {
+			fieldcount = fieldcount + 1;
+			if ( fieldcount GT 1 ) {
+				ArrayAppend(sqlarray,",");// put a comma before every field after the first
+			}
+			ArrayAppend(sqlarray,fields[ii].Default);
+		} else if ( NOT ( useField(sData,fields[ii]) OR StructKeyExists(fields[ii],"Default") OR fields[ii].AllowNulls ) ) {
+			fieldcount = fieldcount + 1;
+			if ( fieldcount GT 1 ) {
+				ArrayAppend(sqlarray,",");// put a comma before every field after the first
+			}
+			ArrayAppend(sqlarray,"''");
+		}
+	}
+	for ( ii=1; ii LTE ArrayLen(pkfields); ii++ ) {
+		if ( useField(sData,pkfields[ii]) AND NOT isIdentityField(pkfields[ii]) ) {// Include the field in SQL if it has appropriate data
+			checkLength(pkfields[ii],sData[pkfields[ii].ColumnName]);
+			fieldcount = fieldcount + 1;
+			if ( fieldcount GT 1 ) {
+				ArrayAppend(sqlarray,",");// put a comma before every field after the first
+			}
+			ArrayAppend(sqlarray,sval(pkfields[ii],sData));
+		} else if ( pkfields[ii].CF_Datatype EQ "CF_SQL_IDSTAMP" AND bSetGuid ) {
+			fieldcount = fieldcount + 1;
+			if ( fieldcount GT 1 ) {
+				ArrayAppend(sqlarray,",");// put a comma before every field after the first
+			}
+			ArrayAppend(sqlarray,"@#GuidVar#");
+		}
+	}
+	if ( fieldcount EQ 0 ) {
+		//<cfsavecontent variable="inf"><cfdump var="#sData#"></cfsavecontent>--->
+		throwDMError("You must pass in at least one field that can be inserted into the database. Fields: #StructKeyList(sData)#","NeedInsertFields");
+	}
+	if ( bUseSubquery ) {
+		ArrayAppend(sqlarray,"WHERE NOT EXISTS (");
+			ArrayAppend(sqlarray,"SELECT 1");
+			ArrayAppend(sqlarray,"FROM #escape(arguments.tablename)#");
+			ArrayAppend(sqlarray,"WHERE 1 = 1");
+			ArrayAppend(sqlarray,getWhereSQL(tablename=arguments.tablename,data=arguments.data_where,filters=arguments.filters));
+		ArrayAppend(sqlarray,")");
+	} else {
+		ArrayAppend(sqlarray,")");
+	}
+	if ( bSetGuid ) {
+		ArrayAppend(sqlarray,";");
+		ArrayAppend(sqlarray,"SELECT @#GuidVar# AS NewID");
+	} else if ( bGetNewSeqId ) {
+		ArrayAppend(sqlarray,";");
+		ArrayAppend(sqlarray, "SELECT inserted_guid AS NewID FROM @#GuidVar#;");
+	}
 
-	<cfif fieldcount EQ 0>
-		<cfset sqlarray = ArrayNew(1)>
-	</cfif>
+	if ( fieldcount EQ 0 ) {
+		sqlarray = ArrayNew(1);
+	}
 
-	<cfreturn sqlarray>
-</cffunction>
+	return sqlarray;
+}
 
-<cffunction name="isDeletable" access="public" returntype="boolean" output="no">
-	<cfargument name="tablename" type="string" required="yes" hint="The name of the table from which to delete a record.">
-	<cfargument name="data" type="struct" required="yes" hint="A structure indicating the record to delete. A key indicates a field. The structure should have a key for each primary key in the table.">
+/**
+* @tablename The name of the table from which to delete a record.
+* @data A structure indicating the record to delete. A key indicates a field. The structure should have a key for each primary key in the table.
+*/
+public boolean function isDeletable(
+	required string tablename,
+	required struct data
+) {
+	return ( Len(getDeletionConflicts(argumentCollection=arguments)) EQ 0 );
+}
 
-	<cfreturn ( Len(getDeletionConflicts(argumentCollection=arguments)) EQ 0 )>
-</cffunction>
+public boolean function isLogging() {
+	if ( NOT StructKeyExists(variables,"doLogging") ) {
+		variables.doLogging = false;
+	}
 
-<cffunction name="isLogging" access="public" returntype="boolean" output="no">
+	return variables.doLogging;
+}
 
-	<cfif NOT isDefined("doLogging")>
-		<cfset variables.doLogging = false>
-	</cfif>
+public boolean function isLogicalDeletion(required string tablename) {
+	var fields = getUpdateableFields(arguments.tablename);
+	var ii = 0;
+	var result = false;
 
-	<cfreturn variables.doLogging>
-</cffunction>
-
-<cffunction name="isLogicalDeletion" access="public" returntype="boolean" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-
-	<cfset var fields = getUpdateableFields(arguments.tablename)>
-	<cfset var ii = 0>
-	<cfset var result = false>
-
-	<cfloop index="ii" from="1" to="#ArrayLen(fields)#" step="1">
-		<cfif
+	for ( ii=1; ii LTE ArrayLen(fields); ii++ ) {
+		if (
 				( StructKeyExists(fields[ii],"Special") AND fields[ii].Special EQ "DeletionMark" )
 			AND	(
 						fields[ii].CF_DataType EQ "CF_SQL_BIT"
 					OR	fields[ii].CF_DataType EQ "CF_SQL_DATE"
 					OR	fields[ii].CF_DataType EQ "CF_SQL_DATETIME"
 				)
-		>
-			<cfset result = true>
-			<cfbreak>
-		</cfif>
-	</cfloop>
+		) {
+			result = true;
+			break;
+		}
+	}
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="isMatchingRecord" access="public" returntype="boolean" output="no">
-	<cfargument name="tablename" type="string" required="yes" hint="The table in which to insert data.">
-	<cfargument name="data" type="struct" required="yes" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="pksonly" type="boolean" default="true">
+/**
+* @tablename The table in which to insert data.
+* @data A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+*/
+public boolean function isMatchingRecord(
+	required string tablename,
+	required struct data,
+	boolean pksonly=true
+) {
+	return BooleanFormat( StructCount(getMatchingRecordKeys(argumentCollection=arguments)) GT 0 );
+}
 
-	<cfreturn ( StructCount(getMatchingRecordKeys(argumentCollection=arguments)) GT 0 )>
-</cffunction>
-
-<cffunction name="isValidDate" access="public" returntype="boolean" output="no">
-	<cfargument name="value" type="string" required="yes">
-
-	<cfset var result = (
+public boolean function isValidDate(required string value) {
+	var result = (
 			isDate(arguments.value)
 		OR	(
 					isNumeric(arguments.value)
 				AND	arguments.value GT 0
 				AND	arguments.value LT 65538
 			)
-	)>
+	);
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="loadTable" access="public" returntype="void" output="no" hint="I load a table from the database into DataMgr.">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="ErrorOnNotExists" type="boolean" default="true">
+/**
+* I load a table from the database into DataMgr.
+*/
+public void function loadTable(
+	required string tablename,
+	boolean ErrorOnNotExists=true
+) {
+	var ii = 0;
+	var arrTableStruct = 0;
 
-	<cfset var ii = 0>
-	<cfset var arrTableStruct = 0>
+	try {
+		arrTableStruct = getDBTableStruct(arguments.tablename);
 
-	<cftry>
-		<cfset arrTableStruct = getDBTableStruct(arguments.tablename)>
+		for ( ii=1; ii LTE ArrayLen(arrTableStruct); ii++ ) {
+			if ( StructKeyExists(arrTableStruct[ii],"Default") AND Len(arrTableStruct[ii]["Default"]) ) {
+				arrTableStruct[ii]["Default"] = makeDefaultValue(arrTableStruct[ii]["Default"],arrTableStruct[ii].CF_DataType);
+			}
+		}
+		addTable(arguments.tablename,arrTableStruct);
 
-		<cfloop index="ii" from="1" to="#ArrayLen(arrTableStruct)#" step="1">
-			<cfif StructKeyExists(arrTableStruct[ii],"Default") AND Len(arrTableStruct[ii]["Default"])>
-				<cfset arrTableStruct[ii]["Default"] = makeDefaultValue(arrTableStruct[ii]["Default"],arrTableStruct[ii].CF_DataType)>
-			</cfif>
-		</cfloop>
-		<cfset addTable(arguments.tablename,arrTableStruct)>
+		setCacheDate();
+	} catch (any e) {
+		if ( arguments.ErrorOnNotExists ) {
+			rethrow;
+		}
+	}
+}
 
-		<cfset setCacheDate()>
-	<cfcatch>
-		<cfif arguments.ErrorOnNotExists>
-			<cfrethrow />
-		</cfif>
-	</cfcatch>
-	</cftry>
-
-</cffunction>
-
-<cffunction name="loadXML" access="public" returntype="any" output="false" hint="I add tables from XML and optionally create tables/columns as needed (I can also load data to a table upon its creation).">
-	<cfargument name="xmldata" type="string" required="yes" hint="XML data of tables and columns to load into DataMgr. Follows schema: http://www.bryantwebconsulting.com/cfcs/DataMgr.xsd">
-	<cfargument name="docreate" type="boolean" default="false" hint="I indicate if the table should be created in the database if it doesn't already exist.">
-	<cfargument name="addcolumns" type="boolean" default="false" hint="I indicate if missing columns should be be created.">
-
-	<cfscript>
+/**
+* I add tables from XML and optionally create tables/columns as needed (I can also load data to a table upon its creation).
+* @xmldata XML data of tables and columns to load into DataMgr. Follows schema: http://www.bryantwebconsulting.com/cfcs/DataMgr.xsd
+* @docreate I indicate if the table should be created in the database if it doesn't already exist.
+* @addcolumns I indicate if missing columns should be be created.
+*/
+public function loadXML(
+	required string xmldata,
+	boolean docreate=false,
+	boolean addcolumns=false
+) {
 	var xmlstring = "";
 	var dbtables = "";
 	var MyTables = StructNew();
@@ -2915,25 +3170,23 @@
 	var key = "";
 
 	var sDBTableData = 0;
-	</cfscript>
 
-	<cflock name="DataMgr_loadXml_#variables.UUID#" timeout="1800" throwontimeout="yes">
-		<cfif isSimpleValue(arguments.xmldata)>
-			<cfif arguments.xmldata CONTAINS "</tables>">
-				<cfset xmlstring = arguments.xmldata>
-			<cfelseif FileExists(arguments.xmldata)>
-				<cffile action="read" file="#arguments.xmldata#" variable="xmlstring">
-			<cfelse>
-				<cfset throwDMError("xmldata argument for LoadXML must be a valid XML or a path to a file holding a valid XML string.","LoadFailed")>
-			</cfif>
-			<cfset varXML = XmlParse(xmlstring,"no")>
-		<cfelseif isXmlDoc(arguments.xmldata)>
-			<cfset varXML = arguments.xmldata>
-		<cfelse>
-			<cfset throwDMError("xmldata argument for LoadXML must be a valid XML or a path to a file holding a valid XML string.","LoadFailed")>
-		</cfif>
+	lock name="DataMgr_loadXml_#variables.UUID#" timeout="1800" throwontimeout="yes" {
+		if ( isSimpleValue(arguments.xmldata) ) {
+			if ( arguments.xmldata CONTAINS "</tables>" ) {
+				xmlstring = arguments.xmldata;
+			} else if ( FileExists(arguments.xmldata) ) {
+				xmlstring = FileRead(arguments.xmldata);
+			} else {
+				throwDMError("xmldata argument for LoadXML must be a valid XML or a path to a file holding a valid XML string.","LoadFailed");
+			}
+			varXML = XmlParse(xmlstring,"no");
+		} else if ( isXmlDoc(arguments.xmldata) ) {
+			varXML = arguments.xmldata;
+		} else {
+			throwDMError("xmldata argument for LoadXML must be a valid XML or a path to a file holding a valid XML string.","LoadFailed");
+		}
 
-		<cfscript>
 		xTables = varXML.XmlRoot.XmlChildren;
 		xData = XmlSearch(varXML, "//data");
 		aTableNames = XmlSearch(varXML, "//table/@name");
@@ -2941,11 +3194,9 @@
 		for (i=1; i LTE ArrayLen(aTableNames);i=i+1) {
 			tables_made = ListAppend(tables_made,ListLast(aTableNames[i].XmlValue,"."));
 		}
-		</cfscript>
 
-		<cfset dbtables = getDatabaseTablesCache()>
+		dbtables = getDatabaseTablesCache();
 
-		<cfscript>
 		//  Loop over all root elements in XML
 		for (i=1; i LTE ArrayLen(xTables);i=i+1) {
 			//  If element is a table and has a name, add it to the data
@@ -3145,12 +3396,11 @@
 			}
 
 		}// if
-		</cfscript>
 
-		<cfif Len(FailedSQL)>
-			<cfset throwDMError("LoadXML Failed (verify datasource ""#variables.datasource#"" is correct) #DBErrs#","LoadFailed",FailedSQL,DBErrs)>
-		</cfif>
-		<cfscript>
+		if ( Len(FailedSQL) ) {
+			throwDMError("LoadXML Failed (verify datasource ""#variables.datasource#"" is correct) #DBErrs#","LoadFailed",FailedSQL,DBErrs);
+		}
+
 		//Add columns to tables as needed if requested to do so.
 		if ( arguments.addcolumns ) {
 			//Loop over tables (from XML)
@@ -3256,180 +3506,179 @@
 
 			}// if
 		}
-		</cfscript>
 
-		<cfif Len(FailedSQL)>
-			<cfset throwDMError("LoadXML Failed","LoadFailed",FailedSQL)>
-		</cfif>
+		if ( Len(FailedSQL) ) {
+			throwDMError("LoadXML Failed","LoadFailed",FailedSQL);
+		}
 
-		<cfscript>
 		if ( arguments.docreate ) {
 			seedData(varXML,tables_made);
 			seedConstraints(varXML);
 			seedIndexes(varXML);
 		}
-		</cfscript>
-	</cflock>
+	}
 
-	<cfset setCacheDate()>
+	setCacheDate();
 
-	<cfreturn This>
-</cffunction>
+	return This;
+}
 
-<cffunction name="numRecords" access="public" returntype="numeric" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" default="#StructNew()#" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
+public numeric function numRecords(
+	required string tablename,
+	struct data={}
+) {
+	var qRecords = getRecords(tablename=arguments.tablename,data=arguments.data,function="count",FunctionAlias="NumRecords");
 
-	<cfset var qRecords = getRecords(tablename=arguments.tablename,data=arguments.data,function="count",FunctionAlias="NumRecords")>
+	return Val(qRecords.NumRecords);
+}
 
-	<cfreturn Val(qRecords.NumRecords)>
-</cffunction>
+public struct function queryparam(
+	string cfsqltype,
+	value,
+	string maxLength,
+	string scale=0,
+	boolean null=false,
+	boolean list=false,
+	string separator=","
+) {
+	if ( NOT StructKeyExists(arguments,"cfsqltype") ) {
+		if ( StructKeyExists(arguments,"CF_DataType") ) {
+			arguments["cfsqltype"] = arguments["CF_DataType"];
+		} else if ( StructKeyExists(arguments,"Relation") ) {
+			if ( StructKeyExists(arguments.Relation,"CF_DataType") ) {
+				arguments["cfsqltype"] = arguments.Relation["CF_DataType"];
+			} else if ( StructKeyExists(arguments.Relation,"table") AND StructKeyExists(arguments.Relation,"field") ) {
+				arguments["cfsqltype"] = getEffectiveDataType(argumentCollection=arguments);
+			}
+		}
+	}
 
-<cffunction name="queryparam" access="public" returntype="struct" output="no" hint="I run the given SQL.">
-	<cfargument name="cfsqltype" type="string" required="no">
-	<cfargument name="value" type="any" required="yes">
-	<cfargument name="maxLength" type="string" required="no">
-	<cfargument name="scale" type="string" default="0">
-	<cfargument name="null" type="boolean" default="no">
-	<cfargument name="list" type="boolean" default="no">
-	<cfargument name="separator" type="string" default=",">
+	if ( isStruct(arguments.value) AND StructKeyExists(arguments.value,"value") ) {
+		arguments.value = arguments.value.value;
+	}
 
-	<cfif NOT StructKeyExists(arguments,"cfsqltype")>
-		<cfif StructKeyExists(arguments,"CF_DataType")>
-			<cfset arguments["cfsqltype"] = arguments["CF_DataType"]>
-		<cfelseif StructKeyExists(arguments,"Relation")>
-			<cfif StructKeyExists(arguments.Relation,"CF_DataType")>
-				<cfset arguments["cfsqltype"] = arguments.Relation["CF_DataType"]>
-			<cfelseif StructKeyExists(arguments.Relation,"table") AND StructKeyExists(arguments.Relation,"field")>
-				<cfset arguments["cfsqltype"] = getEffectiveDataType(argumentCollection=arguments)>
-			</cfif>
-		</cfif>
-	</cfif>
+	if ( NOT isSimpleValue(arguments.value) ) {
+		throwDMError("arguments.value must be a simple value","ValueMustBeSimple");
+	}
 
-	<cfif isStruct(arguments.value) AND StructKeyExists(arguments.value,"value")>
-		<cfset arguments.value = arguments.value.value>
-	</cfif>
+	if ( NOT StructKeyExists(arguments,"maxLength") ) {
+		arguments.maxLength = Len(arguments.value);
+	}
 
-	<cfif NOT isSimpleValue(arguments.value)>
-		<cfset throwDMError("arguments.value must be a simple value","ValueMustBeSimple")>
-	</cfif>
+	if ( StructKeyExists(arguments,"maxLength") ) {
+		arguments.maxlength = Int(Val(arguments.maxlength));
+		if ( NOT arguments.maxlength GT 0 ) {
+			arguments.maxlength = Len(arguments.value);
+		}
+		if ( NOT arguments.maxlength GT 0 ) {
+			arguments.maxlength = 100;
+			arguments.null = "yes";
+			arguments.null = "no";
+		}
+	}
 
-	<cfif NOT StructKeyExists(arguments,"maxLength")>
-		<cfset arguments.maxLength = Len(arguments.value)>
-	</cfif>
+	if ( StructKeyExists(Arguments,"cfsqltype") ) {
+		switch (Arguments.cfsqltype) {
+			case "CF_SQL_BLOB":
+					Arguments.value = BinaryDecode(Arguments.value,"Hex");
+				break;
+			case "CF_SQL_BIT":
+					Arguments.value = getBooleanSQLValue(Arguments.value);
+				break;
+		}
+	}
 
-	<cfif StructKeyExists(arguments,"maxLength")>
-		<cfset arguments.maxlength = Int(Val(arguments.maxlength))>
-		<cfif NOT arguments.maxlength GT 0>
-			<cfset arguments.maxlength = Len(arguments.value)>
-		</cfif>
-		<cfif NOT arguments.maxlength GT 0>
-			<cfset arguments.maxlength = 100>
-			<cfset arguments.null = "yes">
-			<cfset arguments.null = "no">
-		</cfif>
-	</cfif>
+	if ( NOT StructKeyExists(arguments,"null") ) {
+		arguments.null = "no";
+	}
 
-	<cfif StructKeyExists(Arguments,"cfsqltype")>
-		<cfswitch expression="#Arguments.cfsqltype#">
-		<cfcase value="CF_SQL_BLOB">
-			<cfset Arguments.value = BinaryDecode(Arguments.value,"Hex")>
-		</cfcase>
-		<cfcase value="CF_SQL_BIT">
-			<cfset Arguments.value = getBooleanSQLValue(Arguments.value)>
-		</cfcase>
-		</cfswitch>
-	</cfif>
+	arguments.scale = Max(int(val(arguments.scale)),2);
 
-	<cfif NOT StructKeyExists(arguments,"null")>
-		<cfset arguments.null = "no">
-	</cfif>
+	return StructFromArgs(arguments);
+}
 
-	<cfset arguments.scale = Max(int(val(arguments.scale)),2)>
+/**
+* I remove a column from a table.
+*/
+public function removeColumn(
+	required string tablename,
+	required string field
+) {
+	var ii = 0;
 
-	<cfreturn StructFromArgs(arguments)>
-</cffunction>
+	if ( ListFindNoCase(getDBFieldList(arguments.tablename),arguments.field) ) {
+		runSQL("ALTER TABLE #escape(arguments.tablename)# DROP COLUMN #escape(arguments.field)#");
+	}
 
-<cffunction name="removeColumn" access="public" returntype="any" output="false" hint="I remove a column from a table.">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="field" type="string" required="yes">
+	// Reset table properties
+	resetTableProps(arguments.tablename);
 
-	<cfset var ii = 0>
+	// Remove field from internal definition of table
+	if ( StructKeyExists(variables.tables,arguments.tablename) ) {
+		for ( ii=1; ii LTE ArrayLen(variables.tables[arguments.tablename]); ii++ ) {
+			if (
+				StructKeyExists(variables.tables[arguments.tablename][ii],"ColumnName")
+				AND
+				variables.tables[arguments.tablename][ii]["ColumnName"] EQ arguments.field
+			) {
+				ArrayDeleteAt(variables.tables[arguments.tablename],ii);
+			}
+		}
+	}
+}
 
-	<cfif ListFindNoCase(getDBFieldList(arguments.tablename),arguments.field)>
-		<cfset runSQL("ALTER TABLE #escape(arguments.tablename)# DROP COLUMN #escape(arguments.field)#")>
-	</cfif>
+/**
+* I remove a record from a table.
+*/
+public function removeRecord(required string tablename) {
+	runSQL("DROP TABLE #escape(arguments.tablename)#");
 
-	<!--- Reset table properties --->
-	<cfset resetTableProps(arguments.tablename)>
+	// Remove table properties
+	StructDelete(variables.tableprops,arguments.tablename);
+	// Remote internal table representation
+	StructDelete(variables.tables,arguments.tablename);
+}
 
-	<!--- Remove field from internal definition of table --->
-	<cfif StructKeyExists(variables.tables,arguments.tablename)>
-		<cfloop index="ii" from="1" to="#ArrayLen(variables.tables[arguments.tablename])#">
-			<cfif
-					StructKeyExists(variables.tables[arguments.tablename][ii],"ColumnName")
-				AND	variables.tables[arguments.tablename][ii]["ColumnName"] EQ arguments.field
-			>
-				<cfset ArrayDeleteAt(variables.tables[arguments.tablename],ii)>
-			</cfif>
-		</cfloop>
-	</cfif>
+public struct function getQueryAttributes() {
+	var sQuery = {name="qQuery",datasource="#variables.datasource#"};
 
-</cffunction>
+	if ( StructKeyExists(variables,"username") AND StructKeyExists(variables,"password") ) {
+		sQuery["username"] = variables.username;
+		sQuery["password"] = variables.password;
+	}
+	if ( variables.SmartCache ) {
+		sQuery["cachedafter"] = "#variables.CacheDate#";
+	}
 
-<cffunction name="removeTable" access="public" returntype="any" output="false" hint="I remove a table.">
-	<cfargument name="tablename" type="string" required="yes">
+	if ( StructKeyExists(Arguments,"atts") ) {
+		StructAppend(sQuery,Arguments.atts,"no");
+	}
+	StructAppend(sQuery,Arguments,"no");
 
-	<cfset var ii = 0>
+	return sQuery;
+}
 
-	<cfset runSQL("DROP TABLE #escape(arguments.tablename)#")>
+/**
+* I run the given SQL.
+* @sql The SQL to run.
+* @atts Attributes for cfquery.
+*/
+public function runSQL(
+	required string sql,
+	struct atts
+) {
+	var loc = {};
 
-	<!--- Remove table properties --->
-	<cfset StructDelete(variables.tableprops,arguments.tablename)>
-	<!--- Remote internal table representation --->
-	<cfset StructDelete(variables.tables,arguments.tablename)>
+	if ( Len(arguments.sql) ) {
+		loc.qQuery = QueryExecute(Trim(DMPreserveSingleQuotes(arguments.sql)), [], getQueryAttributes(argumentCollection=arguments));
+		logSQL(arguments.sql);
+	}
 
-</cffunction>
-
-<cffunction name="getQueryAttributes" access="public" returntype="struct" output="no">
-
-	<cfset var sQuery = {name="qQuery",datasource="#variables.datasource#"}>
-
-	<cfif StructKeyExists(variables,"username") AND StructKeyExists(variables,"password")>
-		<cfset sQuery["username"] = variables.username>
-		<cfset sQuery["password"] = variables.password>
-	</cfif>
-	<cfif variables.SmartCache>
-		<cfset sQuery["cachedafter"] = "#variables.CacheDate#">
-	</cfif>
-
-	<cfif StructKeyExists(Arguments,"atts")>
-		<cfset StructAppend(sQuery,Arguments.atts,"no")>
-	</cfif>
-	<cfset StructAppend(sQuery,Arguments,"no")>
-
-	<cfreturn sQuery>
-</cffunction>
-
-<cffunction name="runSQL" access="public" returntype="any" output="no" hint="I run the given SQL.">
-	<cfargument name="sql" type="string" required="yes">
-	<cfargument name="atts" type="struct" required="no" hint="Attributes for cfquery.">
-
-	<cfset var qQuery = 0>
-	<cfset var thisSQL = "">
-	<cfset var sAttributes = getQueryAttributes(ArgumentCollection=Arguments)>
-
-	<cfif Len(arguments.sql)>
-		<cfquery AttributeCollection="#sAttributes#">#Trim(DMPreserveSingleQuotes(arguments.sql))#</cfquery>
-
-		<cfset logSQL(arguments.sql)>
-	</cfif>
-
-	<cfif IsDefined("qQuery") AND isQuery(qQuery)>
-		<cfreturn qQuery>
-	</cfif>
-
-</cffunction>
+	if ( StructKeyExists(loc,"qQuery") AND isQuery(loc.qQuery) ) {
+		return loc.qQuery;
+	}
+}
+</cfscript>
 
 <cffunction name="runSQLArray" access="public" returntype="any" output="no" hint="I run the given array representing SQL code (structures in the array represent params).">
 	<cfargument name="sqlarray" type="array" required="yes">
@@ -3486,10 +3735,8 @@
 	<cfreturn qConflicts>
 </cffunction>
 
-<cffunction name="getConstraintConflicts_Table" access="private" returntype="any" output="no">
-	<cfargument name="tablename" type="string" required="true">
-
-	<cfscript>
+<cfscript>
+private function getConstraintConflicts_Table(required string tablename) {
 	var varXML = getXml(Arguments.tablename);
 	var xTable = Xmlparse(varXML);
 	var aForeignFields = XmlSearch(xTable, "//field[@ftable][@ColumnName]");//Get all real fields that reference other tables
@@ -3520,338 +3767,411 @@
 			sResult[sField["ColumnName"]] = getConstraintConflicts_Field(Arguments.tablename,sField["ftable"],sField["ColumnName"]);
 		}
 	}
-	</cfscript>
+	
 
-	<cfreturn sResult>
-</cffunction>
+	return sResult;
+}
 
-<cffunction name="logSQL" access="private" returntype="void" output="no">
-	<cfargument name="sql" type="any" required="yes">
+private void function logSQL(required sql) {
+	var text = "";
 
-	<cfset var text = "">
+	if ( StructKeyExists(Variables,"logfile") AND Len(Variables.logfile) ) {
+		if ( isSimpleValue(Arguments.sql) AND Len(Arguments.sql) ) {
+			text = Arguments.sql;
+		} else if ( isArray(Arguments.sql) AND ArrayLen(Arguments.sql) ) {
+			text = readableSQL(Arguments.sql);
+		}
 
-	<cfif StructKeyExists(Variables,"logfile") AND Len(Variables.logfile)>
-		<cfif isSimpleValue(Arguments.sql) AND Len(Arguments.sql)>
-			<cfset text = Arguments.sql>
-		<cfelseif isArray(Arguments.sql) AND ArrayLen(Arguments.sql)>
-			<cfset text = readableSQL(Arguments.sql)>
-		</cfif>
+		if ( Len(text) ) {
+			writeLog(file="#Variables.logfile#",text="#text#");
+		}
+	}
 
-		<cfif Len(text)>
-			<cflog file="#Variables.logfile#" text="#text#">
-		</cfif>
-	</cfif>
+}
 
-</cffunction>
+/**
+* I return human-readable SQL from a SQL array (not to be sent to the database).
+* @sqlarray The SQL array to convert.
+* @runnable Indicates whether the resulting SQL should be runnable( buit unprotected).
+*/
 
-<cffunction name="readableSQL" access="public" returntype="string" output="no" hint="I return human-readable SQL from a SQL array (not to be sent to the database).">
-	<cfargument name="sqlarray" type="array" required="yes">
+public string function readableSQL(
+	required array sqlarray,
+	boolean runnable=false
+) {
+	var aSQL = cleanSQLArray(arguments.sqlarray);
+	var ii = 0;
+	var result = "";
+	var marker = "";
 
-	<cfset var aSQL = cleanSQLArray(arguments.sqlarray)>
-	<cfset var ii = 0>
-	<cfset var result = "">
+	for ( ii=1; ii LTE ArrayLen(aSQL); ii++ ) {
+		if ( isSimpleValue(aSQL[ii]) ) {
+			result = result & " " & aSQL[ii];
+		} else if ( isStruct(aSQL[ii]) ) {
+			//Try to include parameter inline as runnable SQL.
+			if ( Arguments.runnable ) {
+				marker = "'";
+				if (
+					StructKeyExists(aSQL[ii],"cfsqltype")
+					AND
+					(
+						aSQL[ii]["cfsqltype"] CONTAINS "int"
+						OR
+						aSQL[ii]["cfsqltype"] CONTAINS "bit"
+						OR
+						aSQL[ii]["cfsqltype"] CONTAINS "decimal"
+					)
+				) {
+					marker = "";
+				}
+				result = result & " " & marker & aSQL[ii].value & marker;
+			} else {
+				result = result & " " & "(#aSQL[ii].value#)";
+			}
+		}
+	}
 
-	<cfloop index="ii" from="1" to="#ArrayLen(aSQL)#" step="1">
-		<cfif IsSimpleValue(aSQL[ii])>
-			<cfset result = result & " " & aSQL[ii]>
-		<cfelseif IsStruct(aSQL[ii])>
-			<cfset result = result & " " & "(#aSQL[ii].value#)">
-		</cfif>
-	</cfloop>
+	return result;
+}
 
-	<cfreturn result>
-</cffunction>
+/**
+* I set a column in the given table
+* @tablename The name of the table to which a column will be added.
+* @columnname The name of the column to add.
+* @CF_Datatype The ColdFusion SQL Datatype of the column.
+* @Length The ColdFusion SQL Datatype of the column.
+* @Default The default value for the column.
+* @Special The special behavior for the column.
+* @Relation Relationship information for this column.
+* @PrimaryKey Indicates whether this column is a primary key.
+*/
+public function setColumn(
+	required string tablename,
+	required string columnname,
+	string CF_Datatype,
+	numeric Length=0,
+	string Default,
+	string Special,
+	struct Relation,
+	boolean PrimaryKey,
+	boolean AllowNulls=true,
+	boolean useInMultiRecordsets=true
+) {
+	var type = "";
+	var sql = "";
+	var FailedSQL = "";
+	var FieldIndex = 0;
+	var aTable = 0;
 
-<cffunction name="setColumn" access="public" returntype="any" output="no" hint="I set a column in the given table">
-	<cfargument name="tablename" type="string" required="yes" hint="The name of the table to which a column will be added.">
-	<cfargument name="columnname" type="string" required="yes" hint="The name of the column to add.">
-	<cfargument name="CF_Datatype" type="string" required="no" hint="The ColdFusion SQL Datatype of the column.">
-	<cfargument name="Length" type="numeric" default="0" hint="The ColdFusion SQL Datatype of the column.">
-	<cfargument name="Default" type="string" required="no" hint="The default value for the column.">
-	<cfargument name="Special" type="string" required="no" hint="The special behavior for the column.">
-	<cfargument name="Relation" type="struct" required="no" hint="Relationship information for this column.">
-	<cfargument name="PrimaryKey" type="boolean" required="no" hint="Indicates whether this column is a primary key.">
-	<cfargument name="AllowNulls" type="boolean" default="true">
-	<cfargument name="useInMultiRecordsets" type="boolean" default="true">
+	var sArgs = convertColumnAtts(argumentCollection=arguments);
 
-	<cfset var type = "">
-	<cfset var sql = "">
-	<cfset var FailedSQL = "">
-	<cfset var FieldIndex = 0>
-	<cfset var aTable = 0>
+	if ( NOT (StructKeyExists(arguments, "dbfields") AND Len(arguments.dbfields)) ) {
+		arguments.dbfields = getDBFieldList(sArgs.tablename);
+	}
 
-	<cfset var sArgs = convertColumnAtts(argumentCollection=arguments)>
+	if ( StructKeyExists(sArgs, "CF_Datatype") ) {
+		if ( NOT ListFindNoCase(arguments.dbfields, sArgs.columnname) ) {
+			sql = "ALTER TABLE " & escape(Variables.prefix & sArgs.tablename) & " ADD " & sqlCreateColumn(sArgs);
+			try {
+				runSQL(sql);
+			} catch (any e) {
+				FailedSQL = ListAppend(FailedSQL, sql, ";");
+			}
+			if ( Len(FailedSQL) ) {
+				throwDMError(message="Failed to add Column (""#arguments.columnname#"").", detail=FailedSQL);
+			}
+			if ( StructKeyExists(sArgs, "OldField") AND Len(Trim(sArgs.OldField)) ) {
+				updateFromOldField(tablename=sArgs.tablename, NewField=sArgs.columnname, OldField=sArgs.OldField, dbfields=ListAppend(arguments.dbfields, sArgs.columnname));
+			}
+			if ( StructKeyExists(sArgs, "Default") AND Len(Trim(sArgs.Default)) ) {
+				sql = '
+					UPDATE	#escape(Variables.prefix & sArgs.tablename)#
+					SET		#escape(sArgs.columnname)# = #sArgs.Default#
+					WHERE	#escape(sArgs.columnname)# IS NULL
+				';
+				try {
+					runSQL(sql);
+				} catch ( any e ) {
+					FailedSQL = ListAppend(FailedSQL, sql, ";");
+				}
+			}
+		}
+	} else {
+		if ( StructKeyExists(sArgs, "OldField") AND Len(Trim(sArgs.OldField)) ) {
+			updateFromOldField(tablename=sArgs.tablename, NewField=sArgs.columnname, OldField=sArgs.OldField, dbfields=arguments.dbfields);
+		}
+	}
 
-	<cfif NOT ( StructKeyExists(arguments,"dbfields") AND Len(arguments.dbfields) )>
-		<cfset arguments.dbfields = getDBFieldList(sArgs.tablename)>
-	</cfif>
+	FieldIndex = getColumnIndex(arguments.tablename, arguments.columnname);
 
-	<cfif StructKeyExists(sArgs,"CF_Datatype")>
-		<cfif NOT ListFindNoCase(arguments.dbfields,sArgs.columnname)>
-			<cfsavecontent variable="sql"><cfoutput>ALTER TABLE #escape(Variables.prefix & sArgs.tablename)# ADD #sqlCreateColumn(sArgs)#</cfoutput></cfsavecontent>
-			<cftry>
-				<cfset runSQL(sql)>
-				<cfcatch>
-					<cfset FailedSQL = ListAppend(FailedSQL,sql,";")>
-				</cfcatch>
-			</cftry>
-			<cfif Len(FailedSQL)>
-				<cfset throwDMError(message="Failed to add Column (""#arguments.columnname#"").",detail=FailedSQL)>
-			</cfif>
-			<cfif StructKeyExists(sArgs,"OldField") AND Len(Trim(sArgs.OldField))>
-				<cfset updateFromOldField(tablename=sArgs.tablename,NewField=sArgs.columnname,OldField=sArgs.OldField,dbfields=ListAppend(arguments.dbfields,sArgs.columnname))>
-			</cfif>
-			<cfif StructKeyExists(sArgs,"Default") AND Len(Trim(sArgs.Default))>
-				<cfsavecontent variable="sql"><cfoutput>
-				UPDATE	#escape(Variables.prefix & sArgs.tablename)#
-				SET		#escape(sArgs.columnname)# = #sArgs.Default#
-				WHERE	#escape(sArgs.columnname)# IS NULL
-				</cfoutput></cfsavecontent>
+	if ( NOT Len(FailedSQL) ) {
+		if ( NOT FieldIndex ) {
+			ArrayAppend(variables.tables[arguments.tablename], sArgs);
+			FieldIndex = ArrayLen(variables.tables[arguments.tablename]);
+		}
+		aTable = variables.tables[arguments.tablename];
 
-				<cftry>
-					<cfset runSQL(sql)>
-					<cfcatch>
-						<cfset FailedSQL = ListAppend(FailedSQL,sql,";")>
-					</cfcatch>
-				</cftry>
-			</cfif>
-		</cfif>
-	<cfelse>
-		<cfif StructKeyExists(sArgs,"OldField") AND Len(Trim(sArgs.OldField))>
-			<cfset updateFromOldField(tablename=sArgs.tablename,NewField=sArgs.columnname,OldField=sArgs.OldField,dbfields=arguments.dbfields)>
-		</cfif>
-	</cfif>
+		if ( StructKeyExists(sArgs, "Special") AND Len(sArgs.Special) ) {
+			aTable[FieldIndex]["Special"] = sArgs.Special;
+		}
+		if ( StructKeyExists(sArgs, "Relation") ) {
+			if (
+				StructKeyExists(sArgs["Relation"], "type")
+				AND
+				sArgs["Relation"].type EQ "list"
+				AND
+				StructKeyExists(sArgs, "OtherField")
+				AND
+				NOT StructKeyExists(sArgs["Relation"], "other-field")
+			) {
+				sArgs["Relation"]["other-field"] = sArgs["OtherField"];
+			}
+			aTable[FieldIndex]["Relation"] = sArgs.Relation;
+		}
+		if ( StructKeyExists(sArgs, "PrimaryKey") AND isBoolean(sArgs.PrimaryKey) AND sArgs.PrimaryKey ) {
+			aTable[FieldIndex]["PrimaryKey"] = true;
+		}
+		if ( StructKeyExists(sArgs, "useInMultiRecordsets") AND isBoolean(sArgs.useInMultiRecordsets) ) {
+			aTable[FieldIndex]["useInMultiRecordsets"] = sArgs.useInMultiRecordsets;
+		}
+	}
 
-	<cfset FieldIndex = getColumnIndex(arguments.tablename,arguments.columnname)>
+	announceEvent(
+		tablename=Arguments.tablename,
+		action="setColumn",
+		method="setColumn",
+		data={},
+		fieldlist=Arguments.columnname,
+		Args=Arguments
+	);
 
-	<cfif NOT Len(FailedSQL)>
-		<!--- Add the field to DataMgr if DataMgr doesn't know about the field --->
-		<cfif NOT FieldIndex>
-			<cfset ArrayAppend(variables.tables[arguments.tablename], sArgs)>
-			<cfset FieldIndex = ArrayLen(variables.tables[arguments.tablename])>
-		</cfif>
-		<cfset aTable = variables.tables[arguments.tablename]>
+	resetTableProps(arguments.tablename);
+}
+/**
+* I insert or update a record in the given table (update if a matching record is found) with the provided data and return the primary key of the updated record.
+* @param tablename The table on which to update data.
+* @param data A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+* @param fieldlist A list of insertable fields. If left blank, any field can be inserted.
+* @param truncate Should the field values be automatically truncated to fit in the available space for each field?
+* @param checkfields Only for OnExists=update. A list of fields to use to check for existing records (default to checking all updateable fields for update).
+* @return The primary key of the updated record.
+*/
+public string function saveRecord(
+	required string tablename,
+	required struct data,
+	string fieldlist="",
+	boolean truncate=false,
+	string checkfields=""
+) {
+	var result = insertRecord(
+		tablename = arguments.tablename,
+		data = arguments.data,
+		OnExists = "update",
+		fieldlist = arguments.fieldlist,
+		truncate = arguments.truncate,
+		checkfields = arguments.checkfields
+	);
 
-		<cfif StructKeyExists(sArgs,"Special") AND Len(sArgs.Special)>
-			<cfset aTable[FieldIndex]["Special"] = sArgs.Special>
-		</cfif>
-		<cfif StructKeyExists(sArgs,"Relation")>
-			<cfif
-					StructKeyExists(sArgs["Relation"],"type")
-				AND	sArgs["Relation"].type EQ "list"
-				AND	StructKeyExists(sArgs,"OtherField")
-				AND	NOT StructKeyExists(sArgs["Relation"],"other-field")
-			>
-				<cfset sArgs["Relation"]["other-field"] = sArgs["OtherField"]>
-			</cfif>
-			<!--- If the field exists but a relation is passed, set the relation --->
-			<cfset aTable[FieldIndex]["Relation"] = sArgs.Relation>
-		</cfif>
-		<cfif StructKeyExists(sArgs,"PrimaryKey") AND isBoolean(sArgs.PrimaryKey) AND sArgs.PrimaryKey>
-			<!--- If the field exists but a primary key is passed, set the primary key --->
-			<cfset aTable[FieldIndex]["PrimaryKey"] = true>
-		</cfif>
-		<cfif StructKeyExists(sArgs,"useInMultiRecordsets") AND isBoolean(sArgs.useInMultiRecordsets)>
-			<!--- If the field exists but a primary key is passed, set the primary key --->
-			<cfset aTable[FieldIndex]["useInMultiRecordsets"] = sArgs.useInMultiRecordsets>
-		</cfif>
-	</cfif>
+	return result;
+}
+/**
+ * I save a many-to-many relationship.
+ * 
+ * @param tablename The table holding the many-to-many relationships.
+ * @param keyfield The field holding our key value for relationships.
+ * @param keyvalue The value of our primary field.
+ * @param multifield The field holding our many relationships for the given key.
+ * @param multilist The list of related values for our key.
+ * @param reverse Should the reverse of the relationship be run as well (for self-joins)?
+ */
+public void function saveRelationList(
+	required string tablename,
+	required string keyfield,
+	required string keyvalue,
+	required string multifield,
+	required string multilist,
+	boolean reverse=false
+) {
+	var bTable = checkTable(arguments.tablename);// Check whether table is loaded
+	var getStruct = StructNew();
+	var setStruct = StructNew();
+	var qExistingRecords = 0;
+	var sExistingRecord = 0;
+	var item = "";
+	var ExistingList = "";
 
-	<cfset resetTableProps(arguments.tablename)>
+	// Make sure a value is passed in for the primary key value
+	if ( NOT Len(Trim(arguments.keyvalue)) ) {
+		throwDMError("You must pass in a value for keyvalue of saveRelationList","NoKeyValueForSaveRelationList");
+	}
 
-</cffunction>
+	if ( arguments.reverse ) {
+		saveRelationList(
+			tablename=arguments.tablename,
+			keyfield=arguments.multifield,
+			keyvalue=arguments.keyvalue,
+			multifield=arguments.keyfield,
+			multilist=arguments.multilist
+		);
+	}
 
-<cffunction name="saveRecord" access="public" returntype="string" output="no" hint="I insert or update a record in the given table (update if a matching record is found) with the provided data and return the primary key of the updated record.">
-	<cfargument name="tablename" type="string" required="yes" hint="The table on which to update data.">
-	<cfargument name="data" type="struct" required="yes" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="fieldlist" type="string" default="" hint="A list of insertable fields. If left blank, any field can be inserted.">
-	<cfargument name="truncate" type="boolean" default="false" hint="Should the field values be automatically truncated to fit in the available space for each field?">
-	<cfargument name="checkfields" type="string" default="" hint="Only for OnExists=update. A list of fields to use to check for existing records (default to checking all updateable fields for update).">
+	// Get existing records
+	getStruct[arguments.keyfield] = arguments.keyvalue;
+	qExistingRecords = getRecords(arguments.tablename,getStruct);
 
-	<cfset var result = insertRecord(arguments.tablename,arguments.data,"update",arguments.fieldlist,arguments.truncate,arguments.checkfields)>
+	// Remove existing records not in list
+	for ( sExistingRecord in qExistingRecords ) {
+		ExistingList = ListAppend(ExistingList,sExistingRecord[arguments.multifield]);
+		if ( NOT ListFindNoCase(arguments.multilist,sExistingRecord[arguments.multifield]) ) {
+			setStruct = StructNew();
+			setStruct[arguments.keyfield] = arguments.keyvalue;
+			setStruct[arguments.multifield] = sExistingRecord[arguments.multifield];
+			deleteRecords(arguments.tablename,setStruct);
+		}
+	}
 
-	<cfreturn result>
-</cffunction>
+	// Add records from list that don't exist
+	for ( item in ArrayToList(arguments.multilist) ) {
+		if ( isOfCFType(item,getEffectiveDataType(arguments.tablename,arguments.multifield)) AND NOT ListFindNoCase(ExistingList,item) ) {
+			setStruct = StructNew();
+			setStruct[arguments.keyfield] = arguments.keyvalue;
+			setStruct[arguments.multifield] = Trim(item);
+			insertRecord(arguments.tablename,setStruct,"skip");
+			ExistingList = ListAppend(ExistingList,item);// in case list has one item more than once (4/26/06)
+		}
+	}
 
-<cffunction name="saveRelationList" access="public" returntype="void" output="no" hint="I save a many-to-many relationship.">
-	<cfargument name="tablename" type="string" required="yes" hint="The table holding the many-to-many relationships.">
-	<cfargument name="keyfield" type="string" required="yes" hint="The field holding our key value for relationships.">
-	<cfargument name="keyvalue" type="string" required="yes" hint="The value of out primary field.">
-	<cfargument name="multifield" type="string" required="yes" hint="The field holding our many relationships for the given key.">
-	<cfargument name="multilist" type="string" required="yes" hint="The list of related values for our key.">
-	<cfargument name="reverse" type="boolean" default="false" hint="Should the reverse of the relationship by run as well (for self-joins)?s.">
+	setCacheDate();
 
-	<cfset var bTable = checkTable(arguments.tablename)><!--- Check whether table is loaded --->
-	<cfset var getStruct = StructNew()>
-	<cfset var setStruct = StructNew()>
-	<cfset var qExistingRecords = 0>
-	<cfset var item = "">
-	<cfset var ExistingList = "">
+}
+/**
+ * I save the sort order of records - putting them in the same order as the list of primary key values.
+ * @param tablename The table on which to update data.
+ * @param sortfield The field holding the sort order.
+ * @param sortlist The list of primary key field values in sort order.
+ * @param PrecedingRecords The number of records preceding those being sorted.
+ */
+public void function saveSortOrder(
+	required string tablename,
+	required string sortfield,
+	required string sortlist,
+	numeric PrecedingRecords=0
+) {
+	var pkfields = getPKFields(arguments.tablename);
+	var ii = 0;
+	var keyval = 0;
+	var sqlarray = ArrayNew(1);
+	var sqlStatements = "";
 
-	<!--- Make sure a value is passed in for the primary key value --->
-	<cfif NOT Len(Trim(arguments.keyvalue))>
-		<cfset throwDMError("You must pass in a value for keyvalue of saveRelationList","NoKeyValueForSaveRelationList")>
-	</cfif>
+	arguments.PrecedingRecords = Int(arguments.PrecedingRecords);
+	if ( arguments.PrecedingRecords LT 0 ) {
+		arguments.PrecedingRecords = 0;
+	}
 
-	<cfif arguments.reverse>
-		<cfinvoke method="saveRelationList">
-			<cfinvokeargument name="tablename" value="#arguments.tablename#">
-			<cfinvokeargument name="keyfield" value="#arguments.multifield#">
-			<cfinvokeargument name="keyvalue" value="#arguments.keyvalue#">
-			<cfinvokeargument name="multifield" value="#arguments.keyfield#">
-			<cfinvokeargument name="multilist" value="#arguments.multilist#">
-		</cfinvoke>
-	</cfif>
+	if ( ArrayLen(pkfields) NEQ 1 ) {
+		throwDMError("This method can only be used on tables with exactly one primary key field.","SortWithOneKey");
+	}
 
-	<!--- Get existing records --->
-	<cfset getStruct[arguments.keyfield] = arguments.keyvalue>
-	<cfset qExistingRecords = getRecords(arguments.tablename,getStruct)>
+	for ( ii=1; ii LTE ListLen(arguments.sortlist); ii++ ) {
+		keyval = ListGetAt(arguments.sortlist,ii);
+		sqlarray = ArrayNew(1);
+		ArrayAppend(sqlarray,"UPDATE	#escape(Variables.prefix & arguments.tablename)#");
+		ArrayAppend(sqlarray,"SET		#escape(arguments.sortfield)# = #Val(ii)+arguments.PrecedingRecords#");
+		ArrayAppend(sqlarray,"WHERE	#escape(pkfields[1].ColumnName)# = ");
+		ArrayAppend(sqlarray,sval(pkfields[1],keyval));
+		runSQLArray(sqlarray);
+		sqlStatements = ListAppend(sqlStatements,readableSQL(sqlarray),";");
+	}
 
-	<!--- Remove existing records not in list --->
-	<cfoutput query="qExistingRecords">
-		<cfset ExistingList = ListAppend(ExistingList,qExistingRecords[arguments.multifield][CurrentRow])>
-		<cfif NOT ListFindNoCase(arguments.multilist,qExistingRecords[arguments.multifield][CurrentRow])>
-			<cfset setStruct = StructNew()>
-			<cfset setStruct[arguments.keyfield] = arguments.keyvalue>
-			<cfset setStruct[arguments.multifield] = qExistingRecords[arguments.multifield][CurrentRow]>
-			<cfset deleteRecords(arguments.tablename,setStruct)>
-		</cfif>
-	</cfoutput>
+	if ( variables.doLogging AND ListLen(arguments.sortlist) ) {
+		logAction(
+			tablename=arguments.tablename,
+			action="sort",
+			data=arguments,
+			sql=sqlStatements
+		);
+	}
 
-	<!--- Add records from list that don't exist --->
-	<cfloop index="item" list="#arguments.multilist#">
-		<cfif isOfCFType(item,getEffectiveDataType(arguments.tablename,arguments.multifield)) AND NOT ListFindNoCase(ExistingList,item)>
-			<cfset setStruct = StructNew()>
-			<cfset setStruct[arguments.keyfield] = arguments.keyvalue>
-			<cfset setStruct[arguments.multifield] = Trim(item)>
-			<cfset insertRecord(arguments.tablename,setStruct,"skip")>
-			<cfset ExistingList = ListAppend(ExistingList,item)><!--- in case list has one item more than once (4/26/06) --->
-		</cfif>
-	</cfloop>
+	setCacheDate();
 
-	<cfset setCacheDate()>
+}
 
-</cffunction>
+public function sqlvalue(
+	required string value,
+	string cfdatatype
+) {
+	var result = arguments.value;
+	var strval = "";
 
-<cffunction name="saveSortOrder" access="public" returntype="void" output="no" hint="I save the sort order of records - putting them in the same order as the list of primary key values.">
-	<cfargument name="tablename" type="string" required="yes" hint="The table on which to update data.">
-	<cfargument name="sortfield" type="string" required="yes" hint="The field holding the sort order.">
-	<cfargument name="sortlist" type="string" required="yes" hint="The list of primary key field values in sort order.">
-	<cfargument name="PrecedingRecords" type="numeric" default="0" hint="The number of records preceding those being sorted.">
+	// Some automatic conversion code for GUIDs, thanks to Chuck Brockman
+	if ( StructKeyExists(Arguments,"cfdatatype") AND Arguments.cfdatatype EQ "CF_SQL_IDSTAMP" ) {
+		result = "";
+		for ( strval in ListToArray(Arguments.value) ) {
+			if ( Len(strval) GTE 23 ) {
+				if ( isValid('guid', strval) ) {
+					result = ListAppend(result,strval);
+				} else {
+					result = ListAppend(result,insert("-", strval, 23));
+				}
+			}
+		}
+	}
 
-	<cfset var pkfields = getPKFields(arguments.tablename)>
-	<cfset var ii = 0>
-	<cfset var keyval = 0>
-	<cfset var sqlarray = ArrayNew(1)>
-	<cfset var sqlStatements = "">
+	return result;
+}
 
-	<cfset arguments.PrecedingRecords = Int(arguments.PrecedingRecords)>
-	<cfif arguments.PrecedingRecords LT 0>
-		<cfset arguments.PrecedingRecords = 0>
-	</cfif>
+/**
+* I log an action in the database.
+*/
+public function logAction(
+	required string tablename,
+	string pkval,
+	required string action,
+	struct data,
+	any sql
+) {
+	if ( NOT arguments.tablename EQ variables.logtable ) {
+		if ( StructKeyExists(arguments,"data") ) {
+			arguments.data = serializeJSON(arguments.data);
+		}
 
-	<cfif ArrayLen(pkfields) NEQ 1>
-		<cfset throwDMError("This method can only be used on tables with exactly one primary key field.","SortWithOneKey")>
-	</cfif>
+		if ( StructKeyExists(arguments,"sql") ) {
+			if ( isSimpleValue(arguments.sql) ) {
+				arguments.sql = arguments.sql;
+			} else if ( isArray(arguments.sql) ) {
+				arguments.sql = readableSQL(arguments.sql);
+			} else {
+				throwDMError("The sql argument logAction method must be a string of SQL code or a DataMgr SQL Array.","LogActionSQLDataType");
+			}
+		}
 
-	<cfloop index="ii" from="1" to="#ListLen(arguments.sortlist)#" step="1">
-		<cfset keyval = ListGetAt(arguments.sortlist,ii)>
-		<cfset sqlarray = ArrayNew(1)>
-		<cfset ArrayAppend(sqlarray,"UPDATE	#escape(Variables.prefix & arguments.tablename)#")>
-		<cfset ArrayAppend(sqlarray,"SET		#escape(arguments.sortfield)# = #Val(ii)+arguments.PrecedingRecords#")>
-		<cfset ArrayAppend(sqlarray,"WHERE	#escape(pkfields[1].ColumnName)# = ")>
-		<cfset ArrayAppend(sqlarray,sval(pkfields[1],keyval))>
-		<cfset runSQLArray(sqlarray)>
-		<cfset sqlStatements = ListAppend(sqlStatements,readableSQL(sqlarray),";")>
-	</cfloop>
+		insertRecord(variables.logtable, arguments);
+	}
+}
 
-	<cfif variables.doLogging AND ListLen(arguments.sortlist)>
-		<cfinvoke method="logAction">
-			<cfinvokeargument name="tablename" value="#arguments.tablename#">
-			<cfinvokeargument name="action" value="sort">
-			<cfinvokeargument name="data" value="#arguments#">
-			<cfinvokeargument name="sql" value="#sqlStatements#">
-		</cfinvoke>
-	</cfif>
+public void function setNamedFilter(
+	required string tablename,
+	required string name,
+	required string field,
+	required string operator
+) {
 
-	<cfset setCacheDate()>
+	variables.tableprops[arguments.tablename]["filters"][arguments.name] = StructNew();
+	variables.tableprops[arguments.tablename]["filters"][arguments.name]["field"] = arguments.field;
+	variables.tableprops[arguments.tablename]["filters"][arguments.name]["operator"] = arguments.operator;
 
-</cffunction>
+}
 
-<cffunction name="sqlvalue" access="public" returntype="any" output="no">
-	<cfargument name="value" type="string" required="yes">
-	<cfargument name="cfdatatype" type="string" required="no">
+/**
+* I turn on logging.
+*/
+public void function startLogging(string logtable=variables.logtable) {
+	var dbxml = "";
 
-	<cfset var result = arguments.value>
-	<cfset var strval = "">
+	variables.doLogging = true;
+	variables.logtable = arguments.logtable;
 
-	<!--- Some automatic conversion code for GUIDs, thanks to Chuck Brockman --->
-	<cfif StructKeyExists(Arguments,"cfdatatype") AND Arguments.cfdatatype EQ "CF_SQL_IDSTAMP">
-		<cfset result = "">
-		<cfloop index="strval" list="#Arguments.value#">
-			<cfif Len(strval) GTE 23>
-				<cfif IsValid('guid', strval)>
-					<cfset result = ListAppend(result,strval)>
-				<cfelse>
-					<cfset result = ListAppend(result,insert("-", strval, 23))>
-				</cfif>
-			</cfif>
-		</cfloop>
-	</cfif>
-
-	<cfreturn result>
-</cffunction>
-
-<cffunction name="logAction" access="public" returntype="any" output="no" hint="I log an action in the database.">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="pkval" type="string" required="no">
-	<cfargument name="action" type="string" required="yes">
-	<cfargument name="data" type="struct" required="no">
-	<cfargument name="sql" type="any" required="no">
-
-	<cfif NOT arguments.tablename EQ variables.logtable>
-
-		<cfif StructKeyExists(arguments,"data")>
-			<cfwddx action="CFML2WDDX" input="#arguments.data#" output="arguments.data">
-		</cfif>
-
-		<cfif StructKeyExists(arguments,"sql")>
-			<cfif isSimpleValue(arguments.sql)>
-				<cfset arguments.sql = arguments.sql>
-			<cfelseif isArray(arguments.sql)>
-				<cfset arguments.sql = readableSQL(arguments.sql)>
-			<cfelse>
-				<cfset throwDMError("The sql argument logAction method must be a string of SQL code or a DataMgr SQL Array.","LogActionSQLDataType")>
-			</cfif>
-		</cfif>
-
-		<cfset insertRecord(variables.logtable,arguments)>
-	</cfif>
-
-</cffunction>
-
-<cffunction name="setNamedFilter" access="public" returntype="void" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="name" type="string" required="yes">
-	<cfargument name="field" type="string" required="yes">
-	<cfargument name="operator" type="string" required="yes">
-
-	<cfset variables.tableprops[arguments.tablename]["filters"][arguments.name] = StructNew()>
-	<cfset variables.tableprops[arguments.tablename]["filters"][arguments.name]["field"] = arguments.field>
-	<cfset variables.tableprops[arguments.tablename]["filters"][arguments.name]["operator"] = arguments.operator>
-
-</cffunction>
-
-<cffunction name="startLogging" access="public" returntype="void" output="no" hint="I turn on logging.">
-	<cfargument name="logtable" type="string" default="#variables.logtable#">
-
-	<cfset var dbxml = "">
-
-	<cfset variables.doLogging = true>
-	<cfset variables.logtable = arguments.logtable>
-
-	<cfsavecontent variable="dbxml"><cfoutput>
-	<tables>
+	dbxml = '
 		<table name="#variables.logtable#">
 			<field ColumnName="LogID" CF_DataType="CF_SQL_INTEGER" PrimaryKey="true" Increment="true" />
 			<field ColumnName="tablename" CF_DataType="CF_SQL_VARCHAR" Length="180" />
@@ -3861,22 +4181,28 @@
 			<field ColumnName="data" CF_DataType="CF_SQL_LONGVARCHAR" />
 			<field ColumnName="sql" CF_DataType="CF_SQL_LONGVARCHAR" />
 		</table>
-	</tables>
-	</cfoutput></cfsavecontent>
+	';
+	
+	loadXML(dbxml,true,true);
 
-	<cfset loadXML(dbxml,true,true)>
+}
 
-</cffunction>
+/**
+* I turn off logging.
+*/
+public void function stopLogging() {
+	variables.doLogging = false;
+}
 
-<cffunction name="stopLogging" access="public" returntype="void" output="no" hint="I turn off logging.">
-	<cfset variables.doLogging = false>
-</cffunction>
-
-<cffunction name="truncate" access="public" returntype="struct" output="no" hint="I return the structure with the values truncated to the limit of the fields in the table.">
-	<cfargument name="tablename" type="string" required="yes" hint="The table for which to truncate data.">
-	<cfargument name="data" type="struct" required="yes" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-
-	<cfscript>
+/**
+* I return the structure with the values truncated to the limit of the fields in the table.
+* @tablename The table for which to truncate data.
+* @data A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+*/
+public struct function truncate(
+	required string tablename,
+	required struct data
+) {
 	var bTable = checkTable(arguments.tablename);//Check whether table is loaded
 	var sTables = getTableData();
 	var aColumns = sTables[arguments.tablename];
@@ -3889,532 +4215,612 @@
 			}
 		}
 	}
-	</cfscript>
-
-	<cfreturn arguments.data>
-</cffunction>
-
-<cffunction name="updateRecord" access="public" returntype="string" output="no" hint="I update a record in the given table with the provided data and return the primary key of the updated record.">
-	<cfargument name="tablename" type="string" required="yes" hint="The table on which to update data.">
-	<cfargument name="data" type="struct" required="yes" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="advsql" type="struct" hint="A structure of sqlarrays for each area of a query (SET,WHERE).">
-	<cfargument name="truncate" type="boolean" default="false" hint="Should the field values be automatically truncated to fit in the available space for each field?">
-	<cfargument name="fieldlist" type="string" default="" hint="A list of updateable fields. If left blank, any field can be updated.">
-
-	<cfset var bTable = checkTable(arguments.tablename)>
-	<cfset var ii = 0><!--- generic counter --->
-	<cfset var pkfields = getPKFields(arguments.tablename)>
-	<cfset var in = clean(arguments.data)><!--- holds incoming data for ease of use --->
-	<cfset var qGetUpdateRecord = 0><!--- used to check for existing record --->
-	<cfset var temp = "">
-	<cfset var result = 0>
-	<cfset var sqlarray = ArrayNew(1)>
-	<cfset var ChangeUUID = CreateUUID()>
-	<cfset var sGetArgs = {"tablename":Arguments.tablename,"data":StructNew(),"fieldlist"=Arguments.fieldlist}>
-	<cfset var qBefore = 0>
-	<cfset var qAfter = 0>
-
-	<cfif arguments.truncate>
-		<cfset in = variables.truncate(arguments.tablename,in)>
-	</cfif>
-
-	<cfif NOT ArrayLen(pkfields)>
-		<cfset throwDMError("#arguments.tablename# has no primary key fields. updateRecord and saveRecord can only be called on tables with primary key fields. Use updateRecords or insertRecord (without OnExists of 'update' or 'save') instead.","NoPkFields")>
-	</cfif>
-
-	<!--- Check for existing record --->
-	<cfset sqlarray = ArrayNew(1)>
-	<cfset ArrayAppend(sqlarray,"SELECT	#escape(pkfields[1].ColumnName)#")>
-	<cfset ArrayAppend(sqlarray,"FROM	#escape(arguments.tablename)#")>
-	<cfset ArrayAppend(sqlarray,"WHERE	1 = 1")>
-	<cfloop index="ii" from="1" to="#ArrayLen(pkfields)#" step="1">
-		<cfset ArrayAppend(sqlarray,"AND	#escape(pkfields[ii].ColumnName)# = ")>
-		<cfset ArrayAppend(sqlarray,sval(pkfields[ii],in))>
-		<cfset sGetArgs["data"][pkfields[ii].ColumnName] = in[pkfields[ii].ColumnName]>
-	</cfloop>
-	<cfset qGetUpdateRecord = runSQLArray(sqlarray)>
-
-	<!--- Make sure record exists to update --->
-	<cfif NOT qGetUpdateRecord.RecordCount>
-		<cfset temp = "">
-		<cfloop index="ii" from="1" to="#ArrayLen(pkfields)#" step="1">
-			<cfset temp = ListAppend(temp,"#escape(pkfields[ii].ColumnName)#=#in[pkfields[ii].ColumnName]#")>
-		</cfloop>
-		<cfset throwDMError("No record exists for update criteria (#temp#).","NoUpdateRecord")>
-	</cfif>
-
-	<cfif NOT Len(Trim(sGetArgs.fieldlist))>
-		<cfset sGetArgs["fieldlist"] = StructKeyList(Arguments.data)>
-	</cfif>
-
-	<cfset qBefore = getRecord(ArgumentCollection=sGetArgs)>
-
-	<cfset sqlarray = updateRecordSQL(argumentCollection=arguments)>
-
-	<cfset announceEvent(tablename=arguments.tablename,action="beforeUpdate",method="updateRecord",data=in,fieldlist=Arguments.fieldlist,Args=Arguments,sql=sqlarray,ChangeUUID=ChangeUUID)>
-
-	<cfif ArrayLen(sqlarray)>
-		<cfset runSQLArray(sqlarray)>
-	</cfif>
-
-	<cfset result = qGetUpdateRecord[pkfields[1].ColumnName][1]>
-
-	<!--- set pkfield so that we can save relation data --->
-	<cfset in[pkfields[1].ColumnName] = result>
-
-	<!--- Save any relations --->
-	<cfset saveRelations(arguments.tablename,in,pkfields[1],result)>
-
-	<cfset qAfter = getRecord(ArgumentCollection=sGetArgs)>
-
-	<!--- Log update --->
-	<cfif variables.doLogging AND NOT arguments.tablename EQ variables.logtable>
-		<cfinvoke method="logAction">
-			<cfinvokeargument name="tablename" value="#arguments.tablename#">
-			<cfinvokeargument name="pkval" value="#result#">
-			<cfinvokeargument name="action" value="update">
-			<cfinvokeargument name="data" value="#in#">
-			<cfinvokeargument name="sql" value="#sqlarray#">
-		</cfinvoke>
-	</cfif>
-
-	<cfset announceEvent(tablename=arguments.tablename,action="afterUpdate",method="updateRecord",data=in,fieldlist=Arguments.fieldlist,Args=Arguments,pkvalue=result,sql=sqlarray,ChangeUUID=ChangeUUID,before=qBefore,after=qAfter)>
-
-	<cfset setCacheDate()>
-
-	<cfreturn result>
-</cffunction>
-
-<cffunction name="updateRecordSQL" access="public" returntype="array" output="no" hint="I update a record in the given table with the provided data and return the primary key of the updated record.">
-	<cfargument name="tablename" type="string" required="yes" hint="The table on which to update data.">
-	<cfargument name="data" type="struct" required="yes" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="fieldlist" type="string" default="" hint="A list of updateable fields. If left blank, any field can be updated.">
-	<cfargument name="advsql" type="struct" default="#StructNew()#" hint="A structure of sqlarrays for each area of a query (SET,WHERE).">
-
-	<cfset var bTable = checkTable(arguments.tablename)>
-	<cfset var fields = getUpdateableFields(arguments.tablename)>
-	<cfset var ii = 0><!--- generic counter --->
-	<cfset var pkfields = getPKFields(arguments.tablename)>
-	<cfset var in = clean(arguments.data)><!--- holds incoming data for ease of use --->
-	<cfset var data_set = StructNew()>
-	<cfset var data_where = StructNew()>
-
-	<cfset in = getRelationValues(arguments.tablename,in)>
-
-	<!--- This method requires at least on primary key --->
-	<cfif NOT ArrayLen(pkfields)>
-		<cfset throwDMError("his method can only be used on tables with at least one primary key field.","NeedPKField")>
-	</cfif>
-	<!--- All primary key values must be provided --->
-	<cfloop index="ii" from="1" to="#ArrayLen(pkfields)#" step="1">
-		<cfif NOT StructKeyExists(in,pkfields[ii].ColumnName)>
-			<cfset throwDMError("All Primary Key fields must be used when updating a record.","RequiresAllPkFields")>
-		</cfif>
-		<cfset data_where[pkfields[ii].ColumnName] = in[pkfields[ii].ColumnName]>
-	</cfloop>
-	<cfloop index="ii" from="1" to="#ArrayLen(fields)#" step="1">
-		<cfif StructKeyExists(in,fields[ii].ColumnName)>
-			<cfset data_set[fields[ii].ColumnName] = in[fields[ii].ColumnName]>
-		</cfif>
-	</cfloop>
-
-	<cfreturn updateRecordsSQL(tablename=arguments.tablename,data_set=data_set,data_where=data_where,fieldlist=arguments.fieldlist,advsql=arguments.advsql)>
-</cffunction>
-
-<cffunction name="updateRecords" access="public" returntype="void" output="false" hint="">
-	<cfargument name="tablename" type="string" required="yes" hint="The table on which to update data.">
-	<cfargument name="data_set" type="struct" required="yes" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="data_where" type="struct" required="no" default="#StructNew()#" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="filters" type="array" default="#ArrayNew(1)#">
-	<cfargument name="fieldlist" type="string" default="" hint="A list of updateable fields. If left blank, any field can be updated.">
-	<cfargument name="advsql" type="struct" default="#StructNew()#" hint="A structure of sqlarrays for each area of a query (SET,WHERE).">
-
-	<cfset var sqlarray = updateRecordsSQL(argumentCollection=arguments)>
-	<cfset var qRecords = 0>
-	<cfset var sAdvSQL = StructNew()>
-	<cfset var pklist = getPrimaryKeyFieldNames(arguments.tablename)>
-	<cfset var pkfields = getPKFields(arguments.tablename)><!--- the primary key fields for this table --->
-
-	<cfif ArrayLen(sqlarray)>
-		<cfset runSQLArray(sqlarray)>
-	</cfif>
-
-	<!--- Save any relations --->
-	<cfif ListLen(pklist) EQ 1>
-		<cfif StructKeyExists(arguments.advsql,"WHERE")>
-			<cfset sAdvSQL["WHERE"] = arguments.advsql["WHERE"]>
-		</cfif>
-
-		<cfset qRecords = getRecords(tablename=arguments.tablename,data=data_where,fieldlist=pklist,advsql=sAdvSQL,filters=arguments.filters)>
-
-		<cfoutput query="qRecords">
-			<cfset saveRelations(tablename=arguments.tablename,data=data_set,pkfield=pkfields[1],pkval=qRecords[pklist][CurrentRow])>
-		</cfoutput>
-	</cfif>
-
-	<cfset setCacheDate()>
-
-</cffunction>
-
-<cffunction name="updateRecordsSQL" access="public" returntype="array" output="false" hint="">
-	<cfargument name="tablename" type="string" required="yes" hint="The table on which to update data.">
-	<cfargument name="data_set" type="struct" default="#StructNew()#" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="data_where" type="struct" required="no" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="filters" type="array" default="#ArrayNew(1)#">
-	<cfargument name="fieldlist" type="string" default="" hint="A list of updateable fields. If left blank, any field can be updated.">
-	<cfargument name="advsql" type="struct" default="#StructNew()#" hint="A structure of sqlarrays for each area of a query (SET,WHERE).">
-
-	<cfset var bTable = checkTable(arguments.tablename)>
-	<cfset var fields = getUpdateableFields(arguments.tablename)>
-	<cfset var ii = 0><!--- generic counter --->
-	<cfset var fieldcount = 0><!--- number of fields --->
-	<cfset var in = clean(arguments.data_set)><!--- holds incoming data for ease of use --->
-	<cfset var sqlarray = ArrayNew(1)>
-	<cfset var Specials = "LastUpdatedDate">
-	<cfset var usedfields = "">
-	<cfset var colnum = 0>
-
-	<cfif NOT StructKeyExists(arguments,"data_where")>
-		<cfset arguments.data_where = StructNew()>
-	</cfif>
-
-	<!--- Restrict data to fieldlist --->
-	<cfif Len(Trim(arguments.fieldlist))>
-		<cfloop item="ii" collection="#in#">
-			<cfif NOT ListFindNoCase(arguments.fieldlist,ii)>
-				<cfset StructDelete(in,ii)>
-			</cfif>
-		</cfloop>
-	</cfif>
-
-	<cfset in = getRelationValues(arguments.tablename,in)>
-
-	<!--- Restrict data to fieldlist --->
-	<cfif Len(Trim(arguments.fieldlist))>
-		<cfloop item="ii" collection="#in#">
-			<cfif NOT ListFindNoCase(arguments.fieldlist,ii)>
-				<cfset StructDelete(in,ii)>
-			</cfif>
-		</cfloop>
-	</cfif>
-
-	<!--- Throw exception on any attempt to update a table with no updateable fields --->
-	<cfif NOT ArrayLen(fields)>
-		<cfset throwDMError("This table does not have any updateable fields.","NoUpdateableFields")>
-	</cfif>
-
-	<cfset ArrayAppend(sqlarray,"UPDATE	#escape(Variables.prefix & arguments.tablename)#")>
-	<cfset ArrayAppend(sqlarray,"SET")>
-	<cfloop index="ii" from="1" to="#ArrayLen(fields)#" step="1">
-		<cfif StructKeyExists(fields[ii],"ColumnName") AND NOT ListFindNoCase(usedfields,fields[ii]["ColumnName"])>
-			<cfif useField(in,fields[ii])><!--- Include update if this is valid data --->
-				<cfset checkLength(fields[ii],in[fields[ii].ColumnName])>
-				<cfset fieldcount = fieldcount + 1>
-				<cfset usedfields = ListAppend(usedfields,fields[ii]["ColumnName"])>
-				<cfif fieldcount GT 1>
-					<cfset ArrayAppend(sqlarray,",")>
-				</cfif>
-				<cfset ArrayAppend(sqlarray,"#escape(fields[ii].ColumnName)# = ")>
-				<cfset ArrayAppend(sqlarray,sval(fields[ii],in))>
-			<cfelseif isBlankValue(in,fields[ii])><!--- Or if it is passed in as empty value and null are allowed --->
-				<cfset fieldcount = fieldcount + 1>
-				<cfset usedfields = ListAppend(usedfields,fields[ii]["ColumnName"])>
-				<cfif fieldcount GT 1>
-					<cfset ArrayAppend(sqlarray,",")>
-				</cfif>
-				<cfif StructKeyExists(fields[ii],"AllowNulls") AND isBoolean(fields[ii].AllowNulls) AND NOT fields[ii].AllowNulls>
-					<cfset ArrayAppend(sqlarray,"#escape(fields[ii].ColumnName)# = ''")>
-				<cfelse>
-					<cfset ArrayAppend(sqlarray,"#escape(fields[ii].ColumnName)# = NULL")>
-				</cfif>
-			<cfelseif StructKeyExists(fields[ii],"Special") AND Len(fields[ii].Special) AND ListFindNoCase(Specials,fields[ii].Special)>
-				<cfif fields[ii]["Special"] EQ "LastUpdatedDate">
-					<cfset fieldcount = fieldcount + 1>
-					<cfset usedfields = ListAppend(usedfields,fields[ii]["ColumnName"])>
-					<cfif fieldcount GT 1>
-						<cfset ArrayAppend(sqlarray,",")>
-					</cfif>
-					<cfset ArrayAppend(sqlarray,"#escape(fields[ii].ColumnName)# = ")>
-					<cfset ArrayAppend(sqlarray,getFieldNowValue(arguments.tablename,fields[ii]))>
-				</cfif>
-			</cfif>
-		</cfif>
-	</cfloop>
-	<cfif StructKeyExists(arguments,"advsql") AND StructKeyExists(arguments.advsql,"SET")>
-		<cfif fieldcount>
-			<cfset ArrayAppend(sqlarray,",")><cfset colnum = colnum + 1>
-		</cfif>
-		<cfset fieldcount = fieldcount + 1>
-		<cfset ArrayAppend(sqlarray,arguments.advsql["SET"])>
-	</cfif>
-	<cfset ArrayAppend(sqlarray,"WHERE	1 = 1")>
-	<cfset ArrayAppend(sqlarray,getWhereSQL(tablename=arguments.tablename,data=arguments.data_where,filters=arguments.filters))>
-	<cfif fieldcount>
-		<cfset fieldcount = 0>
-	<cfelse>
-		<cfset sqlarray = ArrayNew(1)>
-	</cfif>
-
-	<cfreturn sqlarray>
-</cffunction>
-
-<cffunction name="addColumn" access="public" returntype="any" output="no" hint="I add a column to the given table (deprecated in favor of setColumn).">
-	<cfargument name="tablename" type="string" required="yes" hint="The name of the table to which a column will be added.">
-	<cfargument name="columnname" type="string" required="yes" hint="The name of the column to add.">
-	<cfargument name="CF_Datatype" type="string" required="no" hint="The ColdFusion SQL Datatype of the column.">
-	<cfargument name="Length" type="numeric" default="50" hint="The ColdFusion SQL Datatype of the column.">
-	<cfargument name="Default" type="string" required="no" hint="The default value for the column.">
-
-	<cfset setColumn(argumentCollection=arguments)>
-
-</cffunction>
-
-<cffunction name="addTable" access="private" returntype="boolean" output="no" hint="I add a table to the Data Manager.">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="fielddata" type="array" required="yes">
-	<cfargument name="filters" type="struct" required="no">
-	<cfargument name="props" type="struct" required="no">
-
-	<cfset var isTableAdded = false>
-	<cfset var i = 0>
-	<cfset var j = 0>
-	<cfset var hasField = false>
-
-	<cfif StructKeyExists(variables.tables,arguments.tablename)>
-		<!--- If the table exists, add new columns --->
-		<cfloop index="i" from="1" to="#ArrayLen(arguments.fielddata)#" step="1">
-			<cfset hasField = false>
-			<cfloop index="j" from="1" to="#ArrayLen(variables.tables[arguments.tablename])#" step="1">
-				<cfif arguments.fielddata[i]["ColumnName"] EQ variables.tables[arguments.tablename][j]["ColumnName"]>
-					<cfset hasField = true>
-					<cfset variables.tables[arguments.tablename][j] = arguments.fielddata[i]>
-				</cfif>
-			</cfloop>
-			<cfif NOT hasField>
-				<cfset ArrayAppend(variables.tables[arguments.tablename],arguments.fielddata[i])>
-			</cfif>
-		</cfloop>
-	<cfelse>
-		<!--- If the table doesn't exist, just add it as given --->
-		<cfset variables.tables[arguments.tablename] = arguments.fielddata>
-	</cfif>
-
-	<cfset resetTableProps(arguments.tablename)>
-
-	<cfif StructKeyExists(arguments,"filters") AND StructCount(arguments.filters)>
-		<cfset StructAppend(variables.tableprops[arguments.tablename]["filters"],arguments.filters,true)>
-	</cfif>
-
-	<cfif StructKeyExists(arguments,"props") AND StructCount(arguments.props)>
-		<cfset setTableProps(arguments.tablename,arguments.props)>
-	</cfif>
-
-	<cfset isTableAdded = true>
-
-	<cfset setCacheDate()>
-
-	<cfreturn isTableAdded>
-</cffunction>
-
-<cffunction name="adjustColumnArgs" access="private" returntype="any" output="false" hint="">
-	<cfargument name="args" type="struct" required="yes">
-
-	<cfset var sArgs = StructCopy(arguments.args)>
-
-	<!--- Require ColumnName --->
-	<cfif NOT ( StructKeyExists(sArgs,"ColumnName") AND Len(Trim(sArgs.ColumnName)) )>
-		<cfset throwDMError("ColumnName is required")>
-	</cfif>
-	<!--- Require CF_Datatype --->
-	<cfif NOT ( StructKeyExists(sArgs,"CF_Datatype") AND Len(Trim(sArgs.CF_Datatype)) GT 7 AND Left(sArgs.CF_Datatype,7) EQ "CF_SQL_" )>
-		<cfset throwDMError("CF_Datatype is required")>
-	</cfif>
-	<cfif NOT ( StructKeyExists(sArgs,"Length") AND isNumeric(sArgs.Length) AND Int(sArgs.Length) GT 0 )>
-		<cfset sArgs.Length = 255>
-	</cfif>
-	<cfif NOT isStringType(getDBDataType(sArgs.CF_DataType))>
-		<cfset StructDelete(sArgs,"Length")>
-	</cfif>
-	<cfif NOT ( StructKeyExists(sArgs,"PrimaryKey") AND isBoolean(sArgs.PrimaryKey) )>
-		<cfset sArgs.PrimaryKey = false>
-	</cfif>
-	<cfif NOT ( StructKeyExists(sArgs,"Increment") AND isBoolean(sArgs.Increment) )>
-		<cfset sArgs.Increment = false>
-	</cfif>
-	<cfif NOT ( StructKeyExists(sArgs,"Default") )>
-		<cfset sArgs.Default = "">
-	</cfif>
-	<cfif NOT ( StructKeyExists(sArgs,"Special") )>
-		<cfset sArgs.Special = "">
-	</cfif>
-	<cfif NOT ( StructKeyExists(sArgs,"useInMultiRecordsets") )>
-		<cfset sArgs.useInMultiRecordsets = true>
-	</cfif>
-	<cfif NOT ( StructKeyExists(sArgs,"AllowNulls") AND isBoolean(sArgs.AllowNulls) )>
-		<cfset sArgs.AllowNulls = true>
-	</cfif>
-	<cfif StructKeyExists(sArgs,"Length")>
-		<cfset sArgs.Length = Int(sArgs.Length)>
-	</cfif>
-	<cfif StructKeyExists(sArgs,"precision") OR StructKeyExists(sArgs,"scale")>
-		<cfif NOT ( StructKeyExists(sArgs,"precision") AND Val(sArgs.precision) NEQ 0 )>
-			<cfset sArgs.precision = 12>
-		</cfif>
-		<cfif NOT ( StructKeyExists(sArgs,"scale") AND Val(sArgs.scale) NEQ 0 )>
-			<cfset sArgs.scale = 2>
-		</cfif>
-	</cfif>
-
-	<cfreturn sArgs>
-</cffunction>
-
-<cffunction name="applyConcatRelations" access="public" returntype="query" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="query" type="query" required="yes">
-
-	<cfset var qRecords = arguments.query>
-	<cfset var rfields = getRelationFields(arguments.tablename)><!--- relation fields in table --->
-	<cfset var i = 0><!--- Generic counter --->
-	<cfset var hasConcats = false>
-	<cfset var qRelationList = 0>
-	<cfset var temp = 0>
-
-	<!--- Check for list values in recordset --->
-	<cfloop index="i" from="1" to="#ArrayLen(rfields)#" step="1">
-		<cfif ListFindNoCase(qRecords.ColumnList,rfields[i].ColumnName)>
-			<cfif rfields[i].Relation.type EQ "concat">
-				<cfset hasConcats = true>
-				<cfbreak>
-			</cfif>
-		</cfif>
-	</cfloop>
-
-	<!--- Get list values --->
-	<cfif hasConcats>
-		<cfloop query="qRecords">
-			<cfloop index="i" from="1" to="#ArrayLen(rfields)#" step="1">
-				<cfif rfields[i].Relation["type"] EQ "concat" AND ListFindNoCase(qRecords.ColumnList,rfields[i].ColumnName) AND Len(rfields[i].relation.delimiter)>
-					<cfif ReFindNoCase("^(#rfields[i].relation.delimiter#\s?)+$",qRecords[rfields[i].ColumnName][CurrentRow])>
-						<cfset QuerySetCell(qRecords, rfields[i].ColumnName, "", CurrentRow)>
-					</cfif>
-				</cfif>
-			</cfloop>
-		</cfloop>
-	</cfif>
-
-	<cfreturn qRecords>
-</cffunction>
-
-<cffunction name="applyListRelations" access="public" returntype="query" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="query" type="query" required="yes">
-
-	<cfset var qRecords = arguments.query>
-	<cfset var rfields = getRelationFields(arguments.tablename)><!--- relation fields in table --->
-	<cfset var i = 0><!--- Generic counter --->
-	<cfset var hasLists = false>
-	<cfset var qRelationList = 0>
-	<cfset var temp = 0>
-
-	<!--- Check for list values in recordset --->
-	<cfloop index="i" from="1" to="#ArrayLen(rfields)#" step="1">
-		<cfif ListFindNoCase(qRecords.ColumnList,rfields[i].ColumnName)>
-			<cfif rfields[i].Relation.type EQ "list">
-				<cfset hasLists = true>
-			</cfif>
-		</cfif>
-	</cfloop>
-
-	<!--- Get list values --->
-	<cfif hasLists>
-		<cfloop query="qRecords">
-			<cfloop index="i" from="1" to="#ArrayLen(rfields)#" step="1">
-				<cfif rfields[i].Relation["type"] EQ "list" AND ListFindNoCase(qRecords.ColumnList,rfields[i].ColumnName)>
-					<cfset fillOutJoinTableRelations(arguments.tablename)>
-					<cfset temp = StructNew()>
-					<cfset temp.tablename = rfields[i].Relation["table"]>
-					<cfset temp.fieldlist = rfields[i].Relation["field"]>
-					<cfif StructKeyExists(rfields[i].Relation,"distinct") AND rfields[i].Relation["distinct"] IS true>
-						<cfset temp.distinct = true>
-						<cfset temp["sortfield"] = rfields[i].Relation["field"]>
-					</cfif>
-					<cfset temp.advsql = StructNew()>
-					<cfif StructKeyExists(rfields[i].Relation,"sort-field")>
-						<cfset temp["sortfield"] = rfields[i].Relation["sort-field"]>
-						<cfif StructKeyExists(rfields[i].Relation,"sort-dir")>
-							<cfset temp["sortdir"] = rfields[i].Relation["sort-dir"]>
-						</cfif>
-					</cfif>
-
-					<cfset temp.filters = ArrayNew(1)>
-					<cfif StructKeyExists(rfields[i].Relation,"filters")>
-						<cfset temp.filters = rfields[i].Relation["filters"]>
-					</cfif>
-					<cfif StructKeyExists(rfields[i].Relation,"join-table")>
-						<cfset temp.join = StructNew()>
-						<cfset temp.join["table"] = rfields[i].Relation["join-table"]>
-						<cfset temp.join["onleft"] = rfields[i].Relation["remote-table-join-field"]>
-						<cfset temp.join["onright"] = rfields[i].Relation["join-table-field-remote"]>
-						<!--- Use filters for extra join fielter --->
-						<cfset ArrayAppend(temp.filters,StructNew())>
-						<cfset temp.filters[ArrayLen(temp.filters)].table = rfields[i].Relation["join-table"]>
-						<cfset temp.filters[ArrayLen(temp.filters)].field = rfields[i].Relation["join-table-field-local"]>
-						<cfset temp.filters[ArrayLen(temp.filters)].operator = "IN">
-						<cfset temp.filters[ArrayLen(temp.filters)].value = qRecords[rfields[i].ColumnName][CurrentRow]>
-					<cfelse>
-						<!--- Use filters for extra join fielter --->
-						<cfset ArrayAppend(temp.filters,StructNew())>
-						<cfset temp.filters[ArrayLen(temp.filters)].table = rfields[i].Relation["table"]>
-						<cfset temp.filters[ArrayLen(temp.filters)].field = rfields[i].Relation["join-field-remote"]>
-						<cfset temp.filters[ArrayLen(temp.filters)].operator = "IN">
-						<cfset temp.filters[ArrayLen(temp.filters)].value = qRecords[rfields[i].ColumnName][CurrentRow]>
-					</cfif>
-					<cfset qRelationList = getRecords(argumentCollection=temp)>
-
-					<cfset temp = "">
-					<cfoutput query="qRelationList">
-						<cfif Len(qRelationList[rfields[i].Relation["field"]][CurrentRow])>
-							<cfif StructKeyExists(rfields[i].Relation,"delimiter")>
-								<!---<cfset temp = ListAppend(temp,qRelationList[rfields[i].Relation["field"]][CurrentRow],rfields[i].Relation["delimiter"])>--->
-								<cfif Len(temp)>
-									<cfset temp = temp & rfields[i].Relation["delimiter"]>
-								</cfif>
-								<cfset temp = temp & qRelationList[rfields[i].Relation["field"]][CurrentRow]>
-							<cfelse>
-								<cfset temp = ListAppend(temp,qRelationList[rfields[i].Relation["field"]][CurrentRow])>
-							</cfif>
-						</cfif>
-					</cfoutput>
-					<cfset QuerySetCell(qRecords, rfields[i].ColumnName, temp, CurrentRow)>
-
-				</cfif>
-			</cfloop>
-		</cfloop>
-	</cfif>
-
-	<cfreturn qRecords>
-</cffunction>
-
-<cffunction name="convertColumnAtts" access="private" returntype="struct" output="false" hint="">
-	<cfargument name="tablename" type="string" required="yes" hint="The name of the table to which a column will be added.">
-	<cfargument name="columnname" type="string" required="yes" hint="The name of the column to add.">
-	<cfargument name="CF_Datatype" type="string" required="no" hint="The ColdFusion SQL Datatype of the column.">
-	<cfargument name="Length" type="numeric" default="0" hint="The ColdFusion SQL Datatype of the column.">
-	<cfargument name="Default" type="string" required="no" hint="The default value for the column.">
-	<cfargument name="Special" type="string" required="no" hint="The special behavior for the column.">
-	<cfargument name="Relation" type="struct" required="no" hint="Relationship information for this column.">
-	<cfargument name="PrimaryKey" type="boolean" required="no" hint="Indicates whether this column is a primary key.">
-	<cfargument name="AllowNulls" type="boolean" default="true">
-	<cfargument name="useInMultiRecordsets" type="boolean" default="true">
-
-	<!--- Default length to 255 (only used for text types) --->
-	<cfif arguments.Length EQ 0 AND StructKeyExists(arguments,"CF_Datatype")>
-		<cfset arguments.Length = 255>
-	</cfif>
-
-	<cfif StructKeyExists(arguments,"CF_Datatype")>
-		<cfset arguments.CF_Datatype = UCase(arguments.CF_Datatype)>
-		<cfscript>
+
+	return arguments.data;
+}
+
+/**
+* I update a record in the given table with the provided data and return the primary key of the updated record.">
+* @tablename The table on which to update data.
+* @data A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+* @advsql A structure of sqlarrays for each area of a query (SET,WHERE).
+* @truncate Should the field values be automatically truncated to fit in the available space for each field?
+* @fieldlist A list of updateable fields. If left blank, any field can be updated.
+*/
+public string function updateRecord(
+	required string tablename,
+	required struct data,
+	struct advsql = {},
+	boolean truncate = false,
+	string fieldlist = ""
+) {
+	var bTable = checkTable(arguments.tablename);
+	var ii = 0; // generic counter
+	var pkfields = getPKFields(arguments.tablename);
+	var sData = clean(arguments.data); // holds incoming data for ease of use
+	var qGetUpdateRecord = 0; // used to check for existing record
+	var temp = "";
+	var result = 0;
+	var sqlarray = [];
+	var ChangeUUID = CreateUUID();
+	var sGetArgs = {"tablename":arguments.tablename,"data":{},"fieldlist":arguments.fieldlist};
+	var qBefore = 0;
+	var qAfter = 0;
+
+	if ( arguments.truncate ) {
+		sData = variables.truncate(arguments.tablename, sData);
+	}
+
+	if ( NOT ArrayLen(pkfields) ) {
+		throwDMError("#arguments.tablename# has no primary key fields. updateRecord and saveRecord can only be called on tables with primary key fields. Use updateRecords or insertRecord (without OnExists of 'update' or 'save') instead.", "NoPkFields");
+	}
+
+	// Check for existing record
+	sqlarray = [];
+	sqlarray.append("SELECT " & escape(pkfields[1].ColumnName));
+	sqlarray.append("FROM " & escape(arguments.tablename));
+	sqlarray.append("WHERE 1 = 1");
+	for ( ii = 1; ii <= ArrayLen(pkfields); ii++ ) {
+		sqlarray.append("AND " & escape(pkfields[ii].ColumnName) & " = ");
+		sqlarray.append(sval(pkfields[ii], sData));
+		sGetArgs["data"][pkfields[ii].ColumnName] = sData[pkfields[ii].ColumnName];
+	}
+	qGetUpdateRecord = runSQLArray(sqlarray);
+
+	// Make sure record exists to update
+	if ( NOT qGetUpdateRecord.RecordCount ) {
+		temp = "";
+		for (ii = 1; ii <= ArrayLen(pkfields); ii++) {
+			temp = ListAppend(temp, escape(pkfields[ii].ColumnName) & "=" & sData[pkfields[ii].ColumnName]);
+		}
+		throwDMError("No record exists for update criteria (#temp#).", "NoUpdateRecord");
+	}
+
+	if ( NOT Len(Trim(sGetArgs.fieldlist)) ) {
+		sGetArgs["fieldlist"] = StructKeyList(arguments.data);
+	}
+
+	qBefore = getRecord(argumentCollection=sGetArgs);
+
+	sqlarray = updateRecordSQL(argumentCollection=arguments);
+
+	announceEvent(tablename=arguments.tablename, action="beforeUpdate", method="updateRecord", data=sData, fieldlist=arguments.fieldlist, Args=arguments, sql=sqlarray, ChangeUUID=ChangeUUID);
+
+	if ( ArrayLen(sqlarray) ) {
+		runSQLArray(sqlarray);
+	}
+
+	result = qGetUpdateRecord[pkfields[1].ColumnName][1];
+
+	// set pkfield so that we can save relation data
+	sData[pkfields[1].ColumnName] = result;
+
+	// Save any relations
+	saveRelations(arguments.tablename, sData, pkfields[1], result);
+
+	qAfter = getRecord(argumentCollection = sGetArgs);
+
+	// Log update
+	if ( variables.doLogging AND arguments.tablename NEQ variables.logtable ) {
+		logAction(
+			tablename=arguments.tablename,
+			pkval=result,
+			action="update",
+			data=sData,
+			sql=sqlarray
+		);
+	}
+
+	announceEvent(tablename=arguments.tablename,action="afterUpdate",method="updateRecord",data=sData,fieldlist=arguments.fieldlist,Args=arguments,pkvalue=result,sql=sqlarray,ChangeUUID=ChangeUUID,before=qBefore,after=qAfter);
+
+	setCacheDate();
+
+	return result;
+}
+
+/**
+* I update a record in the given table with the provided data and return the primary key of the updated record.
+* @tablename The table on which to update data.
+* @data A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+* @fieldlist A list of updateable fields. If left blank, any field can be updated.
+* @advsql A structure of sqlarrays for each area of a query (SET,WHERE).
+*/
+public array function updateRecordSQL(
+	required string tablename,
+	required struct data,
+	string fieldlist="",
+	struct advsql={}
+) {
+	var bTable = checkTable(arguments.tablename);
+	var fields = getUpdateableFields(arguments.tablename);
+	var ii = 0; // generic counter
+	var pkfields = getPKFields(arguments.tablename);
+	var sData = clean(arguments.data); // holds incoming data for ease of use
+	var data_set = {};
+	var data_where = {};
+
+	sData = getRelationValues(arguments.tablename, sData);
+
+	// This method requires at least one primary key
+	if ( NOT ArrayLen(pkfields) ) {
+		throwDMError("This method can only be used on tables with at least one primary key field.", "NeedPKField");
+	}
+
+	// All primary key values must be provided
+	for ( ii = 1; ii <= ArrayLen(pkfields); ii++ ) {
+		if ( NOT StructKeyExists(sData, pkfields[ii].ColumnName) ) {
+			throwDMError("All Primary Key fields must be used when updating a record.", "RequiresAllPkFields");
+		}
+		data_where[pkfields[ii].ColumnName] = sData[pkfields[ii].ColumnName];
+	}
+
+	for ( ii = 1; ii <= ArrayLen(fields); ii++ ) {
+		if ( StructKeyExists(sData, fields[ii].ColumnName) ) {
+			data_set[fields[ii].ColumnName] = sData[fields[ii].ColumnName];
+		}
+	}
+
+	return updateRecordsSQL(
+		tablename = arguments.tablename,
+		data_set = data_set,
+		data_where = data_where,
+		fieldlist = arguments.fieldlist,
+		advsql = arguments.advsql
+	);
+}
+
+/*
+* @tablename The table on which to update data.
+* @data_set A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+* @data_where A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+* @filters An array of filters to apply to the query.
+* @fieldlist A list of updateable fields. If left blank, any field can be updated.
+* @advsql A structure of sqlarrays for each area of a query (SET,WHERE).
+*/
+public void function updateRecords(
+	required string tablename,
+	required struct data_set,
+	struct data_where={},
+	array filters=[],
+	string fieldlist="",
+	struct advsql={}
+) {
+	var sqlarray = updateRecordsSQL(argumentCollection=arguments);
+	var qRecords = 0;
+	var sAdvSQL = {};
+	var pklist = getPrimaryKeyFieldNames(arguments.tablename);
+	var pkfields = getPKFields(arguments.tablename); // the primary key fields for this table
+
+	if ( ArrayLen(sqlarray) ) {
+		runSQLArray(sqlarray);
+	}
+
+	// Save any relations
+	if ( ListLen(pklist) EQ 1 ) {
+		if ( StructKeyExists(arguments.advsql, "WHERE") ) {
+			sAdvSQL["WHERE"] = arguments.advsql["WHERE"];
+		}
+
+		qRecords = getRecords(
+			tablename = arguments.tablename,
+			data = data_where,
+			fieldlist = pklist,
+			advsql = sAdvSQL,
+			filters = arguments.filters
+		);
+
+		for ( var i = 1; i <= qRecords.RecordCount; i++ ) {
+			saveRelations(
+				tablename = arguments.tablename,
+				data = data_set,
+				pkfield = pkfields[1],
+				pkval = qRecords[pklist][i]
+			);
+		}
+	}
+
+	setCacheDate();
+}
+
+/**
+* @tablename The table on which to update data.
+* @data_set A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+* @data_where A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+* @filters An array of filters to apply to the query.
+* @fieldlist A list of updateable fields. If left blank, any field can be updated.
+* @advsql A structure of sqlarrays for each area of a query (SET,WHERE).
+*/
+public array function updateRecordsSQL(
+	required string tablename,
+	struct data_set={},
+	struct data_where,
+	array filters=[],
+	string fieldlist="",
+	struct advsql={}
+) {
+	var bTable = checkTable(arguments.tablename);
+	var fields = getUpdateableFields(arguments.tablename);
+	var ii = 0;// generic counter
+	var fieldcount = 0;// number of fields
+	var sData = clean(arguments.data_set);// holds incoming data for ease of use
+	var sqlarray = [];
+	var Specials = "LastUpdatedDate";
+	var usedfields = "";
+	var colnum = 0;
+
+	if ( NOT StructKeyExists(arguments,"data_where") ) {
+		arguments.data_where = {};
+	}
+
+	// Restrict data to fieldlist
+	if ( Len(Trim(arguments.fieldlist)) ) {
+		for ( ii in sData )
+			if ( NOT ListFindNoCase(arguments.fieldlist,ii) ) {
+				StructDelete(sData,ii);
+			}
+	}
+
+	sData = getRelationValues(arguments.tablename,sData);
+
+	// Restrict data to fieldlist
+	if ( Len(Trim(arguments.fieldlist)) ) {
+		for ( ii in sData ) {
+			if ( NOT ListFindNoCase(arguments.fieldlist,ii) ) {
+				StructDelete(sData,ii);
+			}
+		}
+	}
+
+	// Throw exception on any attempt to update a table with no updateable fields
+	if ( NOT ArrayLen(fields) ) {
+		throwDMError("This table does not have any updateable fields.","NoUpdateableFields");
+	}
+
+	ArrayAppend(sqlarray,"UPDATE	#escape(Variables.prefix & arguments.tablename)#");
+	ArrayAppend(sqlarray,"SET");
+	for ( ii=1; ii LTE ArrayLen(fields); ii++ ) {
+		if ( StructKeyExists(fields[ii],"ColumnName") AND NOT ListFindNoCase(usedfields,fields[ii]["ColumnName"]) ) {
+			if ( useField(sData,fields[ii]) ) {// Include update if this is valid data
+				checkLength(fields[ii],sData[fields[ii].ColumnName]);
+				fieldcount = fieldcount + 1;
+				usedfields = ListAppend(usedfields,fields[ii]["ColumnName"]);
+				if ( fieldcount GT 1 ) {
+					ArrayAppend(sqlarray,",");
+				}
+				ArrayAppend(sqlarray,"#escape(fields[ii].ColumnName)# = ");
+				ArrayAppend(sqlarray,sval(fields[ii],sData));
+			} else if ( isBlankValue(sData,fields[ii]) ) {// Or if it is passed in as empty value and null are allowed
+				fieldcount = fieldcount + 1;
+				usedfields = ListAppend(usedfields,fields[ii]["ColumnName"]);
+				if ( fieldcount GT 1 ) {
+					ArrayAppend(sqlarray,",");
+				}
+				if ( StructKeyExists(fields[ii],"AllowNulls") AND isBoolean(fields[ii].AllowNulls) AND NOT fields[ii].AllowNulls ) {
+					ArrayAppend(sqlarray,"#escape(fields[ii].ColumnName)# = ''");
+				} else {
+					ArrayAppend(sqlarray,"#escape(fields[ii].ColumnName)# = NULL");
+				}
+				} else if ( StructKeyExists(fields[ii],"Special") AND Len(fields[ii].Special) AND ListFindNoCase(Specials,fields[ii].Special) ) {
+				if ( fields[ii]["Special"] EQ "LastUpdatedDate" ) {
+					fieldcount = fieldcount + 1;
+					usedfields = ListAppend(usedfields,fields[ii]["ColumnName"]);
+					if ( fieldcount GT 1 ) {
+						ArrayAppend(sqlarray,",");
+					}
+					ArrayAppend(sqlarray,"#escape(fields[ii].ColumnName)# = ");
+					ArrayAppend(sqlarray,getFieldNowValue(arguments.tablename,fields[ii]));
+				}
+			}
+		}
+	}
+	if ( StructKeyExists(arguments,"advsql") AND StructKeyExists(arguments.advsql,"SET") ) {
+		if ( fieldcount ) {
+			ArrayAppend(sqlarray,",");colnum = colnum + 1;
+		}
+		fieldcount = fieldcount + 1;
+		ArrayAppend(sqlarray,arguments.advsql["SET"]);
+	}
+	ArrayAppend(sqlarray,"WHERE	1 = 1");
+	ArrayAppend(sqlarray,getWhereSQL(tablename=arguments.tablename,data=arguments.data_where,filters=arguments.filters));
+	if ( fieldcount ) {
+		fieldcount = 0;
+	} else {
+		sqlarray = [];
+	}
+
+	return sqlarray;
+}
+
+/*
+* I add a column to the given table (deprecated in favor of setColumn).
+* @tablename The name of the table to which a column will be added.
+* @columnname The name of the column to add.
+* @CF_Datatype The ColdFusion SQL Datatype of the column.
+* @Length The ColdFusion SQL Datatype of the column.
+* @Default The default value for the column.
+*/
+public function addColumn(
+	required string tablename,
+	required string columnname,
+	string CF_Datatype,
+	numeric Length=50,
+	string Default
+) {
+
+	setColumn(argumentCollection=arguments);
+
+}
+
+/**
+* I add a table to the Data Manager.
+*/
+private boolean function addTable(
+	required string tablename,
+	required array fielddata,
+	struct filters,
+	struct props
+) {
+	var isTableAdded = false;
+	var ii = 0;
+	var jj = 0;
+	var hasField = false;
+
+	if ( StructKeyExists(variables.tables,arguments.tablename) ) {
+		// If the table exists, add new columns
+		for ( ii=1; ii LTE ArrayLen(arguments.fielddata); ii++ ) {
+			hasField = false;
+			for ( jj=1; jj LTE ArrayLen(variables.tables[arguments.tablename]); jj++ ) {
+				if ( arguments.fielddata[ii]["ColumnName"] EQ variables.tables[arguments.tablename][jj]["ColumnName"] ) {
+					hasField = true;
+					variables.tables[arguments.tablename][jj] = arguments.fielddata[ii];
+				}
+			}
+			if ( NOT hasField ) {
+				ArrayAppend(variables.tables[arguments.tablename],arguments.fielddata[ii]);
+			}
+		}
+	} else {
+		// If the table doesn't exist, just add it as given
+		variables.tables[arguments.tablename] = arguments.fielddata;
+	}
+
+	resetTableProps(arguments.tablename);
+
+	if ( StructKeyExists(arguments,"filters") AND StructCount(arguments.filters) ) {
+		StructAppend(variables.tableprops[arguments.tablename]["filters"],arguments.filters,true);
+	}
+
+	if ( StructKeyExists(arguments,"props") AND StructCount(arguments.props) ) {
+		setTableProps(arguments.tablename,arguments.props);
+	}
+
+	isTableAdded = true;
+
+	announceEvent(
+		tablename=Arguments.tablename,
+		action="addTable",
+		method="addTable",
+		data={},
+		Args=Arguments
+	);
+
+	setCacheDate();
+
+	return isTableAdded;
+}
+
+private function adjustColumnArgs(required struct args) {
+	var sArgs = StructCopy(arguments.args);
+
+	// Require ColumnName
+	if ( NOT (StructKeyExists(sArgs, "ColumnName") AND Len(Trim(sArgs.ColumnName))) ) {
+		throwDMError("ColumnName is required");
+	}
+	// Require CF_Datatype
+	if ( NOT (StructKeyExists(sArgs, "CF_Datatype") AND Len(Trim(sArgs.CF_Datatype)) GT 7 AND Left(sArgs.CF_Datatype, 7) EQ "CF_SQL_") ) {
+		throwDMError("CF_Datatype is required");
+	}
+	if ( NOT (StructKeyExists(sArgs, "Length") AND isNumeric(sArgs.Length) AND Int(sArgs.Length) GT 0) ) {
+		sArgs.Length = 255;
+	}
+	if ( NOT isStringType(getDBDataType(sArgs.CF_DataType)) ) {
+		StructDelete(sArgs, "Length");
+	}
+	if ( NOT (StructKeyExists(sArgs, "PrimaryKey") AND isBoolean(sArgs.PrimaryKey)) ) {
+		sArgs.PrimaryKey = false;
+	}
+	if ( NOT (StructKeyExists(sArgs, "Increment") AND isBoolean(sArgs.Increment)) ) {
+		sArgs.Increment = false;
+	}
+	if ( NOT StructKeyExists(sArgs, "Default") ) {
+		sArgs.Default = "";
+	}
+	if ( NOT StructKeyExists(sArgs, "Special") ) {
+		sArgs.Special = "";
+	}
+	if ( NOT StructKeyExists(sArgs, "useInMultiRecordsets") ) {
+		sArgs.useInMultiRecordsets = true;
+	}
+	if ( NOT (StructKeyExists(sArgs, "AllowNulls") AND isBoolean(sArgs.AllowNulls)) ) {
+		sArgs.AllowNulls = true;
+	}
+	if ( StructKeyExists(sArgs, "Length") ) {
+		sArgs.Length = Int(sArgs.Length);
+	}
+	if ( StructKeyExists(sArgs, "precision") OR StructKeyExists(sArgs, "scale") ) {
+		if ( NOT (StructKeyExists(sArgs, "precision") AND Val(sArgs.precision) NEQ 0) ) {
+			sArgs.precision = 12;
+		}
+		if ( NOT (StructKeyExists(sArgs, "scale") AND Val(sArgs.scale) NEQ 0) ) {
+			sArgs.scale = 2;
+		}
+	}
+
+	return sArgs;
+}
+
+public query function applyConcatRelations(
+	required string tablename,
+	required query query
+) {
+	var qRecords = arguments.query;
+	var rfields = getRelationFields(arguments.tablename); // relation fields in table
+	var i = 0; // Generic counter
+	var hasConcats = false;
+	var qRelationList = 0;
+	var temp = 0;
+
+	// Check for list values in recordset
+	for ( i = 1; i <= ArrayLen(rfields); i++ ) {
+		if ( ListFindNoCase(qRecords.ColumnList, rfields[i].ColumnName) ) {
+			if ( rfields[i].Relation.type EQ "concat" ) {
+				hasConcats = true;
+				break;
+			}
+		}
+	}
+
+	// Get list values
+	if ( hasConcats ) {
+		for ( var row = 1; row <= qRecords.RecordCount; row++ ) {
+			for ( i = 1; i <= ArrayLen(rfields); i++ ) {
+				if ( rfields[i].Relation["type"] EQ "concat" AND ListFindNoCase(qRecords.ColumnList, rfields[i].ColumnName) AND Len(rfields[i].relation.delimiter) ) {
+					if ( ReFindNoCase("^(#rfields[i].relation.delimiter#\\s?)+$", qRecords[rfields[i].ColumnName][row]) ) {
+						qRecords[rfields[i].ColumnName][row] = "";
+					}
+				}
+			}
+		}
+	}
+
+	return qRecords;
+}
+
+public query function applyListRelations(
+	required string tablename,
+	required query query
+) {
+	var qRecords = arguments.query;
+	var rfields = getRelationFields(arguments.tablename);// relation fields in table
+	var i = 0;// Generic counter
+	var hasLists = false;
+	var qRelationList = 0;
+	var temp = 0;
+	var sRecord = 0;
+	var sRelation = 0;
+
+	// Check for list values in recordset
+	for ( i=1; i LTE ArrayLen(rfields); i++ ) {
+		if ( ListFindNoCase(qRecords.ColumnList,rfields[i].ColumnName) ) {
+			if ( rfields[i].Relation.type EQ "list" ) {
+				hasLists = true;
+			}
+		}
+	}
+
+	// Get list values
+	if ( hasLists ) {
+		for ( sRecord in qRecords ) {
+			for ( i=1; i LTE ArrayLen(rfields); i++ ) {
+				if ( rfields[i].Relation["type"] EQ "list" AND StructKeyExists(sRecord,rfields[i].ColumnName) ) {
+					fillOutJoinTableRelations(arguments.tablename);
+					temp = {};
+					temp.tablename = rfields[i].Relation["table"];
+					temp.fieldlist = rfields[i].Relation["field"];
+					if ( StructKeyExists(rfields[i].Relation,"distinct") AND rfields[i].Relation["distinct"] IS true ) {
+						temp.distinct = true;
+						temp["sortfield"] = rfields[i].Relation["field"];
+					}
+					temp.advsql = StructNew();
+					if ( StructKeyExists(rfields[i].Relation,"sort-field") ) {
+						temp["sortfield"] = rfields[i].Relation["sort-field"];
+						if ( StructKeyExists(rfields[i].Relation,"sort-dir") ) {
+							temp["sortdir"] = rfields[i].Relation["sort-dir"];
+						}
+					}
+
+					temp.filters = [];
+					if ( StructKeyExists(rfields[i].Relation,"filters") ) {
+						temp.filters = rfields[i].Relation["filters"];
+					}
+					if ( StructKeyExists(rfields[i].Relation,"join-table") ) {
+						temp.join = StructNew();
+						temp.join["table"] = rfields[i].Relation["join-table"];
+						temp.join["onleft"] = rfields[i].Relation["remote-table-join-field"];
+						temp.join["onright"] = rfields[i].Relation["join-table-field-remote"];
+						// Use filters for extra join fielter
+						ArrayAppend(temp.filters,StructNew());
+						temp.filters[ArrayLen(temp.filters)].table = rfields[i].Relation["join-table"];
+						temp.filters[ArrayLen(temp.filters)].field = rfields[i].Relation["join-table-field-local"];
+						temp.filters[ArrayLen(temp.filters)].operator = "IN";
+						temp.filters[ArrayLen(temp.filters)].value = sRecord[rfields[i].ColumnName];
+					} else {
+						// Use filters for extra join fielter
+						ArrayAppend(temp.filters,StructNew());
+						temp.filters[ArrayLen(temp.filters)].table = rfields[i].Relation["table"];
+						temp.filters[ArrayLen(temp.filters)].field = rfields[i].Relation["join-field-remote"];
+						temp.filters[ArrayLen(temp.filters)].operator = "IN";
+						temp.filters[ArrayLen(temp.filters)].value = sRecord[rfields[i].ColumnName];
+					}
+					qRelationList = getRecords(argumentCollection=temp);
+
+					temp = "";
+					for ( sRelation in qRelationList ) {
+						if ( Len(qRelationList[rfields[i].Relation["field"]][CurrentRow]) ) {
+							if ( StructKeyExists(rfields[i].Relation,"delimiter") ) {
+								//temp = ListAppend(temp,sRelation[rfields[i].Relation["field"]],rfields[i].Relation["delimiter"]);
+								if ( Len(temp) ) {
+									temp = temp & rfields[i].Relation["delimiter"];
+								}
+								temp = temp & sRelation[rfields[i].Relation["field"]];
+							} else {
+								temp = ListAppend(temp,sRelation[rfields[i].Relation["field"]]);
+							}
+						}
+					}
+					//QuerySetCell(qRecords, rfields[i].ColumnName, temp, CurrentRow);
+					sRecord[rfields[i].ColumnName] = temp;
+				}
+			}
+		}
+	}
+
+	return qRecords;
+}
+
+/**
+* @tablename The name of the table to which a column will be added.
+* @columnname The name of the column to add.
+* @CF_Datatype The ColdFusion SQL Datatype of the column.
+* @Length The ColdFusion SQL Datatype of the column.
+* @Default The default value for the column.
+* @Special The special behavior for the column.
+* @Relation Relationship information for this column.
+* @PrimaryKey Indicates whether this column is a primary key.
+* @AllowNulls Indicates whether this column allows null values.
+* @useInMultiRecordsets Indicates whether this column should be included in multi-recordset queries.
+*/
+private struct function convertColumnAtts(
+	required string tablename,
+	required string columnname,
+	string CF_Datatype,
+	numeric Length=0,
+	string Default,
+	string Special,
+	struct Relation,
+	boolean PrimaryKey,
+	boolean AllowNulls=true,
+	boolean useInMultiRecordsets=true
+) {
+
+	// Default length to 255 (only used for text types)
+	if ( arguments.Length EQ 0 AND StructKeyExists(arguments,"CF_Datatype") ) {
+		arguments.Length = 255;
+	}
+
+	if ( StructKeyExists(arguments,"CF_Datatype") ) {
+		arguments.CF_Datatype = UCase(arguments.CF_Datatype);
+		
 		//Set default (if exists)
 		if ( StructKeyExists(arguments,"Default") AND Len(arguments["Default"]) ) {
 			arguments["Default"] = makeDefaultValue(arguments["Default"],arguments["CF_DataType"]);
@@ -4434,9 +4840,7 @@
 		} else {
 			arguments["Special"] = "";
 		}
-		</cfscript>
-	</cfif>
-	<cfscript>
+	}
 	//Other field for list relation
 	if (
 			StructKeyExists(arguments,"Relation")
@@ -4447,342 +4851,396 @@
 	) {
 		arguments["Relation"]["other-field"] = arguments["OtherField"];
 	}
-	</cfscript>
 
-	<cfreturn StructFromArgs(arguments)>
-</cffunction>
+	return StructFromArgs(arguments);
+}
 
-<cffunction name="getComparatorSQL" access="private" returntype="array" output="no">
-	<cfargument name="value" type="string" required="true">
-	<cfargument name="cfsqltype" type="string" required="true">
-	<cfargument name="operator" type="string" default="=">
-	<cfargument name="nullable" type="boolean" default="true">
-	<cfargument name="sql" type="any" required="false">
+private array function getComparatorSQL(
+	required string value,
+	required string cfsqltype,
+	string operator="=",
+	boolean nullable=true,
+	any sql
+) {
+	var aSQL = ArrayNew(1);
+	var inops = "IN,NOT IN";
+	var posops = "=,IN,LIKE,>,>=";
 
-	<cfset var aSQL = ArrayNew(1)>
-	<cfset var inops = "IN,NOT IN">
-	<cfset var posops = "=,IN,LIKE,>,>=">
+	if ( StructKeyExists(arguments,"sql") AND ( NOT isSimpleValue(arguments.sql) OR Len(arguments.sql) ) ) {
+		if ( ListFindNoCase(inops,arguments.operator) ) {
+			ArrayAppend(aSQL," #arguments.operator# (");
+			ArrayAppend(aSQL,arguments.sql);
+			ArrayAppend(aSQL," )");
+		} else {
+			ArrayAppend(aSQL," #arguments.operator#");
+			ArrayAppend(aSQL,arguments.sql);
+		}
+	} else if ( Len(Trim(arguments.value)) OR NOT arguments.nullable ) {
+		if ( ListFindNoCase(inops,arguments.operator) ) {
+			ArrayAppend(aSQL," #arguments.operator# (");
+			ArrayAppend(aSQL,queryparam(cfsqltype=arguments.cfsqltype,value=arguments.value,list=true));
+			ArrayAppend(aSQL," )");
+		} else {
+			ArrayAppend(aSQL," #arguments.operator#");
+			ArrayAppend(aSQL,queryparam(arguments.cfsqltype,arguments.value));
+		}
+	} else {
+		if ( ListFindNoCase(posops,arguments.operator) ) {
+			ArrayAppend(aSQL," IS");
+		} else {
+			ArrayAppend(aSQL," IS NOT");
+		}
+		ArrayAppend(aSQL," NULL");
+	}
 
-	<cfif StructKeyExists(arguments,"sql") AND ( NOT isSimpleValue(arguments.sql) OR Len(arguments.sql) )>
-		<cfif ListFindNoCase(inops,arguments.operator)>
-			<cfset ArrayAppend(aSQL," #arguments.operator# (")>
-			<cfset ArrayAppend(aSQL,arguments.sql)>
-			<cfset ArrayAppend(aSQL," )")>
-		<cfelse>
-			<cfset ArrayAppend(aSQL," #arguments.operator#")>
-			<cfset ArrayAppend(aSQL,arguments.sql)>
-		</cfif>
-	<cfelseif Len(Trim(arguments.value)) OR NOT arguments.nullable>
-		<cfif ListFindNoCase(inops,arguments.operator)>
-			<cfset ArrayAppend(aSQL," #arguments.operator# (")>
-			<cfset ArrayAppend(aSQL,queryparam(cfsqltype=arguments.cfsqltype,value=arguments.value,list=true))>
-			<cfset ArrayAppend(aSQL," )")>
-		<cfelse>
-			<cfset ArrayAppend(aSQL," #arguments.operator#")>
-			<cfset ArrayAppend(aSQL,queryparam(arguments.cfsqltype,arguments.value))>
-		</cfif>
-	<cfelse>
-		<cfif ListFindNoCase(posops,arguments.operator)>
-			<cfset ArrayAppend(aSQL," IS")>
-		<cfelse>
-			<cfset ArrayAppend(aSQL," IS NOT")>
-		</cfif>
-		<cfset ArrayAppend(aSQL," NULL")>
-	</cfif>
+	return aSQL;
+}
 
-	<cfreturn aSQL>
-</cffunction>
+/**
+* I get a list of all tables in the current database.
+*/
+public string function getDatabaseTablesCache() {
+	if ( NOT StructKeyExists(variables,"cache_dbtables") ) {
+		variables.cache_dbtables = getDatabaseTables();
+	}
 
-<cffunction name="getDatabaseTablesCache" access="public" returntype="string" output="no" hint="I get a list of all tables in the current database.">
+	return variables.cache_dbtables;
+}
 
-	<cfif NOT StructKeyExists(variables,"cache_dbtables")>
-		<cfset variables.cache_dbtables = getDatabaseTables()>
-	</cfif>
+public string function getDBDataTypeFull(required struct sField) {
+	var cftype = StructKeyExists(sField,"CF_DataType") ? sField.CF_DataType : sField.CFSQLTYPE;
+	var dbtype = getDBDataType(cftype);
 
-	<cfreturn variables.cache_dbtables>
-</cffunction>
+	if ( isStringType(getDBDataType(cftype)) ) {
+		if ( StructKeyExists(sField,"Length") AND Val(sField.Length) ) {
+			dbtype = dbtype & "(#Val(sField.Length)#)";
+		} else if ( StructKeyExists(sField,"MaxLength") AND Val(sField.MaxLength) ) {
+			dbtype = dbtype & "(#Val(sField.MaxLength)#)";
+		}
+	}
 
-<cffunction name="hasTable" access="public" returntype="boolean" output="no" hint="I check to see if the given table exists in the Datamgr.">
-	<cfargument name="tablename" type="string" required="yes">
+	return dbtype;
+}
 
-	<cfset var result = true>
+/**
+* I check to see if the given table exists in the Datamgr.
+*/
+public boolean function hasTable(required string tablename) {
+	var result = true;
 
-	<cftry>
-		<cfset checkTable(arguments.tablename)>
-	<cfcatch>
-		<cfset result = false>
-	</cfcatch>
-	</cftry>
+	try {
+		checkTable(arguments.tablename);
+	} catch ( any e ) {
+		result = false;
+	}
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="getDefaultOrderBySQL" access="private" returntype="array" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="tablealias" type="string" required="yes">
-	<cfargument name="fieldlist" type="string" default="">
+private array function getDefaultOrderBySQL(
+	required string tablename,
+	required string tablealias,
+	string fieldlist=""
+) {
+	var aResults = [];
+	var fields = getUpdateableFields(arguments.tablename);// non primary-key fields in table
+	var pkfields = getPKFields(arguments.tablename);// primary key fields in table
+	var ii = 0;
+	var temp = "";
 
-	<cfset var aResults = ArrayNew(1)>
-	<cfset var fields = getUpdateableFields(arguments.tablename)><!--- non primary-key fields in table --->
-	<cfset var pkfields = getPKFields(arguments.tablename)><!--- primary key fields in table --->
-	<cfset var ii = 0>
+	if ( ArrayLen(pkfields) AND pkfields[1].CF_DataType EQ "CF_SQL_INTEGER" AND ( ListFindNoCase(arguments.fieldlist,pkfields[1].ColumnName) OR NOT Len(arguments.fieldlist) ) ) {
+		ArrayAppend(aResults,getFieldSelectSQL(arguments.tablename,pkfields[1].ColumnName,arguments.tablealias,false));
+	} else if ( Len(arguments.fieldlist) ) {
+		ArrayAppend(aResults,getOrderbyFieldList(argumentCollection=arguments));
+	} else if ( ArrayLen(pkfields) ) {
+		ArrayAppend(aResults,getFieldSelectSQL(arguments.tablename,pkfields[1].ColumnName,arguments.tablealias,false));
+	} else {
+		for ( ii=1; ii LTE Min(ArrayLen(fields),3); ii++ ) {
+			if ( NOT ListFindNoCase(variables.nocomparetypes,fields[ii].CF_DataType) ) {
+				ArrayAppend(aResults,getFieldSelectSQL(arguments.tablename,fields[ii].ColumnName,arguments.tablealias,false));
+				break;
+			}
+		}
+	}
 
-	<cfif ArrayLen(pkfields) AND pkfields[1].CF_DataType EQ "CF_SQL_INTEGER" AND ( ListFindNoCase(arguments.fieldlist,pkfields[1].ColumnName) OR NOT Len(arguments.fieldlist) )>
-		<cfset ArrayAppend(aResults,getFieldSelectSQL(arguments.tablename,pkfields[1].ColumnName,arguments.tablealias,false))>
-	<cfelseif Len(arguments.fieldlist)>
-		<cfset ArrayAppend(aResults,getOrderbyFieldList(argumentCollection=arguments))>
-	<cfelseif ArrayLen(pkfields)>
-		<cfset ArrayAppend(aResults,getFieldSelectSQL(arguments.tablename,pkfields[1].ColumnName,arguments.tablealias,false))>
-	<cfelse>
-		<cfloop index="ii" from="1" to="#Min(ArrayLen(fields),3)#" step="1">
-			<cfif NOT ListFindNoCase(variables.nocomparetypes,fields[ii].CF_DataType)>
-				<cfset ArrayAppend(aResults,getFieldSelectSQL(arguments.tablename,fields[ii].ColumnName,arguments.tablealias,false))>
-				<cfbreak>
-			</cfif>
-		</cfloop>
-	</cfif>
+	if ( Len(arguments.function) ) {
+		temp = arguments["function"] & "(";
+		ArrayPrepend(aResults,temp);
+		ArrayAppend(aResults,")");
+	}
 
-	<cfif Len(arguments.function)>
-		<cfset ArrayPrepend(aResults,"#arguments.function#(")>
-		<cfset ArrayAppend(aResults,")")>
-	</cfif>
+	return aResults;
+}
 
-	<cfreturn aResults>
-</cffunction>
+private function  getFieldNowValue(
+	required string tablename,
+	required struct sField
+) {
+	var result = "";
+	var type = getSpecialDateType(arguments.tablename,arguments.sField);
 
-<cffunction name="getFieldNowValue" access="private" returntype="any" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="sField" type="struct" required="yes">
+	switch ( type ) {
+		case "DB":
+		case "SQL":
+			result = getNowSQL();
+			break;
+		case "UTC":
+			result = sval(arguments.sField,DateAdd('s',GetTimezoneInfo().utcTotalOffset,now()));
+			break;
+		default:
+			result = sval(arguments.sField,now());
+	}
 
-	<cfset var result = "">
-	<cfset var type = getSpecialDateType(arguments.tablename,arguments.sField)>
+	return result;
+}
 
-	<cfswitch expression="#type#">
-	<cfcase value="DB,SQL">
-		<cfset result = getNowSQL()>
-	</cfcase>
-	<cfcase value="UTC">
-		<cfset result = sval(arguments.sField,DateAdd('s', GetTimezoneInfo().utcTotalOffset, now()))>
-	</cfcase>
-	<cfdefaultcase>
-		<cfset result = sval(arguments.sField,now())>
-	</cfdefaultcase>
-	</cfswitch>
+public struct function getFTableFields(required string tablename) {
+	var aFields = 0;
+	var ii = 0;
+	var sResult = 0;
 
-	<cfreturn result>
-</cffunction>
+	if ( StructKeyExists(variables.tableprops, arguments.tablename) ) {
+		if ( NOT StructKeyExists(variables.tableprops[arguments.tablename],"ftablekeys") ) {
+			variables.tableprops[arguments.tablename]["ftablekeys"] = {};
+			aFields = getFields(arguments.tablename);
+			for ( ii = 1; ii <= ArrayLen(aFields); ii++ ) {
+				if ( StructKeyExists(aFields[ii], "ftable") ) {
+					variables.tableprops[arguments.tablename]["ftablekeys"][aFields[ii].ftable] = aFields[ii].ColumnName;
+				}
+			}
+		}
+		sResult = variables.tableprops[arguments.tablename]["ftablekeys"];
+	} else {
+		sResult = {};
+	}
 
-<cffunction name="getFTableFields" access="public" returntype="struct" output="no">
-	<cfargument name="tablename" type="string" required="yes">
+	return sResult;
+}
 
-	<cfset var aFields = 0>
-	<cfset var ii = 0>
-	<cfset var sResult = 0>
+private function getSpecialDateType(
+	required string tablename,
+	required struct sField
+) {
+	var result = "CF";
+	var validtypes = "CF,UTC,DB,SQL";
 
-	<cfif StructKeyExists(variables.tableprops,arguments.tablename)>
-		<cfif NOT StructKeyExists(variables.tableprops[arguments.tablename],"ftablekeys")>
-			<cfset variables.tableprops[arguments.tablename]["ftablekeys"] = StructNew()>
-			<cfset aFields = getFields(arguments.tablename)>
-			<cfloop index="ii" from="1" to="#ArrayLen(aFields)#" step="1">
-				<cfif StructKeyExists(aFields[ii],"ftable")>
-					<cfset variables.tableprops[arguments.tablename]["ftablekeys"][aFields[ii].ftable] = aFields[ii].ColumnName>
-				</cfif>
-			</cfloop>
-		</cfif>
-		<cfset sResult = variables.tableprops[arguments.tablename]["ftablekeys"]>
-	<cfelse>
-		<cfset sResult = StructNew()>
-	</cfif>
+	if ( StructKeyExists(arguments.sField, "SpecialDateType") AND ListFindNoCase(validtypes, arguments.sField.SpecialDateType) ) {
+		result = arguments.sField.SpecialDateType;
+	} else if ( StructKeyExists(variables.tableprops[arguments.tablename], "SpecialDateType") AND ListFindNoCase(validtypes, variables.tableprops[arguments.tablename].SpecialDateType) ) {
+		result = variables.tableprops[arguments.tablename].SpecialDateType;
+	} else if ( StructKeyExists(variables, "SpecialDateType") AND ListFindNoCase(validtypes, variables.SpecialDateType) ) {
+		result = variables.SpecialDateType;
+	}
 
-	<cfreturn sResult>
-</cffunction>
+	return result;
+}
 
-<cffunction name="getSpecialDateType" access="private" returntype="any" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="sField" type="struct" required="yes">
+private function getFieldSQL_Math(
+	required string tablename,
+	required string field,
+	string tablealias
+) {
+	var sField = getField(arguments.tablename, arguments.field);
+	var aSQL = [];
 
-	<cfset var result = "CF">
-	<cfset var validtypes = "CF,UTC,DB,SQL">
+	ArrayAppend(aSQL, "(");
+	ArrayAppend(aSQL, getFieldSelectSQL(tablename=arguments.tablename, field=sField.Relation['field1'], tablealias=arguments.tablealias, useFieldAlias=false));
+	ArrayAppend(aSQL, sField.Relation['operator']);
+	ArrayAppend(aSQL, getFieldSelectSQL(tablename=arguments.tablename, field=sField.Relation['field2'], tablealias=arguments.tablealias, useFieldAlias=false));
+	ArrayAppend(aSQL, ")");
 
-	<cfif StructKeyExists(sField,"SpecialDateType") AND ListFindNoCase(validtypes,sField.SpecialDateType)>
-		<cfset result = sField.SpecialDateType>
-	<cfelseif StructKeyExists(variables.tableprops[arguments.tablename],"SpecialDateType") AND ListFindNoCase(validtypes,variables.tableprops[arguments.tablename].SpecialDateType)>
-		<cfset result = variables.tableprops[arguments.tablename].SpecialDateType>
-	<cfelseif StructKeyExists(variables,"SpecialDateType") AND ListFindNoCase(validtypes,variables.SpecialDateType)>
-		<cfset result = variables.SpecialDateType>
-	</cfif>
+	return aSQL;
+}
 
-	<cfreturn result>
-</cffunction>
+/**
+* I determine if the given field is in the select list.
+*/
+private boolean function isFieldInSelect(
+	required struct field,
+	string fieldlist="",
+	numeric maxrows=0
+) {
+	var sField = arguments.field;
+	var result = false;
 
-<cffunction name="getFieldSQL_Math" access="private" returntype="any" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="field" type="string" required="yes">
-	<cfargument name="tablealias" type="string" required="no">
-
-	<cfset var sField = getField(arguments.tablename,arguments.field)>
-	<cfset var aSQL = ArrayNew(1)>
-
-	<cfset ArrayAppend(aSQL,"(")>
-	<cfset ArrayAppend(aSQL, getFieldSelectSQL(tablename=arguments.tablename,field=sField.Relation['field1'],tablealias=arguments.tablealias,useFieldAlias=false) )>
-	<cfset ArrayAppend(aSQL, sField.Relation['operator'] )>
-	<cfset ArrayAppend(aSQL, getFieldSelectSQL(tablename=arguments.tablename,field=sField.Relation['field2'],tablealias=arguments.tablealias,useFieldAlias=false) )>
-	<cfset ArrayAppend(aSQL,")")>
-
-	<cfreturn aSQL>
-</cffunction>
-
-<cffunction name="isFieldInSelect" access="private" returntype="boolean" output="no" hint="I determine if the given field is in the select list.">
-	<cfargument name="field" type="struct" required="yes">
-	<cfargument name="fieldlist" type="string" default="">
-	<cfargument name="maxrows" type="numeric" default="0">
-
-	<cfset var sField = arguments.field>
-	<cfset var result = false>
-
-	<cfif
+	if (
 			(
 					Len(arguments.fieldlist) EQ 0
 				AND	(
-							NOT	StructKeyExists(sField,"useInMultiRecordsets")
+							NOT	StructKeyExists(sField, "useInMultiRecordsets")
 						OR	sField.useInMultiRecordsets IS true
 						OR	arguments.maxrows EQ 1
 					)
 			)
-		OR	ListFindNoCase(arguments.fieldlist,sField.ColumnName)
-	>
-		<cfset result = true>
-	</cfif>
+		OR	ListFindNoCase(arguments.fieldlist, sField.ColumnName)
+	) {
+		result = true;
+	}
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="checkLength" access="private" returntype="void" output="no" hint="I check the length of incoming data to see if it can fit in the designated field (making for a more developer-friendly error messages).">
-	<cfargument name="field" type="struct" required="yes">
-	<cfargument name="data" type="string" required="yes">
+/**
+* I check the length of incoming data to see if it can fit in the designated field (making for a more developer-friendly error messages).
+*/
+private void function checkLength(
+	required struct field,
+	required string data
+) {
+	var type = getDBDataType(arguments.field.CF_DataType);
 
-	<cfset var type = getDBDataType(field.CF_DataType)>
+	if (
+		isStringType(type)
+		AND
+		StructKeyExists(arguments.field, "Length")
+		AND
+		isNumeric(arguments.field.Length)
+		AND
+		arguments.field.Length GT 0
+		AND
+		Len(arguments.data) GT arguments.field.Length
+	) {
+		throwDMError("The data for '#arguments.field.ColumnName#' must be no more than #arguments.field.Length# characters in length.");
+	}
+}
 
-	<cfif isStringType(type) AND StructKeyExists(field,"Length") AND isNumeric(field.Length) AND field.Length GT 0 AND Len(data) GT field.Length>
-		<cfset throwDMError("The data for '#field.ColumnName#' must be no more than #field.Length# characters in length.")>
-	</cfif>
+/**
+* I check to see if the given table exists in the DataMgr.
+*/
+private boolean function checkTable(
+	required string tablename
+) {
 
-</cffunction>
+	//Note that this method is overridden for any database for which DataMgr can introspect the database table
 
-<cffunction name="checkTable" access="private" returntype="boolean" output="no" hint="I check to see if the given table exists in the Datamgr.">
-	<cfargument name="tablename" type="string" required="yes">
+	if ( NOT StructKeyExists(variables.tables, arguments.tablename) ) {
+		throwDMError("The table #arguments.tablename# must be loaded into DataMgr before you can use it.", "NoTableLoaded");
+	}
 
-	<!--- Note that this method is overridden for any database for which DataMgr can introspect the database table --->
+	return true;
+}
 
-	<cfif NOT StructKeyExists(variables.tables,arguments.tablename)>
-		<cfset throwDMError("The table #arguments.tablename# must be loaded into DataMgr before you can use it.","NoTableLoaded")>
-	</cfif>
+/**
+* I check to see if the given table has a primary key.
+*/
+private void function checkTablePK(
+	required string tablename
+) {
+	var i = 0; // counter
+	var arrFields = ArrayNew(1); // array of primarykey fields
 
-	<cfreturn true>
-</cffunction>
+	// If pkfields data if stored
+	if (
+		StructKeyExists(variables.tableprops, arguments.tablename)
+		AND
+		StructKeyExists(variables.tableprops[arguments.tablename], "pkfields")
+	) {
+		arrFields = variables.tableprops[arguments.tablename]["pkfields"];
+	} else {
+		for ( i = 1; i <= ArrayLen(variables.tables[arguments.tablename]); i++ ) {
+			if (
+				StructKeyExists(variables.tables[arguments.tablename][i], "PrimaryKey")
+				AND
+				variables.tables[arguments.tablename][i].PrimaryKey
+			) {
+				ArrayAppend(arrFields, variables.tables[arguments.tablename][i]);
+			}
+		}
+	}
 
-<cffunction name="checkTablePK" access="private" returntype="void" output="no" hint="I check to see if the given table has a primary key.">
-	<cfargument name="tablename" type="string" required="yes">
+	if ( NOT ArrayLen(arrFields) ) {
+		throwDMError("The table #arguments.tablename# must have at least one primary key field to be used by DataMgr.", "NoPKField");
+	}
+}
 
-	<cfset var i = 0><!--- counter --->
-	<cfset var arrFields = ArrayNew(1)><!--- array of primarykey fields --->
+/**
+* I take a potentially nested SQL array and return a flat SQL array.
+*/
+private array function cleanSQLArray(
+	required array sqlarray
+) {
+	return _cleanSQLArray(arguments.sqlarray);
+}
 
-	<!--- If pkfields data if stored --->
-	<cfif StructKeyExists(variables.tableprops,arguments.tablename) AND StructKeyExists(variables.tableprops[arguments.tablename],"pkfields")>
-		<cfset arrFields = variables.tableprops[arguments.tablename]["pkfields"]>
-	<cfelse>
-		<cfloop index="i" from="1" to="#ArrayLen(variables.tables[arguments.tablename])#" step="1">
-			<cfif StructKeyExists(variables.tables[arguments.tablename][i],"PrimaryKey") AND variables.tables[arguments.tablename][i].PrimaryKey>
-				<cfset ArrayAppend(arrFields, variables.tables[arguments.tablename][i])>
-			</cfif>
-		</cfloop>
-	</cfif>
+/**
+* I take a potentially nested SQL array and return a flat SQL array.
+*/
+private array function _cleanSQLArray(
+	required array sqlarray
+) {
+	var result = ArrayNew(1);
+	var i = 0;
+	var j = 0;
+	var temparray = 0;
 
-	<cfif NOT ArrayLen(arrFields)>
-		<cfset throwDMError("The table #arguments.tablename# must have at least one primary key field to be used by DataMgr.","NoPKField")>
-	</cfif>
+	for ( i = 1; i <= ArrayLen(arguments.sqlarray); i++ ) {
+		if ( isArray(arguments.sqlarray[i]) ) {
+			temparray = _cleanSQLArray(arguments.sqlarray[i]);
+			for ( j = 1; j <= ArrayLen(temparray); j++ ) {
+				ArrayAppend(result, temparray[j]);
+			}
+		} else if ( isStruct(arguments.sqlarray[i]) ) {
+			ArrayAppend(result, queryparam(argumentCollection=arguments.sqlarray[i]));
+		} else {
+			ArrayAppend(result, arguments.sqlarray[i]);
+		}
+	}
 
-</cffunction>
+	return result;
+}
 
-<cffunction name="cleanSQLArray" access="public" returntype="array" output="no" hint="I take a potentially nested SQL array and return a flat SQL array.">
-	<cfargument name="sqlarray" type="array" required="yes">
+private function DMDuplicate(
+	required any var
+) {
+	var result = 0;
+	var key = "";
 
-	<cfreturn _cleanSQLArray(arguments.sqlarray)>
-</cffunction>
+	if ( isStruct(arguments.var) ) {
+		result = StructCopy(arguments.var);
+	} else {
+		result = arguments.var;
+	}
 
-<cffunction name="_cleanSQLArray" access="private" returntype="array" output="no" hint="I take a potentially nested SQL array and return a flat SQL array.">
-	<cfargument name="sqlarray" type="array" required="yes">
+	return result;
+}
 
-	<cfset var result = ArrayNew(1)>
-	<cfset var i = 0>
-	<cfset var j = 0>
-	<cfset var temparray = 0>
+private string function DMPreserveSingleQuotes(
+	required any sql
+) {
+	return PreserveSingleQuotes(arguments.sql);
+}
 
-	<cfloop index="i" from="1" to="#ArrayLen(arguments.sqlarray)#" step="1">
-		<cfif isArray(arguments.sqlarray[i])>
-			<cfset temparray = _cleanSQLArray(arguments.sqlarray[i])>
-			<cfloop index="j" from="1" to="#ArrayLen(temparray)#" step="1">
-				<cfset ArrayAppend(result,temparray[j])>
-			</cfloop>
-		<cfelseif isStruct(arguments.sqlarray[i])>
-			<cfset ArrayAppend(result,queryparam(argumentCollection=arguments.sqlarray[i]))>
-		<cfelse>
-			<cfset ArrayAppend(result,arguments.sqlarray[i])>
-		</cfif>
-	</cfloop>
+/**
+* I return an escaped value for a table or field.
+*/
+private string function escape(
+	required string name
+) {
+	return "#arguments.name#";
+}
 
-	<cfreturn result>
-</cffunction>
+public struct function expandRelationStruct(
+	required struct Relation,
+	struct field
+) {
+	var sResult = Duplicate(arguments.Relation);
+	var key = "";
+	var sField = {};
+	var sLocalFTables = 0;
+	var sRemoteFTables = 0;
+	var isFtableInUse = false;
 
-<cffunction name="DMDuplicate" access="private" returntype="any" output="no">
-	<cfargument name="var" type="any" required="yes">
+	if ( StructKeyExists(arguments,"field") ) {
+		sField = arguments.field;
+	}
 
-	<cfset var result = 0>
-	<cfset var key = "">
+	for ( key in sResult ) {
+		if ( key CONTAINS "_" AND KEY NEQ "CF_Datatype" ) {
+			sResult[ListChangeDelims(key,"-","_")] = sResult[key];
+			StructDelete(sResult,key);
+		}
+	}
 
-	<cfif isStruct(arguments.var)>
-		<cfset result = StructCopy(arguments.var)>
-	<cfelse>
-		<cfset result = arguments.var>
-	</cfif>
-
-	<cfreturn result>
-</cffunction>
-
-<cffunction name="DMPreserveSingleQuotes" access="private" returntype="string" output="false" hint="">
-	<cfargument name="sql" type="any" required="yes">
-
-	<cfreturn PreserveSingleQuotes(arguments.sql)>
-</cffunction>
-
-<cffunction name="escape" access="private" returntype="string" output="no" hint="I return an escaped value for a table or field.">
-	<cfargument name="name" type="string" required="yes">
-	<cfreturn "#arguments.name#">
-</cffunction>
-
-<cffunction name="expandRelationStruct" access="public" returntype="struct" output="no">
-	<cfargument name="Relation" type="struct" required="yes">
-	<cfargument name="field" type="struct" required="no">
-
-	<cfset var sResult = Duplicate(arguments.Relation)>
-	<cfset var key = "">
-	<cfset var sField = StructNew()>
-	<cfset var sLocalFTables = 0>
-	<cfset var sRemoteFTables = 0>
-	<cfset var isFtableInUse = false>
-
-	<cfif StructKeyExists(arguments,"field")>
-		<cfset sField = arguments.field>
-	</cfif>
-
-	<cfloop collection="#sResult#" item="key">
-		<cfif key CONTAINS "_" AND KEY NEQ "CF_Datatype">
-			<cfset sResult[ListChangeDelims(key,"-","_")] = sResult[key]>
-			<cfset StructDelete(sResult,key)>
-		</cfif>
-	</cfloop>
-
-	<cfscript>
 	if ( StructKeyHasLen(sResult,"type") AND sResult["type"] EQ "list" ) {
 		if ( NOT StructKeyHasLen(sResult,"delimiter") ) {
 			sResult["delimiter"] = ",";
@@ -4850,698 +5308,731 @@
 			sResult["join-field-remote"] = sResult["join-field"];
 		}
 	}
-	</cfscript>
 
-	<!--- Checking for invalid combinations --->
-	<cfif StructKeyExists(sResult,"table") AND StructKeyExists(sResult,"join-table")>
-		<cfif Len(sResult.table) AND sResult["table"] EQ sResult["join-table"]>
-			<cfset throwDMError("The table and join-table attributes cannot be the same.","RelationAttributesError")>
-		</cfif>
-	</cfif>
+	// Checking for invalid combinations
+	if ( StructKeyExists(sResult,"table") AND StructKeyExists(sResult,"join-table") ) {
+		if ( Len(sResult.table) AND sResult["table"] EQ sResult["join-table"] ) {
+			throwDMError("The table and join-table attributes cannot be the same.","RelationAttributesError");
+		}
+	}
 
-	<cfif StructKeyExists(sField,"ColumnName")>
-		<cfif StructKeyExists(sResult,"join-field-local") AND sField["ColumnName"] EQ sResult["join-field-local"]>
-			<cfset throwDMError("A field cannot refer to itself in a relation.","RelationAttributesError","#sField.ColumnName#")>
-		</cfif>
-		<cfif StructKeyExists(sResult,"local-table-join-field") AND sField["ColumnName"] EQ sResult["local-table-join-field"]>
-			<cfset throwDMError("A field cannot refer to itself in a relation.","RelationAttributesError","#sField.ColumnName#")>
-		</cfif>
-	</cfif>
+	if ( StructKeyExists(sField,"ColumnName") ) {
+		if ( StructKeyExists(sResult,"join-field-local") AND sField["ColumnName"] EQ sResult["join-field-local"] ) {
+			throwDMError("A field cannot refer to itself in a relation.","RelationAttributesError","#sField.ColumnName#");
+		}
+		if ( StructKeyExists(sResult,"local-table-join-field") AND sField["ColumnName"] EQ sResult["local-table-join-field"] ) {
+			throwDMError("A field cannot refer to itself in a relation.","RelationAttributesError","#sField.ColumnName#");
+		}
+	}
 
-	<cfreturn sResult>
-</cffunction>
+	return sResult;
+}
 
-<cffunction name="fillOutJoinTableRelations" access="private" returntype="void" output="no">
-	<cfargument name="tablename" type="string" required="yes">
+private void function fillOutJoinTableRelations(required string tablename) {
+	var bCheckTable = checkTable(arguments.tablename);
+	var relates = variables.tables[arguments.tablename];
+	var ii = 0;
+	var sFillOut = 0;
 
-	<cfset var bCheckTable = checkTable(arguments.tablename)>
-	<cfset var relates = variables.tables[arguments.tablename]>
-	<cfset var ii = 0>
-	<cfset var sFillOut = 0>
+	if ( NOT StructKeyExists(variables.tableprops[arguments.tablename], "fillOutJoinTableRelations") ) {
+		for ( ii = 1; ii <= ArrayLen(relates); ii++ ) {
+			if ( StructKeyExists(relates[ii], "Relation") ) {
+				if ( StructKeyExists(relates[ii].Relation, "table") AND StructKeyExists(relates[ii].Relation, "join-table") ) {
+					checkTable(relates[ii].Relation["table"]);
+					checkTable(relates[ii].Relation["join-table"]);
+					sFillOut = {};
+					if ( NOT (StructKeyExists(relates[ii].Relation, "join-table-field-local") AND Len(relates[ii].Relation["join-table-field-local"])) ) {
+						sFillOut["join-table-field-local"] = getPrimaryKeyFieldName(arguments.tablename);
+					}
+					if ( NOT (StructKeyExists(relates[ii].Relation, "join-table-field-remote") AND Len(relates[ii].Relation["join-table-field-remote"])) ) {
+						sFillOut["join-table-field-remote"] = getPrimaryKeyFieldName(relates[ii].Relation["table"]);
+					}
+					if ( NOT (StructKeyExists(relates[ii].Relation, "local-table-join-field") AND Len(relates[ii].Relation["local-table-join-field"])) ) {
+						sFillOut["local-table-join-field"] = getPrimaryKeyFieldName(arguments.tablename);
+					}
+					if ( NOT (StructKeyExists(relates[ii].Relation, "remote-table-join-field") AND Len(relates[ii].Relation["remote-table-join-field"])) ) {
+						sFillOut["remote-table-join-field"] = getPrimaryKeyFieldName(relates[ii].Relation["table"]);
+					}
+					StructAppend(variables.tables[arguments.tablename][ii].Relation, sFillOut);
+				}
+			}
+		}
+		variables.tableprops[arguments.tablename]["fillOutJoinTableRelations"] = true;
+	}
+}
 
-	<cfif NOT ( StructKeyExists(variables.tableprops[arguments.tablename],"fillOutJoinTableRelations") )>
-		<cfloop index="ii" from="1" to="#ArrayLen(relates)#" step="1">
-			<cfif StructKeyExists(relates[ii],"Relation")>
-				<cfif
-						StructKeyExists(relates[ii].Relation,"table")
-					AND	StructKeyExists(relates[ii].Relation,"join-table")
-				>
-					<cfset checkTable(relates[ii].Relation["table"])>
-					<cfset checkTable(relates[ii].Relation["join-table"])>
-					<cfset sFillOut = {}>
-					<cfif NOT ( StructKeyExists(relates[ii].Relation,"join-table-field-local") AND Len(relates[ii].Relation["join-table-field-local"]) )>
-						<cfset sFillOut["join-table-field-local"] = getPrimaryKeyFieldName(arguments.tablename)>
-					</cfif>
-					<cfif NOT ( StructKeyExists(relates[ii].Relation,"join-table-field-remote") AND Len(relates[ii].Relation["join-table-field-remote"]) )>
-						<cfset sFillOut["join-table-field-remote"] = getPrimaryKeyFieldName(relates[ii].Relation["table"])>
-					</cfif>
-					<cfif NOT ( StructKeyExists(relates[ii].Relation,"local-table-join-field") AND Len(relates[ii].Relation["local-table-join-field"]) )>
-						<cfset sFillOut["local-table-join-field"] = getPrimaryKeyFieldName(arguments.tablename)>
-					</cfif>
-					<cfif NOT ( StructKeyExists(relates[ii].Relation,"remote-table-join-field") AND Len(relates[ii].Relation["remote-table-join-field"]) )>
-						<cfset sFillOut["remote-table-join-field"] = getPrimaryKeyFieldName(relates[ii].Relation["table"])>
-					</cfif>
-					<cfset StructAppend(variables.tables[arguments.tablename][ii].Relation,sFillOut)>
-				</cfif>
-			</cfif>
-		</cfloop>
-		<cfset variables.tableprops[arguments.tablename]["fillOutJoinTableRelations"] = true>
-	</cfif>
+private numeric function getColumnIndex(
+	required string tablename,
+	required string columnname
+) {
+	var bTable = checkTable(arguments.tablename);
+	var aTable = 0;
+	var ii = 0;
+	var result = 0;
 
-</cffunction>
+	aTable = variables.tables[arguments.tablename];
 
-<cffunction name="getColumnIndex" access="private" returntype="numeric" output="false" hint="">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="columnname" type="string" required="yes">
+	for ( ii = 1; ii <= ArrayLen(aTable); ii++ ) {
+		if ( aTable[ii].ColumnName EQ arguments.columnname ) {
+			result = ii;
+			break;
+		}
+	}
 
-	<cfset var bTable = checkTable(arguments.tablename)>
-	<cfset var aTable = 0>
-	<cfset var ii = 0>
-	<cfset var result = 0>
+	return result;
+}
 
-	<cfset aTable = variables.tables[arguments.tablename]>
-
-	<cfloop index="ii" from="1" to="#ArrayLen(aTable)#" step="1">
-		<cfif aTable[ii].ColumnName EQ arguments.columnname>
-			<cfset result = ii>
-			<cfbreak>
-		</cfif>
-	</cfloop>
-
-	<cfreturn result>
-</cffunction>
-
-<cffunction name="getConnection" access="private" returntype="any" output="false" hint="Returns a java.sql.Connection (taken from Transfer with permission).">
-	<cfscript>
+/**
+* Returns a java.sql.Connection (taken from Transfer with permission).
+*/
+private any function getConnection() {
 	var datasourceService = createObject("Java", "coldfusion.server.ServiceFactory").getDataSourceService();
 
-	if( StructKeyExists(variables,"username") AND StructKeyExists(variables,"password") ) {
+	if ( StructKeyExists(variables,"username") AND StructKeyExists(variables,"password") ) {
 		return datasourceService.getDatasource(variables.datasource).getConnection(variables.username, variables.password);
 	} else {
 		return datasourceService.getDatasource(variables.datasource).getConnection();
 	}
-	</cfscript>
-</cffunction>
+}
 
-<cffunction name="getDataStruct" access="private" returntype="struct" output="no" hint="I return a struct from a data string or struct for a table.">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="any" required="yes">
+/**
+* I return a struct from a data string or struct for a table.
+*/
+private struct function getDataStruct(
+	required string tablename,
+	required any data
+) {
+	var result = 0;
+	var pkfields = 0;
 
-	<cfset var result = 0>
-	<cfset var pkfields = 0>
+	if ( isStruct(arguments.data) ) {
+		result = StructCopy(arguments);
+	} else if ( isSimpleValue(arguments.data) ) {
+		pkfields = getPKFields(arguments.tablename);
+		if ( ArrayLen(pkfields) EQ 1 ) {
+			result = {};
+			result[pkfields[1].ColumnName] = arguments.data;
+		}
+	}
 
-	<cfif isStruct(arguments.data)>
-		<cfset result = StructCopy(arguments)>
-	<cfelseif isSimpleValue(arguments.data)>
-		<cfset pkfields = getPKFields(arguments.tablename)>
-		<cfif ArrayLen(pkfields) EQ 1>
-			<cfset result = StructNew()>
-			<cfset result[pkfields[1].ColumnName] = arguments.data>
-		</cfif>
-	</cfif>
+	if ( isStruct(result) ) {
+		result = clean(result);
+	} else {
+		throwDMError("The data argument must be a structure or must be a a primary key value for a table with a simple primary key.", "InvalidDataArgument");
+	}
 
-	<cfif isStruct(result)>
-		<cfset result = clean(result)>
-	<cfelse>
-		<cfset throwDMError("The data argument must be a structure or must be a a primary key value for a table with a simple primary key.","InvalidDataArgument")>
-	</cfif>
+	return result;
+}
 
-	<cfreturn result>
-</cffunction>
+/**
+* I get the generic ColdFusion data type for the given field.
+*/
+private string function getEffectiveDataType(
+	required string tablename,
+	required string fieldname
+) {
+	var sField = 0;
+	var result = "invalid";
 
-<cffunction name="getEffectiveDataType" access="private" returntype="string" output="no" hint="I get the generic ColdFusion data type for the given field.">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="fieldname" type="string" required="yes">
+	if ( isNumeric(arguments.fieldname) ) {
+		result = "numeric";
+	} else {
+		try {
+			sField = getField(arguments.tablename, arguments.fieldname);
+			result = getEffectiveFieldDataType(sField);
+		} catch ( any e ) {
+		}
+	}
 
-	<cfset var sField = 0>
-	<cfset var result = "invalid">
+	return result;
+}
 
-	<cfif isNumeric(arguments.fieldname)>
-		<cfset result="numeric">
-	<cfelse>
-		<cftry>
-			<cfset sField = getField(arguments.tablename,arguments.fieldname)>
-			<cfset result = getEffectiveFieldDataType(sField)>
-		<cfcatch>
-		</cfcatch>
-		</cftry>
-	</cfif>
+/**
+* I get the generic ColdFusion data type for the given field.
+*/
+private string function getEffectiveFieldDataType(
+	required struct field
+) {
+	var sField = arguments.field;
+	var result = "invalid";
 
-	<cfreturn result>
-</cffunction>
+	if ( StructKeyExists(sField, "Relation") AND StructKeyExists(sField.Relation, "type") ) {
+		switch ( sField.Relation.type ) {
+			case "label":
+				result = getEffectiveDataType(sField.Relation.table, sField.Relation.field);
+				break;
+			case "concat":
+				result = "string";
+				break;
+			case "list":
+				if ( arguments.isInWhere ) {
+					result = getEffectiveDataType(sField.Relation.table, sField.Relation.field);
+				} else {
+					result = "invalid";
+				}
+				break;
+			case "avg,count,max,min,sum":
+				result = "numeric";
+				break;
+			case "has":
+				result = "boolean";
+				break;
+			case "math":
+				result = "numeric";//Unless I figure out datediff 
+				break;
+			case "now":
+				result = "date";
+				break;
+			case "custom":
+				if ( StructKeyExists(sField.Relation, "CF_Datatype") ) {
+					result = getGenericType(sField.Relation.CF_Datatype);
+				} else {
+					result = "invalid";
+				}
+				break;
+		}
+	} else if ( StructKeyExists(sField, "CF_Datatype") ) {
+		result = getGenericType(sField.CF_Datatype);
+	}
 
-<cffunction name="getEffectiveFieldDataType" access="private" returntype="string" output="no" hint="I get the generic ColdFusion data type for the given field.">
-	<cfargument name="field" type="struct" required="yes">
-	<cfargument name="isInWhere" type="boolean" default="false">
+	return result;
+}
 
-	<cfset var sField = arguments.field>
-	<cfset var result = "invalid">
+/**
+* I get the generic ColdFusion data type for the given field.
+*/
+private string function getGenericType(
+	required string CF_Datatype
+) {
+	var result = "invalid";
 
-	<cfif StructKeyExists(sField,"Relation") AND StructKeyExists(sField.Relation,"type")>
-		<cfswitch expression="#sField.Relation.type#">
-		<cfcase value="label">
-			<cfset result = getEffectiveDataType(sField.Relation.table,sField.Relation.field)>
-		</cfcase>
-		<cfcase value="concat">
-			<cfset result = "string">
-		</cfcase>
-		<cfcase value="list">
-			<cfif isInWhere>
-				<cfset result = getEffectiveDataType(sField.Relation.table,sField.Relation.field)>
-			<cfelse>
-				<cfset result = "invalid">
-			</cfif>
-		</cfcase>
-		<cfcase value="avg,count,max,min,sum">
-			<cfset result = "numeric">
-		</cfcase>
-		<cfcase value="has">
-			<cfset result = "boolean">
-		</cfcase>
-		<cfcase value="math">
-			<cfset result = "numeric"><!--- Unless I figure out datediff --->
-		</cfcase>
-		<cfcase value="now">
-			<cfset result = "date">
-		</cfcase>
-		<cfcase value="custom">
-			<cfif StructKeyExists(sField.Relation,"CF_Datatype")>
-				<cfset result = getGenericType(sField.Relation.CF_Datatype)>
-			<cfelse>
-				<cfset result = "invalid">
-			</cfif>
-		</cfcase>
-		</cfswitch>
-	<cfelseif StructKeyExists(sField,"CF_Datatype")>
-		<cfset result = getGenericType(sField.CF_Datatype)>
-	</cfif>
+	switch ( arguments.CF_Datatype ) {
+		case "CF_SQL_BIGINT":
+		case "CF_SQL_DECIMAL":
+		case "CF_SQL_DOUBLE":
+		case "CF_SQL_FLOAT":
+		case "CF_SQL_INTEGER":
+		case "CF_SQL_MONEY":
+		case "CF_SQL_MONEY4":
+		case "CF_SQL_NUMERIC":
+		case "CF_SQL_REAL":
+		case "CF_SQL_SMALLINT":
+		case "CF_SQL_TINYINT":
+			result = "numeric";
+			break;
+		case "CF_SQL_BIT":
+			result = "boolean";
+			break;
+		case "CF_SQL_BLOB":
+			result = "binary";
+			break;
+		case "CF_SQL_CHAR":
+		case "CF_SQL_IDSTAMP":
+		case "CF_SQL_VARCHAR":
+			result = "string";
+			break;
+		case "CF_SQL_DATE":
+			result = "date";
+			break;
+		case "CF_SQL_DATETIME":
+		case "CF_SQL_TIMESTAMP":
+			result = "datetime";
+			break;
+		case "CF_SQL_LONGVARCHAR":
+		case "CF_SQL_CLOB":
+			result = "invalid";
+			break;
+	}
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="getGenericType" access="private" returntype="string" output="no" hint="I get the generic ColdFusion data type for the given field.">
-	<cfargument name="CF_Datatype" type="string" required="true">
+/**
+* I get field of the given name.
+*/
+public struct function getField(
+	required string tablename,
+	required string fieldname
+) {
+	var ii = 0;
+	var result = "";
 
-	<cfset var result = "invalid">
+	try {
+		checkTable(arguments.tablename);
+	} catch ( any e ) {
+		throwDMError("The #arguments.tablename# table does not exist.", "NoSuchTable");
+	}
 
-	<cfswitch expression="#arguments.CF_Datatype#">
-	<cfcase value="CF_SQL_BIGINT,CF_SQL_DECIMAL,CF_SQL_DOUBLE,CF_SQL_FLOAT,CF_SQL_INTEGER,CF_SQL_MONEY,CF_SQL_MONEY4,CF_SQL_NUMERIC,CF_SQL_REAL,CF_SQL_SMALLINT,CF_SQL_TINYINT">
-		<cfset result = "numeric">
-	</cfcase>
-	<cfcase value="CF_SQL_BIT">
-		<cfset result = "boolean">
-	</cfcase>
-	<cfcase value="CF_SQL_BLOB">
-		<cfset result = "binary">
-	</cfcase>
-	<cfcase value="CF_SQL_CHAR,CF_SQL_IDSTAMP,CF_SQL_VARCHAR">
-		<cfset result = "string">
-	</cfcase>
-	<cfcase value="CF_SQL_DATE">
-		<cfset result = "date">
-	</cfcase>
-	<cfcase value="CF_SQL_DATETIME,CF_SQL_TIMESTAMP">
-		<cfset result = "datetime">
-	</cfcase>
-	<cfcase value="CF_SQL_LONGVARCHAR,CF_SQL_CLOB">
-		<cfset result = "invalid">
-	</cfcase>
-	</cfswitch>
+	// Loop over the fields in the table and make a list of them
+	if ( StructKeyExists(variables.tables, arguments.tablename) ) {
+		for ( ii = 1; ii <= ArrayLen(variables.tables[arguments.tablename]); ii++ ) {
+			if ( variables.tables[arguments.tablename][ii].ColumnName EQ arguments.fieldname ) {
+				result = Duplicate(variables.tables[arguments.tablename][ii]);
+				result["tablename"] = arguments.tablename;
+				result["fieldname"] = arguments.fieldname;
+				break;
+			}
+		}
+		if ( NOT isStruct(result) ) {
+			throwDMError("The field '#arguments.fieldname#' could not be found in the #arguments.tablename# table.", "NoSuchField");
+		}
+	} else {
+		throwDMError("The #arguments.tablename# table does not exist.", "NoSuchTable");
+	}
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="getField" access="public" returntype="struct" output="no" hint="I the field of the given name.">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="fieldname" type="string" required="yes">
+/**
+* I get the value of the identity field that was just inserted into the given table.
+*/
+private string function getInsertedIdentity(
+	required string tablename,
+	required string identfield
+) {
+	var qCheckKey = 0;
+	var result = 0;
+	var sqlarray = ArrayNew(1);
 
-	<cfset var ii = 0>
-	<cfset var result = "">
+	ArrayAppend(sqlarray, "SELECT Max(#escape(identfield)#) AS NewID");
+	ArrayAppend(sqlarray, "FROM #escape(arguments.tablename)#");
+	qCheckKey = runSQLArray(sqlarray);
 
-	<cftry>
-		<cfset checkTable(arguments.tablename)>
-	<cfcatch>
-		<cfset throwDMError("The #arguments.tablename# table does not exist.","NoSuchTable")>
-	</cfcatch>
-	</cftry>
+	result = Val(qCheckKey.NewID);
 
-	<!--- Loop over the fields in the table and make a list of them --->
-	<cfif StructKeyExists(variables.tables,arguments.tablename)>
-		<cfloop index="ii" from="1" to="#ArrayLen(variables.tables[arguments.tablename])#" step="1">
-			<cfif variables.tables[arguments.tablename][ii].ColumnName EQ arguments.fieldname>
-				<cfset result = Duplicate(variables.tables[arguments.tablename][ii])>
-				<cfset result["tablename"] = arguments.tablename>
-				<cfset result["fieldname"] = arguments.fieldname>
-				<cfbreak>
-			</cfif>
-		</cfloop>
-		<cfif NOT isStruct(result)>
-			<cfset throwDMError("The field '#arguments.fieldname#' could not be found in the #arguments.tablename# table.","NoSuchField")>
-		</cfif>
-	<cfelse>
-		<cfset throwDMError("The #arguments.tablename# table does not exist.","NoSuchTable")>
-	</cfif>
+	return result;
+}
 
-	<cfreturn result>
-</cffunction>
+private array function getOrderByArray(
+	required string tablename,
+	required string orderby,
+	string tablealias=arguments.tablename
+) {
+	var bTable = checkTable(arguments.tablename);
+	var aResults = [];
+	var aFields = getFields(arguments.tablename);
+	var ii = 0;
+	var OrderClause = "";
+	var SortOrder = "";
+	var isFieldFound = false;
 
-<cffunction name="getInsertedIdentity" access="private" returntype="string" output="no" hint="I get the value of the identity field that was just inserted into the given table.">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="identfield" type="string" required="yes">
+	for ( OrderClause in ListToArray(arguments.orderby) ) {
+		isFieldFound = false;
 
-	<cfset var qCheckKey = 0>
-	<cfset var result = 0>
-	<cfset var sqlarray = ArrayNew(1)>
+		// Determine sort order
+		if ( ListLast(OrderClause, " ") EQ "DESC" ) {
+			SortOrder = "DESC";
+		} else {
+			SortOrder = "ASC";
+		}
 
-	<cfset ArrayAppend(sqlarray,"SELECT		Max(#escape(identfield)#) AS NewID")>
-	<cfset ArrayAppend(sqlarray,"FROM		#escape(arguments.tablename)#")>
-	<cfset qCheckKey = runSQLArray(sqlarray)>
+		// Peel off sort order
+		if ( ListFindNoCase("ASC,DESC",ListLast(OrderClause," ")) ) {
+			OrderClause = reverse(ListRest(reverse(OrderClause), " "));
+		}
 
-	<cfset result = Val(qCheckKey.NewID)>
+		for ( ii = 1; ii <= ArrayLen(aFields); ii++ ) {
+			if ( aFields[ii].ColumnName EQ OrderClause OR aFields[ii].ColumnName EQ Trim(OrderClause) ) {
+				ArrayAppend(aResults,getFieldSelectSQL(tablename=arguments.tablename,field=aFields[ii].ColumnName,tablealias=arguments.tablealias));
+				ArrayAppend(aResults,SortOrder);
+				ArrayAppend(aResults,",");
+				isFieldFound = true;
+				break;
+			}
+		}
 
-	<cfreturn result>
-</cffunction>
+		// If a field was found, no more work to do
+		if ( NOT isFieldFound ) {
+			// Security measure, a semicolon indicates the start of a new SQL statement (this is after the field search so that a field name could contain one)
+			if ( OrderClause CONTAINS ";" ) {
+				break;
+			}
+			ArrayAppend(aResults,OrderClause);
+			ArrayAppend(aResults,SortOrder);
+			ArrayAppend(aResults,",");
+		}
+	}
 
-<cffunction name="getOrderByArray" access="private" returntype="array" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="orderby" type="string" required="yes">
-	<cfargument name="tablealias" type="string" default="#arguments.tablename#">
+	// Ditch trailing comma
+	if ( ArrayLen(aResults) AND aResults[ArrayLen(aResults)] EQ "," ) {
+		ArrayDeleteAt(aResults,ArrayLen(aResults));
+	}
 
-	<cfset var bTable = checkTable(arguments.tablename)>
-	<cfset var aResults = ArrayNew(1)>
-	<cfset var aFields = getFields(arguments.tablename)>
-	<cfset var ii = 0>
-	<cfset var OrderClause = "">
-	<cfset var SortOrder = "">
-	<cfset var aOrderClause = 0>
-	<cfset var isFieldFound = false>
+	return aResults;
+}
 
-	<cfloop list="#arguments.orderby#" index="OrderClause">
-		<cfset isFieldFound = false>
+private array function getOrderbyFieldList() {
+	var orderarray = [];
+	var temp = "";
+	var fields = getFieldList(tablename=arguments.tablename);
+	var sql = "";
+	var sqlkeys = "";
+	var sqlkey = "";
+	var count = 0;
 
-		<!--- Determine sort order --->
-		<cfif ListLast(OrderClause," ") EQ "DESC">
-			<cfset SortOrder = "DESC">
-		<cfelse>
-			<cfset SortOrder = "ASC">
-		</cfif>
-		<!--- Peel off sort order --->
-		<cfif ListFindNoCase("ASC,DESC",ListLast(OrderClause," "))>
-			<cfset OrderClause = reverse(ListRest(reverse(OrderClause)," "))>
-		</cfif>
-		<cfloop index="ii" from="1" to="#ArrayLen(aFields)#" step="1">
-			<cfif aFields[ii].ColumnName EQ OrderClause OR aFields[ii].ColumnName EQ Trim(OrderClause)>
-				<cfset ArrayAppend(aResults,getFieldSelectSQL(tablename=arguments.tablename,field=aFields[ii].ColumnName,tablealias=arguments.tablealias))>
-				<cfset ArrayAppend(aResults,SortOrder)>
-				<cfset ArrayAppend(aResults,",")>
-				<cfset isFieldFound = true>
-				<cfbreak>
-				<!--- HERE --->
-			</cfif>
-		</cfloop>
-		<!--- If a field was found, no more work to do --->
-		<cfif NOT isFieldFound>
-			<!--- Security measure, a semicolon indicates the start of a new SQL statement (this is after the field search so that a field name could contain one) --->
-			<cfif OrderClause CONTAINS ";">
-				<cfbreak>
-			</cfif>
-			<cfset ArrayAppend(aResults,OrderClause)>
-			<cfset ArrayAppend(aResults,SortOrder)>
-			<cfset ArrayAppend(aResults,",")>
-		</cfif>
-	</cfloop>
+	if ( Len(arguments.fieldlist) ) {
+		for ( temp in ListToArray(arguments.fieldlist) ) {
+			if ( ListFindNoCase(fields, temp) ) {
+				count++;
+				if (count <= 3) {
+					sql = getFieldSelectSQL(tablename=arguments.tablename, field=temp, tablealias=arguments.tablealias, useFieldAlias=false);
+					sqlkey = Hash(readableSQL(sql));
+					if ( NOT ListFindNoCase(sqlkeys, sqlkey) ) {
+						if ( ArrayLen(orderarray) > 0 ) {
+							ArrayAppend(orderarray, ",");
+						}
+						ArrayAppend(orderarray, sql);
+						sqlkeys = ListAppend(sqlkeys, sqlkey);
+					} else {
+						count--;
+					}
+				}
+			}
+		}
+	}
 
-	<!--- Ditch trailing comma --->
-	<cfif ArrayLen(aResults) AND aResults[ArrayLen(aResults)] EQ ",">
-		<cfset ArrayDeleteAt(aResults,ArrayLen(aResults))>
-	</cfif>
+	return orderarray;
+}
 
-	<cfreturn aResults>
-</cffunction>
+private struct function getProps() {
+	var sProps = {};
 
-<cffunction name="getOrderbyFieldList" access="private" returntype="array" output="no">
+	sProps["areSubqueriesSortable"] = true;
+	StructAppend(sProps, getDatabaseProperties(), true);
 
-	<cfset var orderarray = ArrayNew(1)>
-	<cfset var temp = "">
-	<cfset var fields = getFieldList(tablename=arguments.tablename)>
-	<cfset var sql = 0>
-	<cfset var sqlkeys = "">
-	<cfset var sqlkey = "">
-	<cfset var count = 0>
+	return sProps;
+}
 
-	<cfif Len(arguments.fieldlist)>
-		<cfloop list="#arguments.fieldlist#" index="temp">
-			<cfif ListFindNoCase(fields,temp)>
-				<cfset count = count + 1>
-				<cfif count LTE 3>
-					<cfset sql = getFieldSelectSQL(tablename=arguments.tablename,field=temp,tablealias=arguments.tablealias,useFieldAlias=false)>
-					<cfset sqlkey = Hash(readableSQL(sql))>
-					<cfif NOT ListFindNoCase(sqlkeys,sqlkey)>
-						<cfif ArrayLen(orderarray) GT 0>
-							<cfset ArrayAppend(orderarray,",")>
-						</cfif>
-						<cfset ArrayAppend(orderarray,sql)>
-						<cfset sqlkeys = ListAppend(sqlkeys,sqlkey)>
-					<cfelse>
-						<cfset count = count - 1>
-					</cfif>
-				</cfif>
-			</cfif>
-		</cfloop>
-	</cfif>
+private struct function getRelationValues(
+	required string tablename,
+	required struct data
+) {
+	var sData = DMDuplicate(arguments.data);
+	var rfields = getRelationFields(arguments.tablename); // relation fields in table
+	var dbfields = getDBFieldList(arguments.tablename);
+	var i = 0;
+	var qRecords = 0;
+	var temp = 0;
+	var temp2 = 0;
+	var j = 0;
 
-	<cfreturn orderarray>
-</cffunction>
+	// Check for incoming label values
+	for ( i = 1; i <= ArrayLen(rfields); i++ ) {
+		// Perform action for labels where join-field isn't already being given a value
+		if ( StructKeyExists(sData, rfields[i].ColumnName) AND NOT ListFindNoCase(dbfields, rfields[i].ColumnName) ) {
+			// If this is a label and the associated value isn't already set and valid
+			if ( rfields[i].Relation.type EQ "label" AND NOT useField(sData, getField(arguments.tablename, rfields[i].Relation["join-field-local"])) ) {
+				// Get the value for the relation field
+				temp = {};
+				temp[rfields[i].Relation["field"]] = sData[rfields[i].ColumnName];
+				qRecords = getRecords(tablename=rfields[i].Relation["table"],data=temp,maxrows=1,fieldlist=rfields[i].Relation["join-field-remote"]);
+				// If a record is found, set the value
+				if ( qRecords.RecordCount ) {
+					sData[rfields[i].Relation["join-field-local"]] = qRecords[rfields[i].Relation["join-field-remote"]][1];
+				} 
+				// If no record is found, but an "onMissing" att is, take appropriate action
+				else if ( StructKeyExists(rfields[i].Relation, "onMissing") ) {
+					switch (rfields[i].Relation.onMissing) {
+						case "insert":
+							temp2 = insertRecord(rfields[i].Relation["table"], temp);
+							qRecords = getRecords(tablename=rfields[i].Relation["table"],data=temp,maxrows=1,fieldlist=rfields[i].Relation["join-field-remote"]);
+							sData[rfields[i].Relation["join-field-local"]] = qRecords[rfields[i].Relation["join-field-remote"]][1];
+							break;
+						case "error":
+							throwDMError("""#sData[rfields[i].ColumnName]#"" is not a valid value for ""#rfields[i].ColumnName#""", "InvalidLabelValue");
+							break;
+					}
+				}
+				// ditch this column name from in struct (no longer needed)
+				StructDelete(sData, rfields[i].ColumnName);
+			} 
+			else if ( rfields[i].Relation.type EQ "concat" AND StructKeyExists(rfields[i].Relation, "delimiter") AND StructKeyExists(rfields[i].Relation, "fields") AND Len(sData[rfields[i].ColumnName]) ) {
+				if ( ListLen(rfields[i].Relation["fields"]) EQ ListLen(sData[rfields[i].ColumnName], rfields[i].Relation["delimiter"]) ) {
+					// Make sure none of the component fields are being passed in.
+					temp2 = true;
+					for (temp in ListToArray(rfields[i].Relation.fields)) {
+						if ( StructKeyExists(sData, temp) ) {
+							temp2 = false;
+						}
+					}
+					// If none of the fields are being passed in already, set fields based on concat
+					if ( temp2 ) {
+						for ( j = 1; j <= ListLen(rfields[i].Relation.fields); j++ ) {
+							temp = ListGetAt(rfields[i].Relation.fields, j);
+							sData[temp] = ListGetAt(sData[rfields[i].ColumnName], j, rfields[i].Relation["delimiter"]);
+						}
+					}
+				} else {
+					throwDMError("The number of items in #rfields[i].ColumnName# don't match the number of fields.", "ConcatListLenMisMatch");
+				}
+			}
+		}
+	}
 
-<cffunction name="getProps" access="private" returntype="struct" output="no" hint="no">
+	return sData;
+}
 
-	<cfset var sProps = StructNew()>
+private query function getPreSeedRecords(required string tablename) {
+	return getRecords(tablename=arguments.tablename,function="count",FunctionAlias="NumRecords");
+}
 
-	<cfset sProps["areSubqueriesSortable"] = true>
+/**
+* I return an array of relation fields.
+*/
+public array function getRelationFields(required string tablename) {
+	var i = 0; // counter
+	var arrFields = []; // array of primarykey fields
+	var bTable = checkTable(arguments.tablename); // Check whether table is loaded
+	var novar = fillOutJoinTableRelations(arguments.tablename);
+	var relates = variables.tables[arguments.tablename];
+	var mathoperators = "+,-,*,/";
+	var sRelationTypes = getRelationTypes();
+	var key = "";
+	var fieldatts = "field,field1,field2,fields";
+	var dtype = "";
+	var sThisRelation = 0;
+	var field = "";
 
-	<cfset StructAppend(sProps,getDatabaseProperties(),true)>
+	if ( StructKeyExists(variables.tableprops, arguments.tablename) AND StructKeyExists(variables.tableprops[arguments.tablename], "relatefields") ) {
+		arrFields = variables.tableprops[arguments.tablename]["relatefields"];
+	} else {
+		for ( i=1; i <= ArrayLen(relates); i++ ) {
+			if ( StructKeyExists(relates[i], "Relation") ) {
+				sThisRelation = expandRelationStruct(relates[i].Relation, relates[i]);
+				// Make sure relation type exists
+				if ( StructKeyExists(sThisRelation, "type") ) {
+					// Make sure all needed attributes exist
+					if ( StructKeyExists(sRelationTypes, sThisRelation.type) ) {
+						for ( key in ListToArray(sRelationTypes[sThisRelation.type].atts_req) ) {
+							if ( NOT StructKeyExists(sThisRelation, key) AND NOT (key CONTAINS "join-field" AND (StructKeyExists(sThisRelation, "join-field") OR StructKeyExists(sThisRelation, "join-table"))) ) {
+								throwDMError("There is a problem with the #relates[i].ColumnName# field in the #arguments.tablename# table: The #key# attribute is required for a relation type of #sThisRelation.type#.", "RelationTypeMissingAtt");
+							}
+						}
+					}
+					// Check data types
+					for ( key in ListToArray(fieldatts) ) {
+						if ( StructKeyExists(sThisRelation, key) ) {
+							for ( field in ListToArray(sThisRelation[key]) ) {
+								if ( StructKeyExists(sThisRelation, "table") ) {
+									dtype = getEffectiveDataType(sThisRelation.table, field);
+								} else {
+									dtype = getEffectiveDataType(arguments.tablename, field);
+								}
+								if ( dtype == "invalid" OR (Len(sRelationTypes[sThisRelation.type].gentypes) AND !ListFindNoCase(sRelationTypes[sThisRelation.type].gentypes, dtype)) ) {
+									throwDMError("There is a problem with the #relates[i].ColumnName# field in the #arguments.tablename# table: #dtype# fields (#field#) cannot be used with a relation type of #sThisRelation.type#.", "InvalidRelationGenericType");
+								}
+							}
+						}
+					}
+				} else {
+					throwDMError("There is a problem with the #relates[i].ColumnName# field in the #arguments.tablename# table has no relation type.", "NoSuchRelationType");
+				}
+				ArrayAppend(arrFields, relates[i]);
+			}
+		}
+		variables.tableprops[arguments.tablename]["relatefields"] = arrFields;
+	}
 
-	<cfreturn sProps>
-</cffunction>
+	for ( i=1; i <= ArrayLen(arrFields); i++ ) {
+		arrFields[i].Relation = expandRelationStruct(arrFields[i].Relation, arrFields[i]);
+	}
 
-<cffunction name="getRelationValues" access="private" returntype="struct" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" required="yes">
+	return arrFields;
+}
 
-	<cfset var in = DMDuplicate(arguments.data)>
-	<cfset var rfields = getRelationFields(arguments.tablename)><!--- relation fields in table --->
-	<cfset var dbfields = getDBFieldList(arguments.tablename)>
-	<cfset var i = 0>
-	<cfset var qRecords = 0>
-	<cfset var temp = 0>
-	<cfset var temp2 = 0>
-	<cfset var j = 0>
+/**
+* I see if the given field is passed in as blank and is a nullable field.
+*/
+private boolean function isBlankValue(
+	required struct Struct,
+	required struct Field
+) {
+	var Key = arguments.Field.ColumnName;
+	var result = false;
 
-	<!--- Check for incoming label values --->
-	<cfloop index="i" from="1" to="#ArrayLen(rfields)#" step="1">
-		<!--- Perform action for labels where join-field isn't already being given a value --->
-		<cfif StructKeyExists(in,rfields[i].ColumnName) AND NOT ListFindNoCase(dbfields,rfields[i].ColumnName)>
-			<!--- If this is a label and the associated value isn't already set and valid --->
-			<cfif
-					rfields[i].Relation.type EQ "label"
-				AND	NOT useField(in,getField(arguments.tablename,rfields[i].Relation["join-field-local"]))
-			>
-				<!--- Get the value for the relation field --->
-				<cfset temp = StructNew()>
-				<cfset temp[rfields[i].Relation["field"]] = in[rfields[i].ColumnName]>
-				<cfset qRecords = getRecords(tablename=rfields[i].Relation["table"],data=temp,maxrows=1,fieldlist=rfields[i].Relation["join-field-remote"])>
-				<!--- If a record is found, set the value --->
-				<cfif qRecords.RecordCount>
-					<cfset in[rfields[i].Relation["join-field-local"]] = qRecords[rfields[i].Relation["join-field-remote"]][1]>
-				<!--- If no record is found, but an "onMissing" att is, take appropriate action --->
-				<cfelseif StructKeyExists(rfields[i].Relation,"onMissing")>
-					<cfswitch expression="#rfields[i].Relation.onMissing#">
-					<cfcase value="insert">
-						<cfset temp2 = insertRecord(rfields[i].Relation["table"],temp)>
-						<cfset qRecords = getRecords(tablename=rfields[i].Relation["table"],data=temp,maxrows=1,fieldlist=rfields[i].Relation["join-field-remote"])>
-						<cfset in[rfields[i].Relation["join-field-local"]] = qRecords[rfields[i].Relation["join-field-remote"]][1]>
-					</cfcase>
-					<cfcase value="error">
-						<cfset throwDMError("""#in[rfields[i].ColumnName]#"" is not a valid value for ""#rfields[i].ColumnName#""","InvalidLabelValue")>
-					</cfcase>
-					</cfswitch>
-				</cfif>
-				<!--- ditch this column name from in struct (no longer needed) --->
-				<cfset StructDelete(in,rfields[i].ColumnName)>
-			<cfelseif
-					rfields[i].Relation.type EQ "concat"
-				AND	StructKeyExists(rfields[i].Relation,"delimiter")
-				AND	StructKeyExists(rfields[i].Relation,"fields")
-				AND	Len(in[rfields[i].ColumnName])
-			>
-				<cfif ListLen(rfields[i].Relation["fields"]) EQ ListLen(in[rfields[i].ColumnName],rfields[i].Relation["delimiter"])>
-					<!--- Make sure none of the component fields are being passed in. --->
-					<cfset temp2 = true>
-					<cfloop index="temp" list="#rfields[i].Relation.fields#">
-						<cfif StructKeyExists(in, temp)>
-							<cfset temp2 = false>
-						</cfif>
-					</cfloop>
-					<!--- If none of the fields are being passed in already, set fields based on concat --->
-					<cfif temp2>
-						<cfloop index="j" from="1" to="#ListLen(rfields[i].Relation.fields)#" step="1">
-							<cfset temp = ListGetAt(rfields[i].Relation.fields,j)>
-							<cfset in[temp] = ListGetAt(in[rfields[i].ColumnName],j,rfields[i].Relation["delimiter"])>
-						</cfloop>
-					</cfif>
-				<cfelse>
-					<cfset throwDMError("The number of items in #rfields[i].ColumnName# don't match the number of fields.","ConcatListLenMisMatch")>
-				</cfif>
-			</cfif>
-		</cfif>
-	</cfloop>
-
-	<cfreturn in>
-</cffunction>
-
-<cffunction name="getPreSeedRecords" access="private" returntype="query" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-
-	<cfreturn getRecords(tablename=arguments.tablename,function="count",FunctionAlias="NumRecords")>
-</cffunction>
-
-<cffunction name="getRelationFields" access="public" returntype="array" output="no" hint="I return an array of relation fields.">
-	<cfargument name="tablename" type="string" required="yes">
-
-	<cfset var i = 0><!--- counter --->
-	<cfset var arrFields = ArrayNew(1)><!--- array of primarykey fields --->
-	<cfset var bTable = checkTable(arguments.tablename)><!--- Check whether table is loaded --->
-	<cfset var novar = fillOutJoinTableRelations(arguments.tablename)>
-	<cfset var relates = variables.tables[arguments.tablename]>
-	<cfset var mathoperators = "+,-,*,/">
-	<cfset var sRelationTypes = getRelationTypes()>
-	<cfset var key = "">
-	<cfset var fieldatts = "field,field1,field2,fields">
-	<cfset var dtype = "">
-	<cfset var sThisRelation = 0>
-	<cfset var field = "">
-
-	<cfif StructKeyExists(variables.tableprops,arguments.tablename) AND StructKeyExists(variables.tableprops[arguments.tablename],"relatefields")>
-		<cfset arrFields = variables.tableprops[arguments.tablename]["relatefields"]>
-	<cfelse>
-		<cfloop index="i" from="1" to="#ArrayLen(relates)#" step="1">
-			<cfif StructKeyExists(relates[i],"Relation")>
-				<cfset sThisRelation = expandRelationStruct(relates[i].Relation,relates[i])>
-				<!--- Make sure relation type exists --->
-				<cfif StructKeyExists(sThisRelation,"type")>
-					<!--- Make sure all needed attributes exist --->
-					<cfif StructKeyExists(sRelationTypes,sThisRelation.type)>
-						<cfloop list="#sRelationTypes[sThisRelation.type].atts_req#" index="key">
-							<cfif NOT StructKeyExists(sThisRelation,key) AND NOT ( key CONTAINS "join-field" AND ( StructKeyExists(sThisRelation,"join-field") OR StructKeyExists(sThisRelation,"join-table") ) )>
-								<cfset throwDMError("There is a problem with the #relates[i].ColumnName# field in the #arguments.tablename# table: The #key# attribute is required for a relation type of #sThisRelation.type#.","RelationTypeMissingAtt")>
-							</cfif>
-						</cfloop>
-					</cfif>
-					<!--- Check data types --->
-					<cfloop list="#fieldatts#" index="key">
-						<cfif StructKeyExists(sThisRelation,key)>
-							<cfloop list="#sThisRelation[key]#" index="field">
-								<cfif StructKeyExists(sThisRelation,"table")>
-									<cfset dtype = getEffectiveDataType(sThisRelation.table,field)>
-								<cfelse>
-									<cfset dtype = getEffectiveDataType(arguments.tablename,field)>
-								</cfif>
-								<cfif dtype EQ "invalid" OR ( Len(sRelationTypes[sThisRelation.type].gentypes) AND NOT ListFindNoCase(sRelationTypes[sThisRelation.type].gentypes,dtype) )>
-									<cfset throwDMError("There is a problem with the #relates[i].ColumnName# field in the #arguments.tablename# table: #dtype# fields (#field#) cannot be used with a relation type of #sThisRelation.type#.","InvalidRelationGenericType")>
-								</cfif>
-							</cfloop>
-						</cfif>
-					</cfloop>
-				<cfelse>
-					<cfset throwDMError("There is a problem with the #relates[i].ColumnName# field in the #arguments.tablename# table has no relation type.","NoSuchRelationType")>
-				</cfif>
-				<cfset ArrayAppend(arrFields, relates[i])>
-			</cfif>
-		</cfloop>
-		<cfset variables.tableprops[arguments.tablename]["relatefields"] = arrFields>
-	</cfif>
-
-	<cfloop index="i" from="1" to="#ArrayLen(arrFields)#">
-		<cfset arrFields[i].Relation = expandRelationStruct(arrFields[i].Relation,arrFields[i])>
-	</cfloop>
-
-	<cfreturn arrFields>
-</cffunction>
-
-<cffunction name="isBlankValue" access="private" returntype="boolean" output="no" hint="I see if the given field is passed in as blank and is a nullable field.">
-	<cfargument name="Struct" type="struct" required="yes">
-	<cfargument name="Field" type="struct" required="yes">
-
-	<cfset var Key = arguments.Field.ColumnName>
-	<cfset var result = false>
-
-	<cfif
+	if (
 			StructKeyExists(arguments.Struct,Key)
 		AND	NOT Len(arguments.Struct[Key])
-	>
-		<cfset result = true>
-	</cfif>
+	) {
+		result = true;
+	}
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="isIdentityField" access="private" returntype="boolean" output="no">
-	<cfargument name="Field" type="struct" required="yes">
+private boolean function isIdentityField(required struct Field) {
+	var result = false;
 
-	<cfset var result = false>
+	if ( StructKeyExists(Field, "Increment") AND Field.Increment ) {
+		result = true;
+	}
 
-	<cfif StructKeyExists(Field,"Increment") AND Field.Increment>
-		<cfset result = true>
-	</cfif>
+	return result;
+}
 
-	<cfreturn result>
-</cffunction>
+private function getTypeOfCFType(required string CF_DataType) {
+	var result = "";
 
-<cffunction name="getTypeOfCFType" access="private" returntype="any" output="false" hint="">
-	<cfargument name="CF_DataType" type="string" required="yes">
+	switch (arguments.CF_DataType) {
+		case "CF_SQL_BIT":
+			result = "boolean";
+			break;
+		case "CF_SQL_BLOB":
+			result = "binary";
+			break;
+		case "CF_SQL_DECIMAL":
+		case "CF_SQL_DOUBLE":
+		case "CF_SQL_FLOAT":
+		case "CF_SQL_NUMERIC":
+			result = "numeric";
+			break;
+		case "CF_SQL_BIGINT":
+		case "CF_SQL_INTEGER":
+		case "CF_SQL_SMALLINT":
+		case "CF_SQL_TINYINT":
+			result = "integer";
+			break;
+		case "CF_SQL_DATE":
+		case "CF_SQL_DATETIME":
+			result = "date";
+			break;
+		default:
+			result = arguments.CF_DataType;
+			break;
+	}
 
-	<cfset var result = "">
+	return result;
+}
 
-	<cfswitch expression="#arguments.CF_DataType#">
-	<cfcase value="CF_SQL_BIT">
-		<cfset result = "boolean">
-	</cfcase>
-	<cfcase value="CF_SQL_BLOB">
-		<cfset result = "binary">
-	</cfcase>
-	<cfcase value="CF_SQL_DECIMAL,CF_SQL_DOUBLE,CF_SQL_FLOAT,CF_SQL_NUMERIC">
-		<cfset result = "numeric">
-	</cfcase>
-	<cfcase value="CF_SQL_BIGINT,CF_SQL_INTEGER,CF_SQL_SMALLINT,CF_SQL_TINYINT">
-		<cfset result = "integer">
-	</cfcase>
-	<cfcase value="CF_SQL_DATE,CF_SQL_DATETIME">
-		<cfset result = "date">
-	</cfcase>
-	<cfdefaultcase>
-		<cfset result = arguments.CF_DataType>
-	</cfdefaultcase>
-	</cfswitch>
+/**
+* I check if the given value is of the given data type.
+*/
+private boolean function isOfCFType(
+	required any value,
+	required string CF_DataType
+) {
+	return isOfType(arguments.value, getTypeOfCFType(arguments.CF_DataType));
+}
 
-	<cfreturn result>
-</cffunction>
+/**
+* I check if the given value is of the given data type.
+*/
+public boolean function isOfType(
+	required any value,
+	required string type
+) {
+	var datum = arguments.value;
+	var isOK = false;
 
-<cffunction name="isOfCFType" access="public" returntype="boolean" output="no" hint="I check if the given value is of the given data type.">
-	<cfargument name="value" type="any" required="yes">
-	<cfargument name="CF_DataType" type="string" required="yes">
+	if ( isStruct(datum) AND StructKeyExists(datum,"value") ) {
+		datum = datum.value;
+	}
 
-	<cfreturn isOfType(arguments.value,getTypeOfCFType(arguments.CF_DataType))>
-</cffunction>
+	switch (arguments.type) {
+		case "boolean":
+			isOK = isBoolean(datum);
+			break;
+		case "numeric":
+		case "number":
+			isOK = isNumeric(datum) OR isBoolean(datum);
+			break;
+		case "integer":
+			isOK = (isNumeric(datum) OR isBoolean(datum)) AND ( datum EQ Int(datum) ) AND datum LTE 2147483647;
+			break;
+		case "date":
+			isOK = isValidDate(datum);
+			break;
+		default:
+			isOK = true;
+			break;
+	}
 
-<cffunction name="isOfType" access="public" returntype="boolean" output="no" hint="I check if the given value is of the given data type.">
-	<cfargument name="value" type="any" required="yes">
-	<cfargument name="type" type="string" required="yes">
+	return isOK;
+}
 
-	<cfset var datum = arguments.value>
-	<cfset var isOK = false>
+/**
+* I return the value of the default for the given datatype and raw value.
+*/
+private string function makeDefaultValue(
+	required string value,
+	required string CF_DataType
+) {
+	var result = Trim(arguments.value);
+	var type = getDBDataType(arguments.CF_DataType);
+	var isFunction = true;
 
-	<cfif isStruct(datum) AND StructKeyExists(datum,"value")>
-		<cfset datum = datum.value>
-	</cfif>
-
-	<cfswitch expression="#Arguments.type#">
-	<cfcase value="boolean">
-		<cfset isOK = isBoolean(datum)>
-	</cfcase>
-	<cfcase value="numeric,number">
-		<cfset isOK = isNumeric(datum) OR isBoolean(datum)>
-	</cfcase>
-	<cfcase value="integer">
-		<cfset isOK = (isNumeric(datum) OR isBoolean(datum)) AND ( datum EQ Int(datum) ) AND datum LTE 2147483647>
-	</cfcase>
-	<cfcase value="date">
-		<cfset isOK = isValidDate(datum)>
-	</cfcase>
-	<cfdefaultcase>
-		<cfset isOK = true>
-	</cfdefaultcase>
-	</cfswitch>
-
-	<cfreturn isOK>
-</cffunction>
-
-<cffunction name="makeDefaultValue" access="private" returntype="string" output="no" hint="I return the value of the default for the given datatype and raw value.">
-	<cfargument name="value" type="string" required="yes">
-	<cfargument name="CF_DataType" type="string" required="yes">
-
-	<cfset var result = Trim(arguments.value)>
-	<cfset var type = getDBDataType(arguments.CF_DataType)>
-	<cfset var isFunction = true>
-
-	<!--- If default isn't a string and is in parens, remove it from parens --->
-	<cfscript>
+	// If default isn't a string and is in parens, remove it from parens
 	while ( Left(result,1) EQ "(" AND Right(result,1) EQ ")" ) {
 		result = Mid(result,2,Len(result)-2);
 	}
-	</cfscript>
 
-	<!--- If default is in single quotes, remove it from single quotes --->
-	<cfif Left(result,1) EQ "'" AND Right(result,1) EQ "'">
-		<cfset result = Mid(result,2,Len(result)-2)>
-		<cfset isFunction = false><!--- Functions aren't in single quotes --->
-	</cfif>
+	// If default is in single quotes, remove it from single quotes
+	if ( Left(result,1) EQ "'" AND Right(result,1) EQ "'" ) {
+		result = Mid(result,2,Len(result)-2);
+		isFunction = false;// Functions aren't in single quotes
+	}
 
-	<!--- Functions must have an opening paren and end with a closing paren --->
-	<cfif isFunction AND NOT (FindNoCase("(", result) AND Right(result,1) EQ ")")>
-		<cfset isFunction = false>
-	</cfif>
-	<!--- Functions don't start with a paren --->
-	<cfif isFunction AND Left(result,1) EQ "(">
-		<cfset isFunction = false>
-	</cfif>
+	// Functions must have an opening paren and end with a closing paren
+	if ( isFunction AND NOT (FindNoCase("(", result) AND Right(result,1) EQ ")") ) {
+		isFunction = false;
+	}
+	// Functions don't start with a paren
+	if ( isFunction AND Left(result,1) EQ "(" ) {
+		isFunction = false;
+	}
 
-	<!--- boolean values should be stored as one or zero --->
-	<cfif arguments.CF_DataType EQ "CF_SQL_BIT">
-		<cfset result = getBooleanSqlValue(result)>
-	</cfif>
+	// boolean values should be stored as one or zero
+	if ( arguments.CF_DataType EQ "CF_SQL_BIT" ) {
+		result = getBooleanSqlValue(result);
+	}
 
-	<!--- string values that aren't functions, should be in single quotes. --->
-	<cfif isStringType(type) AND NOT isFunction>
-		<cfset result = ReplaceNoCase(result, "'", "''", "ALL")>
-		<cfset result = "'#result#'">
-	</cfif>
+	// string values that aren't functions, should be in single quotes.
+	if ( isStringType(type) AND NOT isFunction ) {
+		result = ReplaceNoCase(result, "'", "''", "ALL");
+		result = "'#result#'";
+	}
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="readyTable" access="private" returntype="void" output="no" hint="I get the internal table representation ready for use by DataMgr.">
-	<cfargument name="tablename" type="string" required="yes">
+/**
+*I get the internal table representation ready for use by DataMgr.
+*/
+private void function readyTable(
+	required string tablename
+) {
+	checkTable();
 
-	<cfset checkTable()>
+	if ( NOT ( StructKeyExists(variables.tableprops, arguments.tablename) AND StructCount(variables.tableprops[arguments.tablename]) ) ) {
+		getFieldList(arguments.tablename);
+		getPKFields(arguments.tablename);
+		getUpdateableFields(arguments.tablename);
+		getRelationFields();
+		makeFieldSQLs();
+	}
+}
 
-	<cfif NOT ( StructKeyExists(variables.tableprops,arguments.tablename) AND StructCount(variables.tableprops[arguments.tablename]) )>
-		<cfset getFieldList(arguments.tablename)>
-		<cfset getPKFields(arguments.tablename)>
-		<cfset getUpdateableFields(arguments.tablename)>
-		<cfset getRelationFields()>
-		<cfset makeFieldSQLs()>
-	</cfif>
-</cffunction>
+/**
+* I get the internal table representation ready for use by DataMgr.
+*/
+public struct function getTableProps(
+	string tablename
+) {
+	if ( StructKeyExists(arguments,"tablename") ) {
+		return variables.tableprops[arguments.tablename];
+	} else {
+		return variables.tableprops;
+	}
+}
 
-<cffunction name="getTableProps" access="public" returntype="struct" output="no" hint="I get the internal table representation ready for use by DataMgr.">
-	<cfargument name="tablename" type="string" required="no">
+/**
+* I indicate if the current database natively supports offsets.
+*/
+public boolean function dbHasOffset() {
+	return false;
+}
 
-	<cfif StructKeyExists(arguments,"tablename")>
-		<cfreturn variables.tableprops[arguments.tablename]>
-	<cfelse>
-		<cfreturn variables.tableprops>
-	</cfif>
-
-</cffunction>
-
-<cffunction name="dbHasOffset" access="public" returntype="boolean" output="no" hint="I indicate if the current database natively supports offsets">
-	<cfreturn false>
-</cffunction>
-
-<cffunction name="resetTableProps" access="private" returntype="void" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-
-	<cfscript>
+private void function resetTableProps(required string tablename) {
 	var keys = "fielddefaults,fieldlist,fieldlengths,fields,pkfields,updatefields,fillOutJoinTableRelations,relatefields";
 	var key = "";
 
@@ -5551,19 +6042,16 @@
 	if ( NOT StructKeyExists(variables.tableprops[arguments.tablename],"filters") ) {
 		variables.tableprops[arguments.tablename]["filters"] = StructNew();
 	}
-	</cfscript>
 
-	<cfloop list="#keys#" index="key">
-		<cfset StructDelete(variables.tableprops[arguments.tablename],key)>
-	</cfloop>
+	for ( key in ListToArray(keys) ) {
+		StructDelete(variables.tableprops[arguments.tablename],key);
+	}
+}
 
-</cffunction>
-
-<cffunction name="setTableProps" access="private" returntype="void" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="props" type="struct" required="yes">
-
-	<cfscript>
+private void function setTableProps(
+	required string tablename,
+	required struct props
+) {
 	var keys = "fielddefaults,fieldlist,fieldlengths,fields,pkfields,updatefields,fillOutJoinTableRelations,relatefields";
 	var key = "";
 
@@ -5572,103 +6060,108 @@
 			variables.tableprops[arguments.tablename][key] = arguments.props[key];
 		}
 	}
-	</cfscript>
+}
 
-</cffunction>
+/**
+* @tablename The table on which to update data.
+* @data A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+* @pkfield The primary key field for the record.
+* @pkval The primary key for the record.
+*/
+private void function saveRelations(
+	required string tablename,
+	required struct data,
+	required struct pkfield,
+	required string pkval
+) {
+	var relates = getRelationFields(arguments.tablename);
+	var i = 0;
+	var sData = DMDuplicate(arguments.data);
+	var rtablePKeys = 0;
+	var temp = "";
+	var value = "";
+	var list = "";
+	var fieldPK = "";
+	var fieldMulti = "";
+	var reverse = false;
+	var qRecords = 0;
+	var qRecord = 0;
 
-<cffunction name="saveRelations" access="private" returntype="void" output="no">
-	<cfargument name="tablename" type="string" required="yes" hint="The table on which to update data.">
-	<cfargument name="data" type="struct" required="yes" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="pkfield" type="struct" required="yes" hint="The primary key field for the record.">
-	<cfargument name="pkval" type="string" required="yes" hint="The primary key for the record.">
-
-	<cfset var relates = getRelationFields(arguments.tablename)>
-	<cfset var i = 0>
-	<cfset var in = DMDuplicate(arguments.data)>
-	<cfset var rtablePKeys = 0>
-	<cfset var temp = "">
-	<cfset var val = "">
-	<cfset var list = "">
-	<cfset var fieldPK = "">
-	<cfset var fieldMulti = "">
-	<cfset var reverse = false>
-	<cfset var qRecords = 0>
-	<cfset var qRecord = 0>
-
-	<cfif ArrayLen(relates) AND Len(arguments.pkval)>
-		<cfloop index="i" from="1" to="#ArrayLen(relates)#" step="1">
-			<!--- Make sure all needed attributes exist --->
-			<cfif
-					StructKeyExists(in,relates[i].ColumnName)
+	if ( ArrayLen(relates) AND Len(arguments.pkval) ) {
+		for ( i=1; i LTE ArrayLen(relates); i++ ) {
+			// Make sure all needed attributes exist
+			if (
+					StructKeyExists(sData,relates[i].ColumnName)
 				AND	relates[i].Relation["type"] EQ "list"
 				AND	StructKeyExists(relates[i].Relation,"join-table")
-			>
-				<cfset rtablePKeys = getPKFields(relates[i].Relation["table"])>
-				<cfif NOT ArrayLen(rtablePKeys)>
-					<cfset rtablePKeys = getUpdateableFields(relates[i].Relation["table"])>
-				</cfif>
+			) {
+				rtablePKeys = getPKFields(relates[i].Relation["table"]);
+				if ( NOT ArrayLen(rtablePKeys) ) {
+					rtablePKeys = getUpdateableFields(relates[i].Relation["table"]);
+				}
 
-				<!--- Get correct value for local table value --->
-				<cfif Len(relates[i].Relation["local-table-join-field"])>
-					<cfset fieldPK = relates[i].Relation["local-table-join-field"]>
-					<cfif relates[i].Relation["local-table-join-field"] NEQ getPrimaryKeyFieldName(arguments.tablename)>
-						<cfset temp = StructNew()>
-						<cfset temp[getPrimaryKeyFieldName(arguments.tablename)] = arguments.pkval>
-						<cfset qRecord = getRecords(tablename=arguments.tablename,data=temp,fieldlist=fieldPK)>
-						<cfset arguments.pkval = qRecord[fieldPK][1]>
-					</cfif>
-					<cfif Len(relates[i].Relation["join-table-field-local"])>
-						<cfset fieldPK = relates[i].Relation["join-table-field-local"]>
-					</cfif>
-				</cfif>
+				// Get correct value for local table value
+				if ( Len(relates[i].Relation["local-table-join-field"]) ) {
+					fieldPK = relates[i].Relation["local-table-join-field"];
+					if ( relates[i].Relation["local-table-join-field"] NEQ getPrimaryKeyFieldName(arguments.tablename) ) {
+						temp = StructNew();
+						temp[getPrimaryKeyFieldName(arguments.tablename)] = arguments.pkval;
+						qRecord = getRecords(tablename=arguments.tablename,data=temp,fieldlist=fieldPK);
+						arguments.pkval = qRecord[fieldPK][1];
+					}
+					if ( Len(relates[i].Relation["join-table-field-local"]) ) {
+						fieldPK = relates[i].Relation["join-table-field-local"];
+					}
+				}
 
-				<!--- Set field for join-table that points to local table --->
-				<cfif Len(relates[i].Relation["join-table-field-local"])>
-					<cfset fieldPK = relates[i].Relation["join-table-field-local"]>
-				<cfelse>
-					<cfset fieldPK = getPrimaryKeyFieldName(arguments.tablename)>
-				</cfif>
+				// Set field for join-table that points to local table
+				if ( Len(relates[i].Relation["join-table-field-local"]) ) {
+					fieldPK = relates[i].Relation["join-table-field-local"];
+				} else {
+					fieldPK = getPrimaryKeyFieldName(arguments.tablename);
+				}
 
-				<!--- Set field for join-table that points to remote table --->
-				<cfif Len(relates[i].Relation["join-table-field-remote"])>
-					<cfset fieldMulti = relates[i].Relation["join-table-field-remote"]>
-				<cfelse>
-					<cfset fieldMulti = getPrimaryKeyFieldName(relates[i].Relation["table"])>
-				</cfif>
+				// Set field for join-table that points to remote table
+				if ( Len(relates[i].Relation["join-table-field-remote"]) ) {
+					fieldMulti = relates[i].Relation["join-table-field-remote"];
+				} else {
+					fieldMulti = getPrimaryKeyFieldName(relates[i].Relation["table"]);
+				}
 
-				<cfif
+				if (
 						arguments.tablename EQ relates[i].Relation["table"]
 					AND	StructKeyExists(relates[i].Relation,"bidirectional")
 					AND	isBoolean(relates[i].Relation["bidirectional"])
 					AND	relates[i].Relation["bidirectional"]
-				>
-					<cfset reverse = true>
-				<cfelse>
-					<cfset reverse = false>
-				</cfif>
+				) {
+					reverse = true;
+				} else {
+					reverse = false;
+				}
 
-				<!--- If relate column is pk, use saveRelationList normally --->
-				<cfif relates[i].Relation["field"] EQ rtablePKeys[1].ColumnName>
-					<!--- Save this relation list --->
-					<cfset saveRelationList(relates[i].Relation["join-table"],fieldPK,arguments.pkval,fieldMulti,in[relates[i].ColumnName],reverse)>
-				<cfelse>
-					<cfset list = "">
-					<!--- Otherwise, get the values --->
-					<cfloop index="val" list="#in[relates[i].ColumnName]#">
-						<cfset temp = StructNew()>
-						<cfset temp[relates[i].Relation["field"]] = Trim(val)>
-						<cfset qRecords = getRecords(tablename=relates[i].Relation["table"],data=temp,fieldlist=rtablePKeys[1].ColumnName)>
-						<cfif qRecords.RecordCount>
-							<cfset list = ListAppend(list,qRecords[rtablePKeys[1].ColumnName][1])>
-						</cfif>
-					</cfloop>
-					<cfset saveRelationList(relates[i].Relation["join-table"],fieldPK,arguments.pkval,fieldMulti,list,reverse)>
-				</cfif>
-			</cfif>
-		</cfloop>
-	</cfif>
+				// If relate column is pk, use saveRelationList normally
+				if ( relates[i].Relation["field"] EQ rtablePKeys[1].ColumnName ) {
+					// Save this relation list
+					saveRelationList(relates[i].Relation["join-table"],fieldPK,arguments.pkval,fieldMulti,sData[relates[i].ColumnName],reverse);
+				} else {
+					list = "";
+					// Otherwise, get the values
+					for ( value in ListToArray(sData[relates[i].ColumnName]) ) {
+						temp = StructNew();
+						temp[relates[i].Relation["field"]] = Trim(value);
+						qRecords = getRecords(tablename=relates[i].Relation["table"],data=temp,fieldlist=rtablePKeys[1].ColumnName);
+						if ( qRecords.RecordCount ) {
+							list = ListAppend(list,qRecords[rtablePKeys[1].ColumnName][1]);
+						}
+					}
+					saveRelationList(relates[i].Relation["join-table"],fieldPK,arguments.pkval,fieldMulti,list,reverse);
+				}
+			}
+		}
+	}
 
-</cffunction>
+}
+</cfscript>
 
 <cffunction name="seedConstraint" access="private" returntype="void" output="no">
 	<cfargument name="tablename" type="string" required="true">
@@ -5716,10 +6209,13 @@
 
 </cffunction>
 
-<cffunction name="seedConstraints" access="private" returntype="void" output="no">
-	<cfargument name="xmldata" type="any" required="yes" hint="XML data of tables to load into DataMgr follows. Schema: http://www.bryantwebconsulting.com/cfc/DataMgr.xsd">
-
-	<cfscript>
+<cfscript>
+/**
+* @xmldata XML data of tables to load into DataMgr follows. Schema: http://www.bryantwebconsulting.com/cfc/DataMgr.xsd
+*/
+private void function seedConstraints(
+	required any xmldata
+) {
 	var varXML = arguments.xmldata;
 	var aForeignFields = XmlSearch(varXML, "//field[@ftable][@ColumnName]");//Get all real fields that reference other tables
 	var ii = 0;
@@ -5779,42 +6275,42 @@
 			}
 		}
 	}
-	</cfscript>
+}
 
-</cffunction>
+/**
+* @xmldata XML data of tables to load into DataMgr follows. Schema: http://www.bryantwebconsulting.com/cfc/DataMgr.xsd
+*/
+private void function seedData(
+	required any xmldata,
+	required string CreatedTables
+) {
+	var varXML = arguments.xmldata;
+	var arrData = XmlSearch(varXML, "//data");
+	var stcData = StructNew();
+	var tables = "";
 
-<cffunction name="seedData" access="private" returntype="void" output="no">
-	<cfargument name="xmldata" type="any" required="yes" hint="XML data of tables to load into DataMgr follows. Schema: http://www.bryantwebconsulting.com/cfc/DataMgr.xsd">
-	<cfargument name="CreatedTables" type="string" required="yes">
+	var i = 0;
+	var table = "";
+	var j = 0;
+	var rowElement = 0;
+	var rowdata = 0;
+	var att = "";
+	var k = 0;
+	var fieldElement = 0;
+	var fieldatts = 0;
+	var reldata = 0;
+	var m = 0;
+	var relfieldElement = 0;
 
-	<cfset var varXML = arguments.xmldata>
-	<cfset var arrData = XmlSearch(varXML, "//data")>
-	<cfset var stcData = StructNew()>
-	<cfset var tables = "">
+	var data = 0;
+	var col = "";
+	var qRecord = 0;
+	var qRecords = 0;
+	var checkFields = "";
+	var onexists = "";
+	var doSeed = false;
 
-	<cfset var i = 0>
-	<cfset var table = "">
-	<cfset var j = 0>
-	<cfset var rowElement = 0>
-	<cfset var rowdata = 0>
-	<cfset var att = "">
-	<cfset var k = 0>
-	<cfset var fieldElement = 0>
-	<cfset var fieldatts = 0>
-	<cfset var reldata = 0>
-	<cfset var m = 0>
-	<cfset var relfieldElement = 0>
-
-	<cfset var data = 0>
-	<cfset var col = "">
-	<cfset var qRecord = 0>
-	<cfset var qRecords = 0>
-	<cfset var checkFields = "">
-	<cfset var onexists = "">
-	<cfset var doSeed = false>
-
-	<cfif ArrayLen(arrData)>
-		<cfscript>
+	if ( ArrayLen(arrData) ) {
 		//  Loop through data elements
 		for ( i=1; i LTE ArrayLen(arrData); i=i+1 ) {
 			//  Get table name
@@ -5967,42 +6463,42 @@
 			}
 			// /Loop through tables
 		}
-		</cfscript>
-	</cfif>
+	}
+}
 
-</cffunction>
+/**
+* @xmldata XML data of tables to load into DataMgr follows. Schema: http://www.bryantwebconsulting.com/cfc/DataMgr.xsd
+*/
+private void function seedData_BAK(
+	required any xmldata,
+	required string CreatedTables
+) {
+	var varXML = arguments.xmldata;
+	var arrData = XmlSearch(varXML, "//data");
+	var stcData = StructNew();
+	var tables = "";
 
-<cffunction name="seedData_BAK" access="private" returntype="void" output="no">
-	<cfargument name="xmldata" type="any" required="yes" hint="XML data of tables to load into DataMgr follows. Schema: http://www.bryantwebconsulting.com/cfc/DataMgr.xsd">
-	<cfargument name="CreatedTables" type="string" required="yes">
+	var i = 0;
+	var table = "";
+	var j = 0;
+	var rowElement = 0;
+	var rowdata = 0;
+	var att = "";
+	var k = 0;
+	var fieldElement = 0;
+	var fieldatts = 0;
+	var reldata = 0;
+	var m = 0;
+	var relfieldElement = 0;
 
-	<cfset var varXML = arguments.xmldata>
-	<cfset var arrData = XmlSearch(varXML, "//data")>
-	<cfset var stcData = StructNew()>
-	<cfset var tables = "">
+	var data = 0;
+	var col = "";
+	var qRecord = 0;
+	var qRecords = 0;
+	var checkFields = "";
+	var onexists = "";
 
-	<cfset var i = 0>
-	<cfset var table = "">
-	<cfset var j = 0>
-	<cfset var rowElement = 0>
-	<cfset var rowdata = 0>
-	<cfset var att = "">
-	<cfset var k = 0>
-	<cfset var fieldElement = 0>
-	<cfset var fieldatts = 0>
-	<cfset var reldata = 0>
-	<cfset var m = 0>
-	<cfset var relfieldElement = 0>
-
-	<cfset var data = 0>
-	<cfset var col = "">
-	<cfset var qRecord = 0>
-	<cfset var qRecords = 0>
-	<cfset var checkFields = "">
-	<cfset var onexists = "">
-
-	<cfif ArrayLen(arrData)>
-		<cfscript>
+	if ( ArrayLen(arrData) ) {
 		//  Loop through data elements
 		for ( i=1; i LTE ArrayLen(arrData); i=i+1 ) {
 			//  Get table name
@@ -6139,38 +6635,37 @@
 			}
 			// /Loop through tables
 		}
-		</cfscript>
-	</cfif>
+	}
+}
 
-</cffunction>
+private void function seedIndex(
+	required string indexname,
+	required string tablename,
+	required string fields,
+	required boolean unique=false,
+	required boolean clustered=false
+) {
+	var UniqueSQL = "";
+	var ClusteredSQL = "";
 
-<cffunction name="seedIndex" access="private" returntype="void" output="no">
-	<cfargument name="indexname" type="string" required="yes">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="fields" type="string" required="yes">
-	<cfargument name="unique" type="boolean" default="false">
-	<cfargument name="clustered" type="boolean" default="false">
+	if ( unique ) {
+		UniqueSQL = " unique";
+	}
+	if ( clustered ) {
+		ClusteredSQL = " CLUSTERED";
+	}
 
-	<cfset var UniqueSQL = "">
-	<cfset var ClusteredSQL = "">
+	if ( NOT hasIndex(arguments.tablename,arguments.indexname) ) {
+		runSQL("CREATE#UniqueSQL##ClusteredSQL# INDEX #escape(arguments.indexname)# ON #escape(arguments.tablename)# (#arguments.fields#)");
+	}
+}
 
-	<cfif arguments.unique>
-		<cfset UniqueSQL = " unique">
-	</cfif>
-	<cfif arguments.clustered>
-		<cfset ClusteredSQL = " CLUSTERED">
-	</cfif>
-
-	<cfif NOT hasIndex(arguments.tablename,arguments.indexname)>
-		<cfset runSQL("CREATE#UniqueSQL##ClusteredSQL# INDEX #escape(arguments.indexname)# ON #escape(arguments.tablename)# (#arguments.fields#)")>
-	</cfif>
-
-</cffunction>
-
-<cffunction name="seedIndexes" access="private" returntype="void" output="no">
-	<cfargument name="xmldata" type="any" required="yes" hint="XML data of tables to load into DataMgr follows. Schema: http://www.bryantwebconsulting.com/cfc/DataMgr.xsd">
-
-	<cfscript>
+/**
+* @xmldata XML data of tables to load into DataMgr follows. Schema: http://www.bryantwebconsulting.com/cfc/DataMgr.xsd
+*/
+private void function seedIndexes(
+	required any xmldata
+) {
 	var varXML = arguments.xmldata;
 	var aIndexes = XmlSearch(varXML, "//index");
 	var ii = 0;
@@ -6192,220 +6687,238 @@
 			seedIndex(argumentCollection=sIndex);
 		}
 	}
-	</cfscript>
+}
 
-</cffunction>
+public boolean function hasConstraint(
+	required string tablename,
+	required string ftable
+) {
+	return false;
+}
 
-<cffunction name="hasConstraint" access="public" returntype="boolean" output="false" hint="">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="ftable" type="string" required="yes">
+public boolean function hasIndex(
+	required string tablename,
+	required string indexname
+) {
+	return false;
+}
 
-	<cfreturn true>
-</cffunction>
+/**
+* @tablename The table on which to update data.
+* @data A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.
+* @OnExists The action to take if a record with the given values exists. Possible values: insert (inserts another record), error (throws an error), update (updates the matching record), skip (performs no action).
+* @checkFields The fields to check for a matching record.
+*/
+private string function seedRecord(
+	required string tablename,
+	required struct data,
+	required string OnExists="insert",
+	required string checkFields=""
+) {
+	var result = 0;
+	var key = 0;
+	var sArgs = {};
+	var qRecord = 0;
 
-<cffunction name="hasIndex" access="public" returntype="boolean" output="false" hint="">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="indexname" type="string" required="yes">
+	if ( Len(arguments.checkFields) ) {
+		//  Compile data for get
+		for ( key in arguments.data ) {
+			if ( ListFindNoCase(arguments.checkFields,key) ) {
+				sArgs[key] = arguments.data[key];
+			}
+		}
+		qRecord = getRecords(arguments.tablename,sArgs);
+		if ( qRecord.RecordCount ) {
+			if ( arguments.OnExists EQ "update" ) {
+				StructAppend(sArgs,QueryRowToStruct(qRecord),"no");
+				StructAppend(sArgs,arguments.data,"yes");
+				result = updateRecord(arguments.tablename,sArgs);
+			}
+		} else {
+			result = insertRecord(argumentCollection=arguments);
+		}
+	} else {
+		result = insertRecord(argumentCollection=arguments);
+	}
 
-	<cfreturn true>
-</cffunction>
+	return result;
+}
 
-<cffunction name="seedRecord" access="private" returntype="string" output="no">
-	<cfargument name="tablename" type="string" required="yes" hint="The table in which to insert data.">
-	<cfargument name="data" type="struct" required="yes" hint="A structure with the data for the desired record. Each key/value indicates a value for the field matching that key.">
-	<cfargument name="OnExists" type="string" default="insert" hint="The action to take if a record with the given values exists. Possible values: insert (inserts another record), error (throws an error), update (updates the matching record), skip (performs no action).">
-	<cfargument name="checkFields" type="string" default="" hint="The fields to check for a matching record.">
+/**
+* I return a structure for use in runSQLArray (I make a value key in the structure with the appropriate value).
+*/
+private struct function skey(
+	required string name,
+	required string val
+) {
+	var result = {};
 
-	<cfset var result = 0>
-	<cfset var key = 0>
-	<cfset var sArgs = StructNew()>
-	<cfset var qRecord = 0>
+	result[arguments.name] = arguments.val;
 
-	<cfif Len(arguments.checkFields)>
-		<!--- Compile data for get --->
-		<cfloop collection="#arguments.data#" item="key">
-			<cfif ListFindNoCase(arguments.checkFields,key)>
-				<cfset sArgs[key] = arguments.data[key]>
-			</cfif>
-		</cfloop>
-		<cfset qRecord = getRecords(arguments.tablename,sArgs)>
-		<cfif qRecord.RecordCount>
-			<cfif arguments.OnExists EQ "update">
-				<cfset StructAppend(sArgs,QueryRowToStruct(qRecord),"no")>
-				<cfset StructAppend(sArgs,arguments.data,"yes")>
-				<cfset result = updateRecord(arguments.tablename,sArgs)>
-			</cfif>
-		<cfelse>
-			<cfset result = insertRecord(argumentCollection=arguments)>
-		</cfif>
-	<cfelse>
-		<cfset result = insertRecord(argumentCollection=arguments)>
-	</cfif>
+	return result;
+}
 
-	<cfreturn result>
-</cffunction>
+private struct function StructFromArgs() {
+	var sTemp = 0;
+	var sResult = {};
+	var key = "";
 
-<cffunction name="skey" access="private" returntype="struct" output="no" hint="I return a structure for use in runSQLArray (I make a value key in the structure with the appropriate value).">
-	<cfargument name="name" type="string" required="yes">
-	<cfargument name="val" type="string" required="yes">
+	if ( StructCount(arguments) EQ 1 AND isStruct(arguments[1]) ) {
+		sTemp = arguments[1];
+	} else {
+		sTemp = arguments;
+	}
 
-	<cfset var result = StructNew()>
+	//  set all arguments into the return struct
+	for ( key in sTemp ) {
+		if ( StructKeyExists(sTemp,key) ) {
+			sResult[key] = sTemp[key];
+		}
+	}
 
-	<cfset result[arguments.name] = arguments.val>
+	return sResult;
+}
 
-	<cfreturn result>
-</cffunction>
+/**
+* I check to see if the given key of the given structure exists and has a value with any length.
+*/
+private boolean function StructKeyHasLen(
+	required struct Struct,
+	required string Key
+) {
+	var result = false;
 
-<cffunction name="StructFromArgs" access="private" returntype="struct" output="false" hint="">
+	if ( StructKeyExists(arguments.Struct,arguments.Key) AND isSimpleValue(arguments.Struct[arguments.Key]) AND Len(arguments.Struct[arguments.Key]) ) {
+		result = true;
+	}
 
-	<cfset var sTemp = 0>
-	<cfset var sResult = StructNew()>
-	<cfset var key = "">
+	return result;
+}
 
-	<cfif StructCount(arguments) EQ 1 AND isStruct(arguments[1])>
-		<cfset sTemp = arguments[1]>
-	<cfelse>
-		<cfset sTemp = arguments>
-	</cfif>
+/**
+* I return a structure for use in runSQLArray (I make a value key in the structure with the appropriate value).
+*/
+private struct function sval(
+	required struct struct,
+	required any val
+) {
+	var currval = DMDuplicate(arguments.val);
+	var sResult = DMDuplicate(arguments.struct);
 
-	<!--- set all arguments into the return struct --->
-	<cfloop collection="#sTemp#" item="key">
-		<cfif StructKeyExists(sTemp, key)>
-			<cfset sResult[key] = sTemp[key]>
-		</cfif>
-	</cfloop>
+	if ( IsSimpleValue(val) ) {
+		sResult.value = currval;
+	} else if ( IsStruct(currval) AND StructKeyExists(sResult,"ColumnName") AND StructKeyExists(currval,sResult.ColumnName) ) {
+		sResult.value = val[struct.ColumnName];
+	} else if ( IsQuery(currval) AND StructKeyExists(sResult,"ColumnName") AND ListFindNoCase(currval.ColumnList,sResult.ColumnName) ) {
+		sResult.value = currval[sResult.ColumnName][1];
+	} else {
+		throwDMError("Unable to add data to structure for #sResult.ColumnName#");
+	}
 
-	<cfreturn sResult>
-</cffunction>
-
-<cffunction name="StructKeyHasLen" access="private" returntype="boolean" output="no" hint="I check to see if the given key of the given structure exists and has a value with any length.">
-	<cfargument name="Struct" type="struct" required="yes">
-	<cfargument name="Key" type="string" required="yes">
-
-	<cfset var result = false>
-
-	<cfif StructKeyExists(arguments.Struct,arguments.Key) AND isSimpleValue(arguments.Struct[arguments.Key]) AND Len(arguments.Struct[arguments.Key])>
-		<cfset result = true>
-	</cfif>
-
-	<cfreturn result>
-</cffunction>
-
-<cffunction name="sval" access="private" returntype="struct" output="no" hint="I return a structure for use in runSQLArray (I make a value key in the structure with the appropriate value).">
-	<cfargument name="struct" type="struct" required="yes">
-	<cfargument name="val" type="any" required="yes">
-
-	<cfset var currval = DMDuplicate(arguments.val)>
-	<cfset var sResult = DMDuplicate(arguments.struct)>
-
-	<cfif IsSimpleValue(val)>
-		<cfset sResult.value = currval>
-	<cfelseif IsStruct(currval) AND StructKeyExists(sResult,"ColumnName") AND StructKeyExists(currval,sResult.ColumnName)>
-		<cfset sResult.value = val[struct.ColumnName]>
-	<cfelseif IsQuery(currval) AND StructKeyExists(sResult,"ColumnName") AND ListFindNoCase(currval.ColumnList,sResult.ColumnName)>
-		<cfset sResult.value = currval[sResult.ColumnName][1]>
-	<cfelse>
-		<cfset throwDMError("Unable to add data to structure for #sResult.ColumnName#")>
-	</cfif>
-
-	<cfif
+	if (
 			IsBoolean(sResult.value)
 		AND	(
 					( StructKeyExists(sResult,"CF_Datatype") AND sResult.CF_Datatype EQ "CF_SQL_BIT" )
 				OR	( StructKeyExists(sResult,"Relation") AND isStruct(sResult.Relation) AND sResult.Relation.CF_Datatype EQ "CF_SQL_BIT" )
 			)
-	>
-		<cfset sResult.value = getBooleanSqlValue(sResult.value)>
-	</cfif>
+	) {
+		sResult.value = getBooleanSqlValue(sResult.value);
+	}
 
-	<cfreturn sResult>
-</cffunction>
+	return sResult;
+}
 
-<cffunction name="throwDMError" access="private" returntype="void" output="no">
-	<cfargument name="message" type="string" required="yes">
-	<cfargument name="errorcode" type="string" default="">
-	<cfargument name="detail" type="string" default="">
-	<cfargument name="extendedinfo" type="string" default="">
+private void function throwDMError(
+	required string message,
+	required string errorcode="",
+	required string detail="",
+	required string extendedinfo=""
+) {
+	throw(message=message,errorcode=errorcode,detail=detail,type="DataMgr",extendedinfo=extendedinfo);
+}
 
-	<cfthrow message="#arguments.message#" errorcode="#arguments.errorcode#" detail="#arguments.detail#" type="DataMgr" extendedinfo="#arguments.extendedinfo#">
+public void function updateFromOldField(
+	required string tablename,
+	required string NewField,
+	required string OldField
+) {
+	var sql = "";
+	var sData = {};
+	var qRecords = 0;
+	var pklist = "";
+	var key = "";
+	var numTotalRecords = 0;
+	var numEmptyNewField = 0;
 
-</cffunction>
+	if ( NOT (StructKeyExists(arguments, "dbfields") AND Len(arguments.dbfields)) ) {
+		arguments.dbfields = getDBFieldList(arguments.tablename);
+	}
 
-<cffunction name="updateFromOldField" access="private" returntype="void" output="no">
-	<cfargument name="tablename" type="string" required="true">
-	<cfargument name="NewField" type="string" required="true">
-	<cfargument name="OldField" type="string" required="true">
+	if ( NOT (StructKeyExists(arguments, "fields") AND Len(arguments.fields)) ) {
+		arguments.fields = getFieldList(arguments.tablename);
+	}
 
-	<cfset var sql = "">
-	<cfset var sData = 0>
-	<cfset var qRecords = 0>
-	<cfset var pklist = "">
-	<cfset var key = "">
+	if ( ListFindNoCase(arguments.dbfields, arguments.NewField) AND ListFindNoCase(arguments.dbfields, arguments.OldField) ) {
+		sql = "UPDATE " & escape(variables.prefix & arguments.tablename) & " SET " & escape(arguments.NewField) & " = " & escape(arguments.OldField) & " WHERE " & escape(arguments.NewField) & " IS NULL";
+		runSQL(sql);
+	} else if ( ListFindNoCase(arguments.fields, arguments.NewField) AND ListFindNoCase(arguments.fields, arguments.OldField) ) {
+		pklist = getPrimaryKeyFieldNames(arguments.tablename);
+		sData[arguments.NewField] = "";
 
-	<cfif NOT ( StructKeyExists(Arguments,"dbfields") AND Len(Arguments.dbfields) )>
-		<cfset Arguments.dbfields = getDBFieldList(Arguments.tablename)>
-	</cfif>
+		numTotalRecords = numRecords(tablename=arguments.tablename);
+		try {
+			numEmptyNewField = numRecords(tablename=arguments.tablename, data=sData);
+		} catch (any e) {
+			// If the field doesn't exist, numEmptyNewField will be 0.
+			numEmptyNewField = 0;
+		}
+		
 
-	<cfif NOT ( StructKeyExists(Arguments,"fields") AND Len(Arguments.fields) )>
-		<cfset Arguments.fields = getFieldList(Arguments.tablename)>
-	</cfif>
+		// Make sure all records have no value for new field (which is to say, new field doesn't have a value for any record yet ) - Makes function idempotent
+		if ( numTotalRecords EQ numEmptyNewField ) {
+			qRecords = getRecords(tablename=arguments.tablename, data=StructCopy(sData), fieldlist=ListAppend(pklist, arguments.OldField));
 
+			if ( ListFindNoCase(qRecords.ColumnList, arguments.OldField) ) {
+				for ( var i = 1; i <= qRecords.RecordCount; i++ ) {
+					sData = {};
+					for ( key in ListToArray(pklist) ) {
+						sData[key] = qRecords[key][i];
+					}
+					sData[arguments.NewField] = qRecords[arguments.OldField][i];
+					updateRecord(tablename=arguments.tablename, data=StructCopy(sData));
+				}
+			}
+		}
+	}
+}
 
+/**
+* I check to see if the given field should be used in the SQL statement.
+*/
+private boolean function useField(
+	required struct Struct,
+	required struct Field
+) {
+	var result = false;
 
-	<cfif ListFindNoCase(Arguments.dbfields,Arguments.NewField) AND ListFindNoCase(Arguments.dbfields,Arguments.OldField)>
-		<cfsavecontent variable="sql"><cfoutput>
-		UPDATE	#escape(Variables.prefix & Arguments.tablename)#
-		SET		#escape(Arguments.NewField)# = #escape(Arguments.OldField)#
-		WHERE	#escape(Arguments.NewField)# IS NULL
-		</cfoutput></cfsavecontent>
-		<cfset runSQL(sql)>
-	<cfelseif ListFindNoCase(Arguments.fields,Arguments.NewField) AND ListFindNoCase(Arguments.fields,Arguments.OldField)>
-		<cfset pklist = getPrimaryKeyFieldNames(Arguments.tablename)>
-		<cfset sData = StructNew()>
-		<cfset sData[Arguments.NewField] = "">
-
-		<!--- Make sure all records have no value for new field (which is to say, new field doesn't have a value for any record yet ) - Makes function idempotent --->
-		<cfif numRecords(tablename=Arguments.tablename) EQ numRecords(tablename=Arguments.tablename,data=StructCopy(sData))>
-			<cfset qRecords = getRecords(tablename=Arguments.tablename,data=StructCopy(sData),fieldlist=ListAppend(pklist,Arguments.OldField))>
-
-			<cfif ListFindNoCase(qRecords.ColumnList,Arguments.OldField)>
-				<cfoutput query="qRecords">
-					<cfset sData = StructNew()>
-					<cfloop list="#pklist#" index="key">
-						<cfset sData[key] = qRecords[key][CurrentRow]>
-					</cfloop>
-					<cfset sData[Arguments.NewField] = qRecords[Arguments.OldField][CurrentRow]>
-					<cfset updateRecord(tablename=Arguments.tablename,data=StructCopy(sData))>
-				</cfoutput>
-			</cfif>
-		</cfif>
-	</cfif>
-
-</cffunction>
-
-<cffunction name="useField" access="private" returntype="boolean" output="no" hint="I check to see if the given field should be used in the SQL statement.">
-	<cfargument name="Struct" type="struct" required="yes">
-	<cfargument name="Field" type="struct" required="yes">
-
-	<cfset var result = false>
-
-	<cfif
-			StructKeyHasLen(Struct,Field.ColumnName)
+	if (
+			StructKeyHasLen(Struct, Field.ColumnName)
 		AND	(
-					isOfCFType(Struct[Field.ColumnName],getEffectiveFieldDataType(Field,true))
+					isOfCFType(Struct[Field.ColumnName], getEffectiveFieldDataType(Field, true))
 				OR	(
-							StructKeyExists(Field,"Relation")
-						AND	StructKeyExists(Field.Relation,"type")
+							StructKeyExists(Field, "Relation")
+						AND	StructKeyExists(Field.Relation, "type")
 						AND	Field.Relation.type EQ "list"
 					)
 			)
-	>
-		<cfset result = true>
-	</cfif>
+	) {
+		result = true;
+	}
 
-	<cfreturn result>
-</cffunction>
-<!---
+	return result;
+}
+
+/*
 Returns specific number of records starting with a specific row.
 Renamed by RCamden
 Version 2 with column name support by Christopher Bradford, christopher.bradford@aliveonline.com
@@ -6417,45 +6930,43 @@ Version 2 with column name support by Christopher Bradford, christopher.bradford
 @return Returns a query.
 @author Kevin Bridges (christopher.bradford@aliveonline.comcyberswat@orlandoartistry.com)
 @version 2, May 23, 2005
---->
-<cffunction name="QuerySliceAndDice" access="private" returntype="query" output="false">
-    <cfargument name="theQuery" type="query" required="true" />
-    <cfargument name="StartRow" type="numeric" required="true" />
-    <cfargument name="NumberOfRows" type="numeric" required="true" />
-    <cfargument name="ColumnList" type="string" required="false" default="" />
+*/
+private query function QuerySliceAndDice(
+	required query theQuery,
+	required numeric StartRow,
+	required numeric NumberOfRows,
+	string ColumnList=""
+) {
+	var FinalQuery = "";
+	var EndRow = StartRow + NumberOfRows;
+	var counter = 1;
+	var x = "";
+	var y = "";
 
-    <cfscript>
-    var FinalQuery = "";
-    var EndRow = StartRow + NumberOfRows;
-    var counter = 1;
-    var x = "";
-    var y = "";
+	if ( Len(arguments.ColumnList) EQ 0 ) {
+		arguments.ColumnList = theQuery.ColumnList;
+	}
+	FinalQuery = QueryNew(arguments.ColumnList);
 
-    if (arguments.ColumnList IS "") {
-        arguments.ColumnList = theQuery.ColumnList;
-    }
-    FinalQuery = QueryNew(arguments.ColumnList);
+	if ( EndRow GT theQuery.recordcount ) {
+		EndRow = theQuery.recordcount + 1;
+	}
 
-    if(EndRow GT theQuery.recordcount) {
-        EndRow = theQuery.recordcount+1;
-    }
+	QueryAddRow(FinalQuery, EndRow - StartRow);
 
-    QueryAddRow(FinalQuery,EndRow - StartRow);
+	for ( x = 1; x LTE theQuery.recordcount; x = x + 1 ) {
+		if ( x GTE StartRow AND x LT EndRow ) {
+			for ( y = 1; y LTE ListLen(arguments.ColumnList); y = y + 1 ) {
+				QuerySetCell(FinalQuery, ListGetAt(arguments.ColumnList, y), theQuery[ListGetAt(arguments.ColumnList, y)][x], counter);
+			}
+			counter = counter + 1;
+		}
+	}
 
-    for(x = 1; x LTE theQuery.recordcount; x = x + 1){
-        if(x GTE StartRow AND x LT EndRow) {
-            for(y = 1; y LTE ListLen(arguments.ColumnList); y = y + 1) {
-                QuerySetCell(FinalQuery, ListGetAt(arguments.ColumnList, y), theQuery[ListGetAt(arguments.ColumnList, y)][x],counter);
-            }
-            counter = counter + 1;
-        }
-    }
+	return FinalQuery;
+}
 
-    return FinalQuery;
-    </cfscript>
 
-</cffunction>
-<cfscript>
 /**
  * Makes a row of a query into a structure.
  *
@@ -6473,16 +6984,17 @@ function queryRowToStruct(query){
 	//the cols to loop over
 	var cols = listToArray(query.columnList);
 	//the struct to return
-	var stReturn = structnew();
+	var sReturn = {};
 	//if there is a second argument, use that for the row number
-	if(arrayLen(arguments) GT 1)
+	if ( ArrayLen(arguments) GT 1 ) {
 		row = arguments[2];
+	}
 	//loop over the cols and build the struct from the query row
-	for(ii = 1; ii LTE arraylen(cols); ii = ii + 1){
-		stReturn[cols[ii]] = query[cols[ii]][row];
+	for ( ii = 1; ii LTE arraylen(cols); ii = ii + 1 ){
+		sReturn[cols[ii]] = query[cols[ii]][row];
 	}
 	//return the struct
-	return stReturn;
+	return sReturn;
 }
 </cfscript>
 

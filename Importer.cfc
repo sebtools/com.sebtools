@@ -1,114 +1,116 @@
 <cfcomponent displayname="Imports" extends="com.sebtools.Records" output="no">
 
-<cffunction name="init" access="public" returntype="any" output="no">
-	<cfargument name="Manager" type="any" required="yes">
-	<cfargument name="Scheduler" type="any" required="no">
+<cfscript>
+public function init(
+	required Manager,
+	Scheduler
+) {
+	
+	initInternal(argumentCollection=arguments);
 
-	<cfset initInternal(argumentCollection=arguments)>
+	getImportee();
 
-	<cfset getImportee()>
-
-	<cfif StructKeyExists(Variables,"Scheduler")>
-		<cfset Variables.Scheduler.setTask(
+	if ( StructKeyExists(Variables,"Scheduler") ) {
+		Variables.Scheduler.setTask(
 			Name="Remove Uploaded Spreadsheets",
 			ComponentPath="com.sebtools.Importer",
 			Component=This,
 			MethodName="removeOldFiles",
 			interval="hourly"
-		)>
-	</cfif>
+		);
+	}
 
-	<cfreturn This>
-</cffunction>
+	return This;
+}
 
-<cffunction name="getFieldsStruct" access="public" returntype="struct" output="no">
+public struct function getFieldsStruct() {
+	var sResult = Super.getFieldsStruct(argumentCollection=arguments);
 
-	<cfset var sResult = Super.getFieldsStruct(argumentCollection=arguments)>
+	if ( StructKeyExists(variables,"Importee") ) {
+		StructAppend(sResult,variables.Importee.getFieldsStruct(argumentCollection=arguments));
+	}
 
-	<cfif StructKeyExists(variables,"Importee")>
-		<cfset StructAppend(sResult,variables.Importee.getFieldsStruct(argumentCollection=arguments))>
-	</cfif>
+	return sResult;
+}
 
-	<cfreturn sResult>
-</cffunction>
+public struct function getMetaStruct() {
+	var sResult = Super.getMetaStruct(argumentCollection=arguments);
+	var sImporteeStruct = {};
 
-<cffunction name="getMetaStruct" access="public" returntype="struct" output="no">
+	sResult["method_save"] = "importRecords";
+	sResult["property_handles_files"] = false;
 
-	<cfset var sResult = Super.getMetaStruct(argumentCollection=arguments)>
-	<cfset var sImporteeStruct = {}>
+	if ( StructKeyExists(variables,"Importee") ) {
+		try {
+			sImporteeStruct = variables.Importee.getMetaStruct(argumentCollection=arguments);
+			sResult["label_Singular"] = sImporteeStruct.label_Singular;
+			sResult["label_Plural"] = sImporteeStruct.label_Plural;
+			sResult["method_save"] = "import#sImporteeStruct.method_Plural#";
+			sResult["message_save"] = "#sResult.label_Plural# Imported.";
+		} catch ( any e ) {
 
-	<cfset sResult["method_save"] = "importRecords">
-	<cfset sResult["property_handles_files"] = false>
+		}
+	}
 
-	<cfif StructKeyExists(variables,"Importee")>
-		<cftry>
-			<cfset sImporteeStruct = variables.Importee.getMetaStruct(argumentCollection=arguments)>
-			<cfset sResult["label_Singular"] = sImporteeStruct.label_Singular>
-			<cfset sResult["label_Plural"] = sImporteeStruct.label_Plural>
-			<cfset sResult["method_save"] = "import#sImporteeStruct.method_Plural#">
-			<cfset sResult["message_save"] = "#sResult.label_Plural# Imported.">
-		<cfcatch>
-		</cfcatch>
-		</cftry>
-	</cfif>
+	return sResult;
+}
 
-	<cfreturn sResult>
-</cffunction>
+public function getImportee() {
+	var result = 0;
+	var sThis = 0;
+	var name = 0;
 
-<cffunction name="getImportee" access="public" returntype="any" output="no">
-
-	<cfset var result = 0>
-	<cfset var sThis = 0>
-	<cfset var name = 0>
-
-	<cfif StructKeyExists(variables,"Importee") AND isObject(variables.Importee)>
-		<cfset result = variables.Importee>
-	<cfelse>
-		<cfif StructKeyExists(variables,"Parent") AND isObject(variables.Parent)>
-			<cfif NOT ( StructKeyExists(variables,"Importee") AND isSimpleValue(variables.Importee) AND Len(Trim(variables.Importee)) )>
-				<cfset sThis = getMetaData(This)>
-				<cfset name = ReplaceNoCase(ListLast(sThis.name,"."),"Importer","","ALL")>
-				<cfif StructKeyExists(variables.Parent,name) AND isObject(variables.Parent[name])>
-					<cfset variables.Importee = variables.Parent[name]>
-				<cfelse>
-					<cfset name = variables.Manager.pluralize(name)>
-					<cfif StructKeyExists(variables.Parent,name) AND isObject(variables.Parent[name])>
-						<cfset variables.Importee = variables.Parent[name]>
-					</cfif>
-				</cfif>
-			</cfif>
-			<cfif
+	if ( StructKeyExists(variables,"Importee") AND isObject(variables.Importee) ) {
+		result = variables.Importee;
+	} else {
+		if ( StructKeyExists(variables,"Parent") AND isObject(variables.Parent) ) {
+			if (
+				NOT ( StructKeyExists(variables,"Importee") AND isSimpleValue(variables.Importee) AND Len(Trim(variables.Importee)) )
+			) {
+				sThis = getMetaData(This);
+				name = ReplaceNoCase(ListLast(sThis.name,"."),"Importer","","ALL");
+				if ( StructKeyExists(variables.Parent,name) AND isObject(variables.Parent[name]) ) {
+					variables.Importee = variables.Parent[name];
+				} else {
+					name = variables.Manager.pluralize(name);
+					if ( StructKeyExists(variables.Parent,name) AND isObject(variables.Parent[name]) ) {
+						variables.Importee = variables.Parent[name];
+					}
+				}
+			}
+			if (
 					StructKeyExists(variables,"Importee")
 				AND	isSimpleValue(variables.Importee)
 				AND	Len(Trim(variables.Importee))
 				AND	StructKeyExists(variable.Parent,variables.Importee)
 				AND	isObject(variable.Parent[variables.Importee])
-			>
-				<cfset variables.Importee = variable.Parent[variables.Importee]>
-			</cfif>
-		</cfif>
-	</cfif>
+			) {
+				variables.Importee = variable.Parent[variables.Importee];
+			}
+		}
+	}
 
-	<cfif StructKeyExists(variables,"Importee") AND NOT isObject(variables.Importee)>
-		<cfset StructDelete(variables,"Importee")>
-	</cfif>
+	if ( StructKeyExists(variables,"Importee") AND NOT isObject(variables.Importee) ) {
+		StructDelete(variables,"Importee");
+	}
 
-	<cfif StructKeyExists(variables,"Importee")>
-		<cfset variables.sImporteeMeta = variables.Importee.getMetaStruct()>
-		<cfset result = variables.Importee>
-	</cfif>
+	if ( StructKeyExists(variables,"Importee") ) {
+		variables.sImporteeMeta = variables.Importee.getMetaStruct();
+		result = variables.Importee;
+	}
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="getParentComponent" access="public" returntype="any" output="no">
+public function getParentComponent() {
 
-	<cfif StructKeyExists(variables,"Parent")>
-		<cfreturn variables.Parent>
-	<cfelse>
-		<cfreturn Super.getParentComponent()>
-	</cfif>
-</cffunction>
+	if ( StructKeyExists(variables,"Parent") ) {
+		return variables.Parent;
+	} else {
+		return Super.getParentComponent();
+	}
+}
+</cfscript>
 
 <cffunction name="importRecord" access="public" returntype="void" output="no">
 
@@ -152,12 +154,14 @@
 	<cfargument name="HasHeaderRow" type="boolean" default="true">
 	<cfargument name="headerRow" type="numeric" default="1">
 	<cfargument name="sheets" type="string" default="1">
+	<cfargument name="sheetnames" type="string" default="">
+	<!--- Calls to this method may pass in sheet numbers (sheets) or sheet names (sheetnames). --->
 
 	<cfset var ValidSheet = 0>
 	<cfset var qRecords = 0>
 	<cfset var CurrentColumn = "">
 	<cfset var FilePath = variables.FileMgr.getFilePath(arguments.ExcelFile,getFolder('FileImport'))>
-	<cfset var aSheets = readExcel(FilePath=FilePath,HasHeaderRow=arguments.HasHeaderRow,sheets=arguments.sheets,headerRow=arguments.headerRow)>
+	<cfset var aSheets = readExcel(FilePath=FilePath,HasHeaderRow=arguments.HasHeaderRow,sheets=arguments.sheets,sheetnames=arguments.sheetnames,headerRow=arguments.headerRow)>
 	<cfset var qReturn = 0>
 	<cfset var isSuccessful = true>
 	<cfset var sImport = StructNew()>
@@ -187,16 +191,17 @@
 	</cfif>
 
 	<!--- Remove records that do not have any data (cfspreadsheet only ignores if the cell is truly empty or NULL) --->
-	<cfquery name="qRecords" dbtype="query">
-	SELECT	*
-	FROM	qRecords
-	WHERE	1 = 0
-	<cfif Len(qRecords.ColumnList)>
-		<cfloop list="#qRecords.ColumnList#" index="CurrentColumn">
-		OR	(#CurrentColumn# <> '' AND #CurrentColumn# IS NOT NULL)
-		</cfloop>
-	</cfif>
-	</cfquery>
+	<cfscript>
+	qRecords = qRecords.filter(function(rec) {
+		var hasData = false;
+		qRecords.ColumnList.listEach(function(CurrentColumn) {
+			if (Len(Trim(rec[CurrentColumn]))) {
+				hasData = true;
+			}
+		});
+		return hasData;
+	});
+	</cfscript>
 
 	<cfloop query="qRecords">
 		<cfset sData = variables.DataMgr.queryRowToStruct(qRecords,CurrentRow)>
@@ -204,7 +209,11 @@
 		<cfset appendArgDefaults(sData,sArgs)>
 		<cfset StructFormatData(sData,sFields)>
 		<cftry>
-			<cfinvoke component="#arguments.component#" method="#arguments.method#" argumentCollection="#sData#"></cfinvoke>
+			<cfset invoke(
+				arguments.component,
+				arguments.method,
+				sData
+			)>
 		<cfcatch>
 			<cfif Len(arguments.CatchErrTypes) EQ 0 OR ListFindNoCase(arguments.CatchErrTypes,cfcatch.type)>
 				<cfset sData["SpreadSheetImportError"] = CFCATCH.Message>
@@ -217,13 +226,20 @@
 		</cftry>
 	</cfloop>
 
+	<cfset sImport["FileImport"] = arguments.ExcelFile>
 	<cfif NOT isSuccessful>
-		<!---<cfthrow message="Upload Failed for unknown reason." type="Importer">--->
-		<cfset saveSpreadsheet(FileName=arguments.ExcelFile,exportQuery=qReturn)>
+		<!--- Saving the same spreadsheet file would result in an error. Let saveSpreadsheet determine the Excel file for failed import. --->
+		<cfset var saveArgs = {FileName=arguments.ExcelFile, exportQuery=qReturn}>
+		<!--- Need to tell saveSpreadsheet whether to use a sheetname or sheet number when creating the errors file. --->
+		<cfif Len(arguments.sheetNames)>
+			<cfset saveArgs["sheetName"] = ListFirst(Arguments.sheetNames)>
+		<cfelse>
+			<cfset saveArgs["sheet"] = ListFirst(Arguments.sheets)>
+		</cfif>
+		<cfset arguments.ExcelFile = saveSpreadsheet(argumentCollection=saveArgs)>
 		<cfset sImport["FileErrors"] = arguments.ExcelFile>
 	</cfif>
 
-	<cfset sImport["FileImport"] = arguments.ExcelFile>
 	<cftry>
 		<cfset saveImport(argumentCollection=sImport)>
 	<cfcatch>
@@ -248,6 +264,12 @@
 	</cfoutput>
 
 </cffunction>
+
+<cfscript>
+public string function saveImport() {
+	return saveRecordDataOnly(ArgumentCollection=Arguments);
+}
+</cfscript>
 
 <cffunction name="addMethods" access="private" returntype="void" output="no">
 
@@ -294,24 +316,42 @@
 	<cfargument name="HasHeaderRow" type="boolean" default="true">
 	<cfargument name="headerRow" type="numeric" default="1">
 	<cfargument name="sheets" type="string" default="1">
+	<cfargument name="sheetnames" type="string" default="">
 
 	<cfset var result = 0>
 	<cfset var sheetNum = 0>
+	<cfset var sheetName = "">
 	<cfset var aSheets = []>
 
 	<cftry>
 		<!--- Caller expects an array of sheets --->
-		<cfloop index="sheetNum" list="#Arguments.sheets#">
-			<cfif Arguments.headerRow GT 0>
-				<cfspreadsheet action="read" sheet="#sheetNum#" query="result" src="#Arguments.FilePath#" excludeHeaderRow="#Arguments.HasHeaderRow#" headerRow="#Arguments.headerRow#">
-			<cfelse>
-				<cfspreadsheet action="read" sheet="#sheetNum#" query="result" src="#Arguments.FilePath#" excludeHeaderRow="#Arguments.HasHeaderRow#">
-			</cfif>
-			<cfif result.RecordCount>
-				<cfset result = QueryCompact(result)>
-				<cfset ArrayAppend(aSheets,result)>
-			</cfif>
-		</cfloop>
+		<cfscript>
+		var sAtts = {
+			action: "read",
+			query: "result",
+			src: Arguments.FilePath,
+			excludeHeaderRow: Arguments.HasHeaderRow
+		};
+		// Use sheetnames if passed in, otherwise use sheets (sheet numbers)
+		var sheetList = Len(Arguments.sheetnames) ? Arguments.sheetnames : Arguments.sheets;
+		var incoming = Arguments;
+		// For each sheet, add headerrow and sheetname or sheet attributes for the cfspreadsheet call and append the resulting query to the sheets array
+		sheetList.listEach(function(sheet) {
+			if ( incoming.headerRow GT 0 ) {
+				sAtts["headerRow"] = incoming.headerRow;
+			}
+			if ( Len(incoming.sheetnames) ) {
+				sAtts["sheetName"] = sheet;
+			} else {
+				sAtts["sheet"] = sheet;
+			}
+			cfspreadsheet(AttributeCollection=sAtts);
+			if (result.RecordCount) {
+				result = QueryCompact(result);
+				aSheets.append(result);
+			}
+		});
+		</cfscript>
 	<cfcatch>
 		<cfif
 				StructKeyExists(CFCATCH,"Cause")
@@ -439,14 +479,28 @@
 	<cfreturn result>
 </cffunction>
 
-<cffunction name="saveSpreadsheet" access="private" returntype="void" output="no">
+<cffunction name="saveSpreadsheet" access="private" returntype="string" output="no">
 	<cfargument name="FileName" type="string" required="true">
 	<cfargument name="exportQuery" type="query" required="true">
+	<cfargument name="sheet" type="string" default="1">
+	<cfargument name="sheetname" type="string" default="">
 
-	<cfset var FilePath = variables.FileMgr.getFilePath(arguments.FileName,getFolder('FileErrors'))>
+	<cfset var FilePath = variables.FileMgr.getFilePath(arguments.FileName, getFolder('FileErrors'))>
 	<cfset var xlsQuery = Arguments.exportQuery>
+	<cfset var UniqueName = arguments.FileName>
 
-	<cfspreadsheet action="write" filename="#FilePath#" query="xlsQuery">
+	<cfif FileExists(FilePath)>
+		<cfset UniqueName = ReplaceNoCase(Arguments.FileName, ListFirst(Arguments.FileName, "."), ListFirst(Arguments.FileName, ".") & DateFormat(now(), "yyyymmd") & TimeFormat(now(), "HHmmss"))>
+		<cfset FilePath = variables.FileMgr.getFilePath(UniqueName, getFolder('FileErrors'))>
+	</cfif>
+	
+	<cfif Len(Arguments.sheetName)>
+		<cfspreadsheet action="write" filename="#FilePath#" query="xlsQuery" sheetName="#Arguments.sheetName#">
+	<cfelse>
+		<cfspreadsheet action="write" filename="#FilePath#" query="xlsQuery" sheet="#Arguments.sheet#">
+	</cfif>
+
+	<cfreturn UniqueName>
 </cffunction>
 
 <cffunction name="getRequiredColumns" access="public" returntype="string" output="no">

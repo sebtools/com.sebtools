@@ -1,33 +1,23 @@
-<!--- 1.1.5 Build 10 --->
-<!--- Last Updated: 2011-03-30 --->
 <!--- Created by Steve Bryant 2006-12-07 --->
-<!---
-2006-12-07 SEB: Added getDatamgr(), getMailer() to return DataMgr and Mailer components
-2007-02-02 SEB: Added removeNotice() method
-2007-02-16 SEB: Added getMailerData()
-2007-09-24 SEB: Added changeDataKeys()
-2007-10-07 SEB: Version 1.0
-2010-12-18 SEB: 1.0.1: This.DataMgr, This.Mailer
-2011-03-01 SEB: 1.0.1: Works on DataMgr_Sim
---->
 <cfcomponent displayname="Notices Manager" output="no" hint="I manage sending and editing notice email messages.">
+<cfscript>
+public function init(
+	required DataMgr,
+	required Mailer,
+	Observer
+) {
+	
+	initInternal(ArgumentCollection=Arguments);
 
-<cffunction name="init" access="public" returntype="NoticeMgr" output="no" hint="I instantiate and return this component.">
-	<cfargument name="DataMgr" type="any" required="yes">
-	<cfargument name="Mailer" type="any" required="yes">
-	<cfargument name="Observer" type="any" required="no">
+	return This;
+}
 
-	<cfset initInternal(ArgumentCollection=Arguments)>
+public function initInternal(
+	required DataMgr,
+	required Mailer,
+	Observer
+) {
 
-	<cfreturn This>
-</cffunction>
-
-<cffunction name="initInternal" access="public" returntype="void" output="no" hint="I handle instantiate tasks.">
-	<cfargument name="DataMgr" type="any" required="yes">
-	<cfargument name="Mailer" type="any" required="yes">
-	<cfargument name="Observer" type="any" required="no">
-
-	<cfscript>
 	variables.DataMgr = arguments.DataMgr;
 	variables.Mailer = arguments.Mailer;
 	This.DataMgr = arguments.DataMgr;
@@ -42,9 +32,9 @@
 	loadNotices();
 
 	//upgrade();
-	</cfscript>
 
-</cffunction>
+}
+</cfscript>
 
 <cffunction name="addNotice" access="public" returntype="any" output="no" hint="I add the given notice if it doesn't yet exist.">
 	<cfargument name="Component" type="string" required="yes" hint="The path to your component (example com.sebtools.NoticeMgr).">
@@ -201,70 +191,145 @@
 
 </cffunction>
 
-<cffunction name="saveNotice" access="public" returntype="string" output="no" hint="I save a notice.">
-	<cfargument name="Name" type="string" required="yes" hint="The unique name for this notice.">
-	<cfargument name="Component" type="string" required="no" hint="The path to your component (example com.sebtools.NoticeMgr).">
-	<cfargument name="Subject" type="string" required="yes" hint="The subject of the email.">
-	<cfargument name="Text" type="string" required="no" hint="The text of the email (for plan-text email).">
-	<cfargument name="HTML" type="string" required="no" hint="The HTML for the email (for HTML email)">
-	<cfargument name="DataKeys" type="string" required="no" hint="A list of data keys for the component (the values to evaluate from within brackets in the email).">
-	<cfargument name="Notes" type="string" required="no" hint="Notes about the Notice.">
+<cfscript>
+/**
+* @hint I save a notice.
+* @Name The unique name for this notice.
+* @Component The path to your component (example com.sebtools.NoticeMgr).
+* @Subject The subject of the email.
+* @Text The text of the email (for plan-text email).
+* @HTML The HTML for the email (for HTML email).
+* @DataKeys A list of data keys for the component (the values to evaluate from within brackets in the email).
+* @Notes Notes about the Notice.
+* @OneTimeList A list of data keys for which the notice should only be sent one time. 
+*/
+public string function saveNotice(
+	required string Name,
+	string Component,
+	required string Subject,
+	string Text,
+	string HTML,
+	string DataKeys,
+	string Notes,
+	string OneTimeList=""
+) {
+	var result = 0;
+	var qNotice = getNotice(Name=arguments.Name);
+	
+	// Actions to perform if this is an existing notice
+	if ( qNotice.RecordCount ) {
+		// Name drives the id here, not vice-versa
+		arguments["NoticeID"] = qNotice.NoticeID;
 
-	<cfset var result = 0>
-	<cfset var qNotice = getNotice(Name=arguments.Name)>
+		// TODO: Make sure Component and Name haven't changed if this is an existing notice
+		if ( StructKeyExists(arguments, "Component") AND arguments.Component neq qNotice.Component ) {
+			throw(message="You cannot change the component with which a notice is associated.", type="NoticeMgr", errorcode="ChangeComponent");
+		}
+	}
 
-	<!--- Actions to perform if this is an existing notice --->
-	<cfif qNotice.RecordCount>
-		<!--- Name drives the id here, not vice-versa --->
-		<cfset arguments["NoticeID"] = qNotice.NoticeID>
-
-		<!---
-		TODO: Make sure Component and Name haven't changed if this is an existing notice
-		--->
-		<cfif StructKeyExists(arguments,"Component") AND arguments.Component neq qNotice.Component>
-			<cfthrow message="You cannot change the component with which a notice is associated." type="NoticeMgr" errorcode="ChangeComponent">
-		</cfif>
-	</cfif>
-
-	<!--- Make sure notice has something in it --->
-	<cfif NOT
+	// Make sure notice has something in it
+	if (
+		NOT
 		(
-				( StructKeyExists(arguments,"html") AND Len(arguments.html) )
-			OR	( StructKeyExists(arguments,"text") AND Len(arguments.text) )
+				( StructKeyExists(arguments, "html") AND Len(arguments.html) )
+			OR	( StructKeyExists(arguments, "text") AND Len(arguments.text) )
 		)
-	>
-		<cfthrow message="If Contents argument is not provided than either html or text arguments must be." type="Mailer" errorcode="ContentsRequired">
-	</cfif>
+	) {
+		throw(message="If Contents argument is not provided than either html or text arguments must be.", type="Mailer", errorcode="ContentsRequired");
+	}
+	
+	// Save notice record
+	result = variables.DataMgr.saveRecord("emlNotices", arguments);
 
+	// get notice record
+	qNotice = getNotice(Name=arguments.Name);
 
-	<!--- Save notice record --->
-	<cfset result = variables.DataMgr.saveRecord("emlNotices",arguments)>
-	<!--- get notice record --->
-	<cfset qNotice = getNotice(Name=arguments.Name)>
+	// Add/save notice to mailer
+	if ( Len(qNotice.HTML) OR Len(qNotice.Text) ) {
+		addMailerNotice(name=qNotice.Name, Subject=qNotice.Subject, datakeys=qNotice.DataKeys, html=qNotice.HTML,text=qNotice.Text);
+	}
+}
 
-	<!--- Add/save notice to mailer --->
-	<cfif Len(qNotice.HTML) OR Len(qNotice.Text)>
-		<cfinvoke method="addMailerNotice">
-			<cfinvokeargument name="name" value="#qNotice.Name#">
-			<cfinvokeargument name="Subject" value="#qNotice.Subject#">
-			<cfinvokeargument name="datakeys" value="#qNotice.DataKeys#">
-			<cfinvokeargument name="html" value="#qNotice.HTML#">
-			<cfinvokeargument name="text" value="#qNotice.Text#">
-		</cfinvoke>
-	</cfif>
+/**
+* @hint I send set/override any data based on the data given and send the given notice.
+* @Name The name of the notice you want to send.
+* @data The data you want to use for this email message.
+* @OneTimeList An optional list of data keys for which the notice should only be sent one time.
+*/
+public struct function sendNotice(required string name, struct data, string OneTimeList) {
+	var OneTimeNoticeID = 0;
+	validateSendNotice(sArgs=arguments);
+	// validateSendNotice will set arguments.OneTimeList to either the passed value or the notice record value if valid
+	if ( StructKeyExists(arguments, "OneTimeList") ) {
+		var sSendOneTime = getSendOneTime(argumentCollection=arguments);
+		if ( sSendOneTime.doSend ) {
+			OneTimeNoticeID = logOneTimeNotice(arguments.name, sSendOneTime.ArgsHash);
+		} else {
+			return {OneTimeNoticeID: OneTimeNoticeID};
+		}
+	}
 
-</cffunction>
+	if ( StructKeyExists(Variables, "Observer") ) {
+		Variables.Observer.announceEvent(EventName="NoticeMgr:sendNotice", Args=Arguments);
+	}
 
-<cffunction name="sendNotice" access="public" returntype="struct" output="no" hint="I send set/override any data based on the data given and send the given notice.">
-	<cfargument name="name" type="string" required="yes" hint="The name of the notice you want to send.">
-	<cfargument name="data" type="struct" hint="The data you want to use for this email message.">
+	var sReturn = variables.Mailer.sendNotice(argumentCollection=arguments);
+	sReturn.OneTimeNoticeID = OneTimeNoticeID;
+	return sReturn;
+}
 
-	<cfif StructKeyExists(Variables,"Observer")>
-		<cfset Variables.Observer.announceEvent(EventName="NoticeMgr:sendNotice",Args=Arguments)>
-	</cfif>
+private struct function getSendOneTime(required string name, required struct data, required string OneTimeList) {
+	// Make sure this isn't a one-time notice already sent
+	var sData = arguments.data;
+	var sOneTime = {};
+	arguments.OneTimeList.listEach(function(arg) {
+		sOneTime[arg] = sData[arg];
+	});
+	var sOneTimeSorted = sOneTime.toSorted(function(value1, value2, key1, key2) {
+		return compareNoCase(key1, key2);
+	});
+	var argsHash = hash(serializeJSON(sOneTimeSorted));
+	var sentNotice = variables.DataMgr.getRecords("emlOneTimeNotices", {Name: arguments.Name, ArgsHash: argsHash});
 
-	<cfreturn variables.Mailer.sendNotice(argumentCollection=arguments)>
-</cffunction>
+	return {
+		doSend: booleanFormat(NOT sentNotice.RecordCount),
+		ArgsHash: argsHash
+	};
+}
+
+public numeric function logOneTimeNotice(required string Name, required string ArgsHash) {
+	return variables.DataMgr.saveRecord("emlOneTimeNotices", {Name: arguments.Name, ArgsHash: arguments.ArgsHash});
+}
+
+private void function validateOneTimeList(required string OneTimeList, required struct data) {
+	if ( Len(arguments.OneTimeList) ) {
+		if ( StructCount(Arguments.data) ) {
+			var sArgs = arguments.data;
+			arguments.OneTimeList.listEach(function(arg) {
+				if ( NOT StructKeyExists(sArgs, arg) ) {
+					throw(type="NoticeMgr", message="The OneTimeList value contained #arg#, but #arg# was not passed in as a data key.");
+				}
+			});
+		}
+	}
+}
+
+private void function validateSendNotice(required struct sArgs) {
+	var args = arguments.sArgs;
+	var qNotice = getNotice(Name=args.Name, fieldlist="OneTimeList");
+	if (StructKeyExists(args, "OneTimeList")) {
+		// Passing a OneTimeList is not allowed if the notice already has its own.
+		if ( Len(qNotice.OneTimeList) ) {
+			throw(type="NoticeMgr", message="You may not pass a OneTimeList to sendNotice for notices that have their own value (#args.Name#).");
+		}
+	}
+	if ( StructKeyExists(args, "OneTimeList") OR Len(qNotice.OneTimeList) ) {
+		var listToValidate = Len(qNotice.OneTimeList) ? qNotice.OneTimeList : args.OneTimeList;
+		validateOneTimeList(listToValidate, args.data);
+		args.OneTimeList = listToValidate;
+	}
+}
+</cfscript>
 
 <cffunction name="upgrade" access="private" returntype="any" output="no">
 
@@ -318,6 +383,13 @@
 			<field ColumnName="HTML" CF_DataType="CF_SQL_LONGVARCHAR" />
 			<field ColumnName="DataKeys" CF_DataType="CF_SQL_VARCHAR" Length="250" />
 			<field ColumnName="Notes" CF_DataType="CF_SQL_VARCHAR" Length="250" />
+			<field ColumnName="OneTimeList" CF_DataType="CF_SQL_LONGVARCHAR" />
+		</table>
+		<table name="emlOneTimeNotices">
+			<field ColumnName="OneTimeNoticeID" CF_DataType="CF_SQL_INTEGER" PrimaryKey="true" Increment="true" />
+			<field ColumnName="Name" CF_DataType="CF_SQL_VARCHAR" Length="50" />
+			<field ColumnName="ArgsHash" CF_DataType="CF_SQL_LONGVARCHAR" />
+			<field ColumnName="DateSent" CF_DataType="CF_SQL_DATE" Special="CreationDate" />
 		</table>
 	</tables>
 	</cfsavecontent>

@@ -3,395 +3,416 @@
 <!--- Information: http://www.bryantwebconsulting.com/docs/com-sebtools/manager.cfm?version=Build%2012 --->
 <cfcomponent output="false" extends="component">
 
-<cffunction name="init" access="public" returntype="any" output="no">
-	<cfargument name="DataMgr" type="any" required="no">
-	<cfargument name="FileMgr" type="any" required="no">
-	<cfargument name="CFIMAGE" type="any" required="no">
-	<cfargument name="wysiwyg" type="string" default="FCKeditor">
-	<cfargument name="RootURL" type="string" default="">
-	<cfargument name="RootPath" type="string" default="">
-	<cfargument name="Observer" type="any" required="no">
+<cfscript>
+public function init(
+	DataMgr,
+	FileMgr,
+	CFIMAGE,
+	string wysiwyg="FCKeditor",
+	string RootURL="",
+	string RootPath="",
+	Observer
+) {
+	var arg = "";
+	var sTemp = {};
 
-	<cfset var arg = "">
-	<cfset var sTemp = StructNew()>
+	// Set Variables from Arguments
+	for ( arg in Arguments ) {
+		if ( Len(Trim(arg)) AND StructKeyExists(Arguments,arg) ) {
+			if ( NOT StructKeyExists(Variables,arg) ) {
+				Variables[arg] = Arguments[arg];
+			}
+			if ( isObject(Arguments[arg]) AND NOT StructKeyExists(This,arg) ) {
+				This[arg] = Arguments[arg];
+			}
+		}
+	}
 
-	<!--- Set variables from arguments --->
-	<cfloop collection="#arguments#" item="arg">
-		<cfif Len(Trim(arg)) AND StructKeyExists(arguments,arg)>
-			<cfif NOT StructKeyExists(variables,arg)>
-				<cfset variables[arg] = arguments[arg]>
-			</cfif>
-			<cfif isObject(arguments[arg]) AND NOT StructKeyExists(this,arg)>
-				<cfset this[arg] = arguments[arg]>
-			</cfif>
-		</cfif>
-	</cfloop>
+	if ( NOT StructKeyExists(Variables,"DataMgr") ) {
+		if ( FileExists("#getDirectoryFromPath(getCurrentTemplatePath())#DataMgr.cfc") ) {
+			Variables.DataMgr = CreateObject("component","DataMgr").init(ArgumentCollection=Arguments);
+			This.DataMgr = Variables.DataMgr;
+		} else {
+			throw(message="Manager.cfc init() requires DataMgr.",type="Manager");
+		}
+	}
+	if ( NOT StructKeyExists(Variables,"FileMgr") ) {
+		if ( FileExists("#getDirectoryFromPath(getCurrentTemplatePath())#FileMgr.cfc") ) {
+			if ( NOT StructKeyExists(Arguments,"UploadURL") ) {
+				Arguments.UploadURL = "/f/";
+			}
+			if ( NOT StructKeyExists(Arguments,"UploadPath") ) {
+				Arguments.UploadPath = ExpandPath(Arguments.UploadURL);
+			}
+			Variables.FileMgr = CreateObject("component","FileMgr").init(ArgumentCollection=Arguments);
+			This.FileMgr = Variables.FileMgr;
+		} else {
+			throw(message="Manager.cfc init() requires FileMgr.",type="Manager");
+		}
+	}
 
-	<cfif NOT StructKeyExists(variables,"DataMgr")>
-		<cfif FileExists("#getDirectoryFromPath(getCurrentTemplatePath())#DataMgr.cfc")>
-			<cfset variables.DataMgr = CreateObject("component","DataMgr").init(argumentCollection=arguments)>
-			<cfset This.DataMgr = variables.DataMgr>
-		<cfelse>
-			<cfthrow message="Manager.cfc init() requires DataMgr." type="Manager">
-		</cfif>
-	</cfif>
-	<cfif NOT StructKeyExists(variables,"FileMgr")>
-		<cfif FileExists("#getDirectoryFromPath(getCurrentTemplatePath())#FileMgr.cfc")>
-			<cfif NOT StructKeyExists(arguments,"UploadURL")>
-				<cfset arguments.UploadURL = "/f/">
-			</cfif>
-			<cfif NOT StructKeyExists(arguments,"UploadPath")>
-				<cfset arguments.UploadPath = ExpandPath(arguments.UploadURL)>
-			</cfif>
-			<cfset variables.FileMgr = CreateObject("component","FileMgr").init(argumentCollection=arguments)>
-			<cfset This.FileMgr = variables.FileMgr>
-		<cfelse>
-			<cfthrow message="Manager.cfc init() requires FileMgr." type="Manager">
-		</cfif>
-	</cfif>
-	<cfif NOT StructKeyExists(variables,"CFIMAGE") AND FileExists("#getDirectoryFromPath(getCurrentTemplatePath())#cfimagecfc.cfc")>
-		<cfset variables.CFIMAGE = CreateObject("component","cfimagecfc").init()>
-		<cfset This.CFIMAGE = variables.CFIMAGE>
-	</cfif>
-	<cfif NOT StructKeyExists(variables,"Pluralizer") AND FileExists("#getDirectoryFromPath(getCurrentTemplatePath())#Pluralizer.cfc")>
-		<cfset variables.Pluralizer = CreateObject("component","Pluralizer").init()>
-		<cfset This.Pluralizer = variables.Pluralizer>
-	</cfif>
+	if (
+		NOT StructKeyExists(Variables,"CFIMAGE")
+		AND
+		FileExists("#getDirectoryFromPath(getCurrentTemplatePath())#cfimagecfc.cfc")
+	) {
+		Variables.CFIMAGE = CreateObject("component","cfimagecfc").init();
+		This.CFIMAGE = Variables.CFIMAGE;
+	}
+	if (
+		NOT StructKeyExists(Variables,"Pluralizer")
+		AND
+		FileExists("#getDirectoryFromPath(getCurrentTemplatePath())#Pluralizer.cfc")
+	) {
+		Variables.Pluralizer = CreateObject("component","Pluralizer").init();
+		This.Pluralizer = Variables.Pluralizer;
+	}
 
-	<cfset variables.datasource = this.DataMgr.getDatasource()>
-	<cfset variables.cachedata = StructNew()>
-	<cfset variables.sMetaData = StructNew()>
-	<cfset variables.UUID = CreateUUID()>
+	Variables.datasource = this.DataMgr.getDatasource();
+	Variables.cachedata = {};
+	Variables.sMetaData = {};
+	Variables.UUID = CreateUUID();
 
-	<cfset getTypesXml()>
-	<cfset loadTypesStruct()>
+	getTypesXml();
+	loadTypesStruct();
 
-	<cfset variables.FileTypes = ArrayToList(GetValueArray(variables.xTypes,"//type[@lcase_isfiletype='true']/@name"))>
-	<cfset variables.TypeNames = ArrayToList(GetValueArray(variables.xTypes,"//type/@name"))>
+	Variables.FileTypes = ArrayToList(GetValueArray(Variables.xTypes,"//type[@lcase_isfiletype='true']/@name"));
+	Variables.TypeNames = ArrayToList(GetValueArray(Variables.xTypes,"//type/@name"));
 
-	<cfset variables.sSecurityPermissions = StructNew()>
-	<cfset variables.sTypesData = StructNew()>
+	Variables.sSecurityPermissions = {};
+	Variables.sTypesData = {};
 
-	<cfreturn this>
-</cffunction>
+	return This;
+}
 
-<cffunction name="getRootPath" access="public" returntype="string" output="no">
-	<cfreturn variables.RootPath>
-</cffunction>
+public string function getRootPath() {
+	return Variables.RootPath;
+}
 
-<cffunction name="getRootURL" access="public" returntype="string" output="no">
-	<cfreturn variables.RootURL>
-</cffunction>
+public string function getRootURL() {
+	return Variables.RootURL;
+}
 
-<cffunction name="getTypeData" access="public" returntype="any" output="no">
-	<cfargument name="type" type="string" required="true">
-	<cfargument name="transformer" type="string" required="false">
+public function getTypeData(
+	required string type,
+	string transformer
+) {
+	var axTypes = 0;
+	var key = makeTypeDataKey(ArgumentCollection=Arguments);
+	var result = 0;
 
-	<cfset var axTypes = 0>
-	<cfset var key = makeTypeDataKey(ArgumentCollection=Arguments)>
-	<cfset var result = 0>
+	if ( StructKeyExists(Variables.sTypes,key) ) {
+		result = Variables.sTypes[key];
+	} else if ( StructKeyExists(Variables.sTypesData,key) ) {
+		result = Variables.sTypesData[key];
+	} else {
+		axTypes = getTypes(ArgumentCollection=Arguments);
+		if ( ArrayLen(axTypes) EQ 1 ) {
+			result = axTypes[1].XmlAttributes;
+			Variables.sTypesData[key] = result;
+		} else {
+			result = {};
+		}
+	}
 
-	<cfif StructKeyExists(Variables.sTypes,key)>
-		<cfset result = Variables.sTypes[key]>
-	<cfelseif StructKeyExists(Variables.sTypesData,key)>
-		<cfset result = Variables.sTypesData[key]>
-	<cfelse>
-		<cfset axTypes = getTypes(ArgumentCollection=Arguments)>
-		<cfif ArrayLen(axTypes) EQ 1>
-			<cfset result = axTypes[1].XmlAttributes>
-			<cfset Variables.sTypesData[key] = result>
-		<cfelse>
-			<cfset result = StructNew()>
-		</cfif>
-	</cfif>
+	return result;
+}
 
-	<cfreturn result>
-</cffunction>
+public function getTypes(
+	required string type,
+	string transformer
+) {
+	var axResults = [];
 
-<cffunction name="getTypes" access="public" returntype="any" output="no">
-	<cfargument name="type" type="string" required="true">
-	<cfargument name="transformer" type="string" required="false">
+	if ( Len(Trim(Arguments.type)) AND ListFindNoCase(Variables.TypeNames,Arguments.type) ) {
+		if ( StructKeyExists(Arguments,"transformer") AND Len(Trim(Arguments.transformer)) ) {
+			axResults = XmlSearch(xTypes,"//type[@lcase_name='#LCase(Arguments.type)#']/transform[@lcase_name='#LCase(Arguments.transformer)#']");
+		} else {
+			axResults = XmlSearch(xTypes,"//type[@lcase_name='#LCase(Arguments.type)#']");
+		}
+	}
 
-	<cfset var axResults = ArrayNew(1)>
+	return axResults;
+}
 
-	<cfif Len(Trim(Arguments.type)) AND ListFindNoCase(Variables.TypeNames,Arguments.type)>
-		<cfif StructKeyExists(Arguments,"transformer") AND Len(Trim(arguments.transformer))>
-			<cfset axResults = XmlSearch(xTypes,"//type[@lcase_name='#LCase(Arguments.type)#']/transform[@lcase_name='#LCase(arguments.transformer)#']")>
-		<cfelse>
-			<cfset axResults = XmlSearch(xTypes,"//type[@lcase_name='#LCase(Arguments.type)#']")>
-		</cfif>
-	</cfif>
+public function getTypesXml() {
+	var xRawTypes = 0;
+	var xAllTypes = 0;
+	var ii = 0;
+	var key = 0;
 
-	<cfreturn axResults>
-</cffunction>
+	if ( NOT StructKeyExists(Variables,"xTypes") ) {
+		xRawTypes = XmlParse(types());
+		xAllTypes = XmlSearch(xRawTypes,"//*");
+		for ( ii=1; ii LTE ArrayLen(xAllTypes); ii++ ) {
+			for ( key in xAllTypes[ii].XmlAttributes ) {
+				xAllTypes[ii].XmlAttributes["lcase_#LCase(key)#"] = LCase(xAllTypes[ii].XmlAttributes[key]);
+			}
+		}
+		Variables.xTypes = xRawTypes;
+	}
 
-<cffunction name="getTypesXml" access="public" returntype="any" output="no">
+	return Variables.xTypes;
+}
 
-	<cfset var xRawTypes = 0>
-	<cfset var xAllTypes = 0>
-	<cfset var ii = 0>
-	<cfset var key = 0>
+public function loadTypesStruct() {
+	var type_index = 0;
+	var transformer_index = 0;
+	var xType = 0;
+	var xTransformer = 0;
+	var type_key = "";
+	var transformer_key = "";
 
-	<cfif NOT StructKeyExists(variables,"xTypes")>
-		<cfset xRawTypes = XmlParse(types())>
-		<cfset xAllTypes = XmlSearch(xRawTypes,"//*")>
-		<cfloop index="ii" from="1" to="#ArrayLen(xAllTypes)#" step="1">
-			<cfloop item="key" collection="#xAllTypes[ii].XmlAttributes#">
-				<cfset xAllTypes[ii].XmlAttributes["lcase_#LCase(key)#"] = LCase(xAllTypes[ii].XmlAttributes[key])>
-			</cfloop>
-		</cfloop>
-		<cfset variables.xTypes = xRawTypes>
-	</cfif>
+	Variables.sTypes = {};
 
-	<cfreturn variables.xTypes>
-</cffunction>
+	for ( type_index=1; type_index LTE ArrayLen(Variables.xTypes.types.type); type_index++ ) {
+		xType = Variables.xTypes.types.type[type_index];
+		type_key = xType.XmlAttributes["lcase_name"];
+		Variables.sTypes[type_key] = xType.XmlAttributes;
+		if ( StructKeyExists(xType,"transform") ) {
+			for ( transformer_index=1; transformer_index LTE ArrayLen(xType.transform); transformer_index++ ) {
+				xTransformer = xType.transform[transformer_index];
+				transformer_key = type_key & ":" & xTransformer.XmlAttributes["lcase_name"];
+				Variables.sTypes[transformer_key] = xTransformer.XmlAttributes;
+				StructAppend(Variables.sTypes[transformer_key],xType.XmlAttributes,"no");
+			}
+		}
+	}
 
-<cffunction name="loadTypesStruct" access="public" returntype="any" output="no">
+}
 
-	<cfset var type_index = 0>
-	<cfset var transformer_index = 0>
-	<cfset var xType = 0>
-	<cfset var xTransformer = 0>
-	<cfset var type_key = "">
-	<cfset var transformer_key = "">
+public function adjustImage(
+	required string tablename,
+	required string fieldname,
+	required string filename
+) {
+	var sFields = getFieldsStruct(Arguments.tablename);
+	var sField = sFields[Arguments.fieldname];
+	var path = Variables.FileMgr.getFilePath(Arguments.filename,sField.Folder);
 
-	<cfset Variables.sTypes = StructNew()>
+	var myImage = 0;
+	var width = 0;
+	var height = 0;
 
-	<cfloop index="type_index" from="1" to="#ArrayLen(variables.xTypes.types.type)#">
-		<cfset xType = variables.xTypes.types.type[type_index]>
-		<cfset type_key = xType.XmlAttributes["lcase_name"]>
-		<cfset Variables.sTypes[type_key] = xType.XmlAttributes>
-		<cfif StructKeyExists(xType,"transform")>
-			<cfloop index="transformer_index" from="1" to="#ArrayLen(xType.transform)#">
-				<cfset xTransformer = xType.transform[transformer_index]>
-				<cfset transformer_key = type_key & ":" & xTransformer.XmlAttributes["lcase_name"]>
-				<cfset Variables.sTypes[transformer_key] = xTransformer.XmlAttributes>
-				<cfset StructAppend(Variables.sTypes[transformer_key],xType.XmlAttributes,"no")>
-			</cfloop>
-		</cfif>
-	</cfloop>
-
-</cffunction>
-
-<cffunction name="adjustImage" access="public" returntype="any" output="no">
-	<cfargument name="tablename" type="string" required="true">
-	<cfargument name="fieldname" type="string" required="true">
-	<cfargument name="filename" type="string" required="true">
-
-	<cfset var sFields = getFieldsStruct(arguments.tablename)>
-	<cfset var sField = sFields[arguments.fieldname]>
-	<cfset var path = variables.FileMgr.getFilePath(arguments.filename,sField.Folder)>
-
-	<cfset var myImage = 0>
-	<cfset var width = 0>
-	<cfset var height = 0>
-
-	<cfif FileExists(path) AND StructKeyExists(variables,"CFIMAGE")>
-		<!--- Resize if a size limitation exists --->
-		<cfif
+	if ( FileExists(path) AND StructKeyExists(Variables,"CFIMAGE") ) {
+		// Resize if a size limitation exists
+		if (
 				( StructKeyExists(sField,"MaxWidth") AND isNumeric(sField.MaxWidth) AND sField.MaxWidth GT 0 )
 			OR	( StructKeyExists(sField,"MaxHeight") AND isNumeric(sField.MaxHeight) AND sField.MaxHeight GT 0 )
 			OR	( StructKeyExists(sField,"MaxSmallSide") AND isNumeric(sField.MaxSmallSide) AND sField.MaxSmallSide GT 0 )
-		>
-			<!--- Get image --->
-			<cfset myImage = variables.CFIMAGE.read(source=path)>
+		) {
+			// Get image
+			myImage = Variables.CFIMAGE.read(source=path);
 
-			<!--- Get height and width for scale to fit --->
-			<cfset width = getWidth(sField,myImage)>
-			<cfset height = getHeight(sField,myImage)>
+			// Get height and width for scale to fit
+			width = getWidth(sField,myImage);
+			height = getHeight(sField,myImage);
 
-			<cfif width LT myImage.width OR height LT myImage.height>
-				<!--- Scale image to fit --->
-				<cfinvoke component="#variables.CFIMAGE#" method="scaleToFit">
-					<cfinvokeargument name="source" value="#path#">
-					<cfinvokeargument name="quality" value="#sField.quality#">
-					<cfinvokeargument name="width" value="#width#">
-					<cfinvokeargument name="height" value="#height#">
-				</cfinvoke>
-			</cfif>
-		</cfif>
-	</cfif>
+			if ( width LT myImage.width OR height LT myImage.height ) {
+				// Scale image to fit
+				Variables.CFIMAGE.scaleToFit(
+					source=path,
+					quality=sField.quality,
+					width=width,
+					height=height
+				);
+			}
+		}
+	}
 
-</cffunction>
+}
 
-<cffunction name="adjustImages" access="private" returntype="struct" output="no">
-	<cfargument name="tablename" type="string" required="true">
-	<cfargument name="data" type="struct" required="true">
+private struct function adjustImages(
+	required string tablename,
+	required struct data
+) {
+	var aFields = getFileFields(tablename=Arguments.tablename,data=Arguments.data);
+	var sFields = getFieldsStruct(tablename=Arguments.tablename);
+	var ii = 0;
+	var sData = Duplicate(Arguments.data);
+	var myImage = 0;
 
-	<cfset var aFields = getFileFields(tablename=arguments.tablename,data=arguments.data)>
-	<cfset var sFields = getFieldsStruct(tablename=arguments.tablename)>
-	<cfset var ii = 0>
-	<cfset var in = Duplicate(arguments.data)>
-	<cfset var myImage = "">
-
-	<!--- If cfimage is available and image is passed in, fit any images into box --->
-	<cfif StructKeyExists(variables,"CFIMAGE") AND ArrayLen(aFields)>
-		<cfloop index="ii" from="1" to="#ArrayLen(aFields)#" step="1">
-			<!--- Make sure images are big enough --->
-			<cfif
-					StructKeyExists(in,aFields[ii].name)
+	// If cfimage is available and image is passed in, fit any images into box
+	if ( StructKeyExists(Variables,"CFIMAGE") AND ArrayLen(aFields) ) {
+		for ( ii=1; ii LTE ArrayLen(aFields); ii++ ) {
+			// Make sure images are big enough
+			if (
+					StructKeyExists(sData,aFields[ii].name)
 				AND	( StructKeyExists(aFields[ii],"type") AND aFields[ii].type EQ "image")
 				AND	( StructKeyExists(aFields[ii],"Folder") AND Len(aFields[ii].Folder) )
 				AND (
 							( StructKeyExists(aFields[ii],"MinBox") AND isNumeric(aFields[ii].MinBox) AND aFields[ii].MinBox GT 0 )
 					)
-				AND	FileExists(variables.FileMgr.getFilePath(in[aFields[ii].name],aFields[ii].Folder))
-			>
-				<!--- Get image --->
-				<cfset myImage = variables.CFIMAGE.read(source=variables.FileMgr.getFilePath(in[aFields[ii].name],aFields[ii].Folder))>
+				AND	FileExists(Variables.FileMgr.getFilePath(sData[aFields[ii].name],aFields[ii].Folder))
+			) {
+				// Get image
+				myImage = Variables.CFIMAGE.read(source=Variables.FileMgr.getFilePath(sData[aFields[ii].name],aFields[ii].Folder));
 
-				<cfif (myImage.width LT aFields[ii].MinBox) OR (myImage.height LT aFields[ii].MinBox)>
-					<cfthrow message="Width and height of #aFields[ii].label# must both be at least #aFields[ii].MinBox#." type="Manager">
-				</cfif>
-			</cfif>
-		</cfloop>
-		<!--- Copy/Resize thumbnail images --->
-		<cfloop index="ii" from="1" to="#ArrayLen(aFields)#" step="1">
-			<!--- If this is a thumb with a folder --->
-			<cfif
-					isThumbField(arguments.tablename,aFields[ii].name)
-				AND	StructKeyExists(in,aFields[ii].original)
-				AND	isSimpleValue(in[aFields[ii].original])
-				AND	Len(in[aFields[ii].original])
-			>
-				<cfset makeThumb(arguments.tablename,aFields[ii].name,in[aFields[ii].original])>
+				if (
+					(
+						myImage.width LT aFields[ii].MinBox
+					)
+					OR
+					(
+						myImage.height LT aFields[ii].MinBox
+					)
+				) {
+					throw(message="Width and height of #aFields[ii].label# must both be at least #aFields[ii].MinBox#.",type="Manager");
+				}
+			}
+		}
+		// Copy/Resize thumbnail images
+		for ( ii=1; ii LTE ArrayLen(aFields); ii++ ) {
+			// If this is a thumb with a folder
+			if (
+					isThumbField(Arguments.tablename,aFields[ii].name)
+				AND	StructKeyExists(sData,aFields[ii].original)
+				AND	isSimpleValue(sData[aFields[ii].original])
+				AND	Len(sData[aFields[ii].original])
+			) {
+				makeThumb(Arguments.tablename,aFields[ii].name,sData[aFields[ii].original]);
 
-				<!--- Add to in/data --->
-				<cfset in[aFields[ii].name] = in[aFields[ii].original]>
-			</cfif>
-		</cfloop>
-		<!--- Fit any images into box --->
-		<cfloop index="ii" from="1" to="#ArrayLen(aFields)#" step="1">
-			<!--- If: image is in args and has folder and size limitation and file exists --->
-			<cfif
-					( StructKeyExists(in,aFields[ii].name) AND isSimpleValue(in[aFields[ii].name]) AND Len(in[aFields[ii].name]) )
+				// Add to data
+				sData[aFields[ii].name] = sData[aFields[ii].original];
+			}
+		}
+		// Fit any images into box
+		for ( ii=1; ii LTE ArrayLen(aFields); ii++ ) {
+			// If: image is in args and has folder and size limitation and file exists
+			if (
+					( StructKeyExists(sData,aFields[ii].name) AND isSimpleValue(sData[aFields[ii].name]) AND Len(sData[aFields[ii].name]) )
 				AND	( StructKeyExists(aFields[ii],"type") AND aFields[ii].type EQ "image")
 				AND	( StructKeyExists(aFields[ii],"Folder") AND Len(aFields[ii].Folder) )
-			>
-				<cfset adjustImage(arguments.tablename,aFields[ii].name,in[aFields[ii].name])>
-			</cfif>
-		</cfloop>
-	</cfif>
+			) {
+				adjustImage(Arguments.tablename,aFields[ii].name,sData[aFields[ii].name]);
+			}
+		}
+	}
 
-	<cfreturn in>
-</cffunction>
+	return sData;
+}
 
-<cffunction name="getDataMgr" access="public" returntype="any" output="no">
-	<cfreturn this.DataMgr>
-</cffunction>
+public function getDataMgr() {
+	return This.DataMgr;
+}
 
-<cffunction name="getDataMgrGetRecordsArgs" access="private" returntype="string" output="no">
+private string function getDataMgrGetRecordsArgs() {
+	
+	if ( NOT StructKeyExists(Variables,"DataMgrGetRecordsArgs") ) {
+		Variables.DataMgrGetRecordsArgs = getArgumentsList(Variables.DataMgr.getRecords);
+	}
 
-	<cfif NOT StructKeyExists(variables,"DataMgrGetRecordsArgs")>
-		<cfset variables.DataMgrGetRecordsArgs = getArgumentsList(variables.DataMgr.getRecords)>
-	</cfif>
+	return Variables.DataMgrGetRecordsArgs;
+}
 
-	<cfreturn variables.DataMgrGetRecordsArgs>
-</cffunction>
+private string function getDataMgrSaveRecordArgs() {
 
-<cffunction name="getDataMgrSaveRecordArgs" access="private" returntype="string" output="no">
+	if ( NOT StructKeyExists(Variables,"DataMgrSaveRecordArgs") ) {
+		Variables.DataMgrSaveRecordArgs = getArgumentsList(Variables.DataMgr.saveRecord);
+	}
 
-	<cfif NOT StructKeyExists(variables,"DataMgrSaveRecordArgs")>
-		<cfset variables.DataMgrSaveRecordArgs = getArgumentsList(variables.DataMgr.saveRecord)>
-	</cfif>
+	return Variables.DataMgrSaveRecordArgs;
+}
 
-	<cfreturn variables.DataMgrSaveRecordArgs>
-</cffunction>
+public function getFileMgr() {
+	return This.FileMgr;
+}
 
-<cffunction name="getFileMgr" access="public" returntype="any" output="no">
-	<cfreturn this.FileMgr>
-</cffunction>
+public function getMetaStruct(string tablename) {
+	var result = 0;
 
-<cffunction name="getMetaStruct" access="public" returntype="any" output="false" hint="">
-	<cfargument name="tablename" type="string" required="no">
+	if (
+		StructKeyExists(Arguments,"tablename")
+		AND
+		StructKeyExists(Variables.sMetaData,Arguments.tablename)
+	) {
+		result = Variables.sMetaData[Arguments.tablename];
+	} else {
+		result = Variables.sMetaData;
+	}
 
-	<cfset var result = 0>
+	return result;
+}
 
-	<cfif StructKeyExists(arguments,"tablename") AND StructKeyExists(variables.sMetaData,arguments.tablename)>
-		<cfset result = variables.sMetaData[arguments.tablename]>
-	<cfelse>
-		<cfset result = variables.sMetaData>
-	</cfif>
+/*
+public function getMetaXML() {
+	return Variables.xMetaData;
+}
+*/
 
-	<cfreturn result>
-</cffunction>
+public string function getPrimaryKeyFields(
+	required string tablename,
+	xDef
+) {
+	var aPKFields = 0;
+	var ii = 0;
+	var result = "";
 
-<!---<cffunction name="getMetaXML" access="public" returntype="any" output="false" hint="">
-	<cfreturn variables.xMetaData>
-</cffunction>--->
+	if ( StructKeyExists(Arguments,"xDef") ) {
+		aPKFields = XmlSearch(Arguments.xDef,"//table[@name='#Arguments.tablename#']/field[starts-with(@type,'pk:')]");
+		for ( ii=1; ii LTE ArrayLen(aPKFields); ii++ ) {
+			result = ListAppend(result,aPKFields[ii].XmlAttributes.name);
+		}
+	}
 
-<cffunction name="getPrimaryKeyFields" access="public" returntype="string" output="no">
-	<cfargument name="tablename" type="string" required="true">
-	<cfargument name="xDef" type="any" required="false">
+	if ( NOT Len(result) ) {
+		aPKFields = Variables.DataMgr.getPKFields(Arguments.tablename);
+		for ( ii=1; ii LTE ArrayLen(aPKFields); ii++ ) {
+			result = ListAppend(result,aPKFields[ii].ColumnName);
+		}
+	}
 
-	<cfset var aPKFields = 0>
-	<cfset var ii = 0>
-	<cfset var result = "">
+	return result;
+}
 
-	<cfif StructKeyExists(arguments,"xDef")>
-		<cfset aPKFields = XmlSearch(arguments.xDef,"//table[@name='#arguments.tablename#']/field[starts-with(@type,'pk:')]")>
-		<cfloop index="ii" from="1" to="#ArrayLen(aPKFields)#" step="1">
-			<cfset result = ListAppend(result,aPKFields[ii].XmlAttributes.name)>
-		</cfloop>
-	</cfif>
+public string function getPrimaryKeyType(
+	required string tablename,
+	xDef
+) {
+	var result = "";
+	var sTableMeta = sMetaData[Arguments.tablename];
+	var sFields = getFieldsstruct(Arguments.tablename);
+	var sField = 0;
+	var pkfield = "";
+	var ii = 0;
 
-	<cfif NOT Len(result)>
-		<cfset aPKFields = variables.DataMgr.getPKFields(arguments.tablename)>
-		<cfloop index="ii" from="1" to="#ArrayLen(aPKFields)#" step="1">
-			<cfset result = ListAppend(result,aPKFields[ii].ColumnName)>
-		</cfloop>
-	</cfif>
+	if ( StructKeyExists(sTableMeta,"pkfield") ) {
+		pkfield = sTableMeta.pkfield;
+	} else {
+		for ( ii=1; ii LTE ArrayLen(sTableMeta.fields); ii++ ) {
+			if ( StructKeyExists(sTableMeta.fields[ii],"type") AND ListFirst(sTableMeta.fields[ii].type,":") EQ "pk" ) {
+				pkfield = ListAppend(pkfield,sTableMeta.fields[ii].name);
+			}
+		}
+	}
 
-	<cfreturn result>
-</cffunction>
+	if ( NOT Len(pkfield) ) {
+		result = "complex";
+	} else if ( ListLen(pkfield) EQ 1 ) {
+		sField = sFields[pkfield];
+		result = ListLast(sField.type,":");
+	} else {
+		result = "complex";
+	}
 
-<cffunction name="getPrimaryKeyType" access="public" returntype="string" output="no">
-	<cfargument name="tablename" type="string" required="true">
-	<cfargument name="xDef" type="any" required="false">
+	return result;
+}
 
-	<cfset var result = "">
-	<cfset var sTableMeta = sMetaData[arguments.tablename]>
-	<cfset var sFields = getFieldsstruct(arguments.tablename)>
-	<cfset var sField = 0>
-	<cfset var pkfield = "">
-	<cfset var ii = 0>
+private string function getUniversalTableName(
+	required string entity,
+	required string tablename
+) {
+	var qRecords = 0;
+	var sRecord = 0;
+	var result = "";
 
-	<cfif StructKeyExists(sTableMeta,"pkfield")>
-		<cfset pkfield = sTableMeta.pkfield>
-	<cfelse>
-		<cfloop index="ii" from="1" to="#ArrayLen(sTableMeta.fields)#" step="1">
-			<cfif StructKeyExists(sTableMeta.fields[ii],"type") AND ListFirst(sTableMeta.fields[ii].type,":") EQ "pk">
-				<cfset pkfield = ListAppend(pkfield,sTableMeta.fields[ii].name)>
-			</cfif>
-		</cfloop>
-	</cfif>
-
-	<cfif NOT Len(pkfield)>
-		<cfset result = "complex">
-	<cfelseif ListLen(pkfield) EQ 1>
-		<cfset sField = sFields[pkfield]>
-		<cfset result = ListLast(sField.type,":")>
-	<cfelse>
-		<cfset result = "complex">
-	</cfif>
-
-	<cfreturn result>
-</cffunction>
-
-<cffunction name="getUniversalTableName" access="private" returntype="string" output="no">
-	<cfargument name="entity" type="string" required="yes">
-	<cfargument name="tablename" type="string" required="yes">
-
-	<cfset var qRecords = 0>
-	<cfset var result = "">
-
-	<!---
+	/*
 	Make sure we have a table to store this in.
 	This is essential that this has permanent storage.
 	Currently this is the only scenario under which Manager creates a table or stores its own data in the database
-	--->
-	<cfif NOT Variables.DataMgr.hasTable("mgrUniversals")>
-		<cfset Variables.DataMgr.loadXml(
+	*/
+	if ( NOT Variables.DataMgr.hasTable("mgrUniversals") ) {
+		Variables.DataMgr.loadXml(
 			'
 				<tables>
 					<table name="mgrUniversals">
@@ -402,288 +423,297 @@
 			',
 			true,
 			true
-		)>
-	</cfif>
+		);
+	}
 
-	<!---
+	/*
 	Load data from the database the first time this is used
-	--->
-	<cfif NOT StructKeyExists(Variables,"sUniversals")>
-		<cfset Variables.sUniversals = StructNew()>
-		<cfset qRecords = Variables.DataMgr.getRecords(tablename="mgrUniversals")>
-		<cfoutput query="qRecords">
-			<cfset Variables.sUniversals[qRecords["entity"][CurrentRow]] = qRecords["tablename"][CurrentRow]>
-		</cfoutput>
-	</cfif>
-	<cfif NOT StructKeyExists(Variables.sUniversals,Arguments.entity)>
-		<cfset Variables.DataMgr.saveRecord("mgrUniversals",Arguments)>
-		<cfset Variables.sUniversals[Arguments["entity"]] = Arguments["tablename"]>
-	</cfif>
+	*/
+	if ( NOT StructKeyExists(Variables,"sUniversals") ) {
+		Variables.sUniversals = {};
+		qRecords = Variables.DataMgr.getRecords(tablename="mgrUniversals");
+		for ( sRecord in qRecords ) {
+			Variables.sUniversals[sRecord["entity"]] = sRecord["tablename"];
+		}
+	}
+	if ( NOT StructKeyExists(Variables.sUniversals,Arguments.entity) ) {
+		Variables.DataMgr.saveRecord("mgrUniversals",Arguments);
+		Variables.sUniversals[Arguments["entity"]] = Arguments["tablename"];
+	}
 
-	<cfreturn Variables.sUniversals[Arguments.entity]>
-</cffunction>
+	return Variables.sUniversals[Arguments.entity];
+}
 
-<cffunction name="isThumbField" access="public" returntype="string" output="no">
-	<cfargument name="tablename" type="string" required="true">
-	<cfargument name="fieldname" type="string" required="true">
+public string function isThumbField(
+	required string tablename,
+	required string fieldname
+) {
+	var sFields = getFieldsStruct(Arguments.tablename);
+	var sField = sFields[Arguments.fieldname];
+	var result = false;
 
-	<cfset var sFields = getFieldsStruct(arguments.tablename)>
-	<cfset var sField = sFields[arguments.fieldname]>
-	<cfset var result = false>
-
-	<cfif
+	if (
 			( StructKeyExists(sField,"type") AND sField.type EQ "thumb")
 		AND	( StructKeyExists(sField,"Folder") AND Len(sField.Folder) )
 		AND	(
 					StructKeyExists(sField,"original")
 				AND	StructKeyExists(sFields,sField.original)
 			)
+	) {
+		result = true;
+	}
+	
+	return result;
+}
 
-	>
-		<cfset result = true>
-	</cfif>
+public function makeThumb(
+	required string tablename,
+	required string fieldname,
+	required string filename
+) {
+	var sFields = getFieldsStruct(Arguments.tablename);
+	var sField = sFields[Arguments.fieldname];
 
-	<cfreturn result>
-</cffunction>
+	var myImage = 0;
+	var width = 0;
+	var height = 0;
 
-<cffunction name="makeThumb" access="public" returntype="any" output="no">
-	<cfargument name="tablename" type="string" required="true">
-	<cfargument name="fieldname" type="string" required="true">
-	<cfargument name="filename" type="string" required="true">
+	// Copy file if original file exists --->
+	var file_original = Variables.FileMgr.getFilePath(Arguments.filename,sFields[sField.original].Folder);
+	var file_thumb = Variables.FileMgr.getFilePath(Arguments.filename,sField.Folder);
 
-	<cfset var sFields = getFieldsStruct(arguments.tablename)>
-	<cfset var sField = sFields[arguments.fieldname]>
+	if ( FileExists(file_original) ) {
+		// Copy original image to thumb
+		FileCopy(file_original,file_thumb);
 
-	<cfset var myImage = 0>
-	<cfset var width = 0>
-	<cfset var height = 0>
+		// Resize if a size limitation exists --->
+		adjustImage(Arguments.tablename,Arguments.fieldname,Arguments.filename);
+	}
 
-	<!--- Copy file if original file exists --->
-	<cfset var file_original = variables.FileMgr.getFilePath(arguments.filename,sFields[sField.original].Folder)>
-	<cfset var file_thumb = variables.FileMgr.getFilePath(arguments.filename,sField.Folder)>
+}
 
-	<cfif FileExists(file_original)>
-		<!--- Copy original image to thumb --->
-		<cffile action="copy" source="#file_original#" destination="#file_thumb#">
+public void function makeThumbs(
+	required string tablename,
+	string fieldname
+) {
+	var aFields = 0;
+	var ii = 0;
 
-		<!--- Resize if a size limitation exists --->
-		<cfset adjustImage(arguments.tablename,arguments.fieldname,arguments.filename)>
-	</cfif>
+	if ( StructKeyExists(Arguments,"fieldname") ) {
+		makeThumbsInternal(ArgumentCollection=Arguments);
+	} else {
+		aFields = getFileFields(tablename=Arguments.tablename);
+		for ( ii=1; ii LTE ArrayLen(aFields); ii++ ) {
+			if ( isThumbField(Arguments.tablename,aFields[ii].name) ) {
+				makeThumbsInternal(Arguments.tablename,aFields[ii].name);
+			}
+		}
+	}
 
-</cffunction>
+	notifyEvent("makeThumbs",Arguments);
 
-<cffunction name="makeThumbs" access="public" returntype="void" output="no">
-	<cfargument name="tablename" type="string" required="true">
-	<cfargument name="fieldname" type="string" required="false">
+}
 
-	<cfset var aFields = 0>
-	<cfset var ii = 0>
+private void function makeThumbsInternal(
+	required string tablename,
+	required string fieldname
+) {
+	var sFields = 0;
+	var sField = 0;
+	var qRecords = 0;
+	var sRecord = 0;
+	var aFilters = 0;
+	var sData = 0;
+	var pkfield = "";
 
-	<cfif StructKeyExists(arguments,"fieldname")>
-		<cfset makeThumbsInternal(argumentCollection=arguments)>
-	<cfelse>
-		<cfset aFields = getFileFields(tablename=arguments.tablename)>
-		<cfloop index="ii" from="1" to="#ArrayLen(aFields)#" step="1">
-			<cfif isThumbField(arguments.tablename,aFields[ii].name)>
-				<cfset makeThumbsInternal(arguments.tablename,aFields[ii].name)>
-			</cfif>
-		</cfloop>
-	</cfif>
+	//Only take action if the given field is a valid thumb field
+	if ( isThumbField(Arguments.tablename,Arguments.fieldname) ) {
+		sFields = getFieldsStruct(Arguments.tablename);
+		sField = sFields[Arguments.fieldname];
+		aFilters = [];
 
-	<cfset notifyEvent("makeThumbs",Arguments)>
+		// Only take action if table has some records with originals and no thumbnails
+		ArrayAppend(aFilters,StructFromArgs(field=Arguments.fieldname,operator="=",value=""));
+		ArrayAppend(aFilters,StructFromArgs(field=sField.original,operator="<>",value=""));
+		qRecords = Variables.DataMgr.getRecords(
+			tablename=Arguments.tablename,
+			fieldlist="#getPrimaryKeyFields(Arguments.tablename)#,#Arguments.fieldname#,#sField.original#",
+			filters=aFilters
+		);
 
-</cffunction>
+		for ( sRecord in qRecords ) {
+			// Make thumbnail of original
+			makeThumb(Arguments.tablename,Arguments.fieldname,sRecord[sField.original]);
+			// Save data
+			sData = {};
+			sData[Arguments.fieldname] = sRecord[sField.original];
+			for ( pkfield in ListToArray(getPrimaryKeyFields(Arguments.tablename)) ) {
+				sData[pkfield] = sRecord[pkfield];
+			}
+			Variables.DataMgr.updateRecord(Arguments.tablename,sData);
 
-<cffunction name="makeThumbsInternal" access="private" returntype="void" output="no">
-	<cfargument name="tablename" type="string" required="true">
-	<cfargument name="fieldname" type="string" required="true">
+		}
+	}
 
-	<cfset var sFields = 0>
-	<cfset var sField = 0>
-	<cfset var qRecords = 0>
-	<cfset var aFilters = 0>
-	<cfset var sData = 0>
-	<cfset var pkfield = "">
+}
 
-	<!--- Only take action if the given field is a valid thumb field --->
-	<cfif isThumbField(arguments.tablename,arguments.fieldname)>
+public string function pluralize(required string string) {
+	var result = Arguments.string;
 
-		<cfset sFields = getFieldsStruct(arguments.tablename)>
-		<cfset sField = sFields[arguments.fieldname]>
-		<cfset aFilters = ArrayNew(1)>
+	if ( Len(Trim(result)) ) {
+		if ( StructKeyExists(Variables,"Pluralizer") ) {
+			result = Variables.Pluralizer.pluralize(Arguments.string);
+		}
 
-		<!--- Only take action if table has some records with originals and no thumbnails --->
-		<cfset ArrayAppend(aFilters,StructFromArgs(field=arguments.fieldname,operator="=",value=""))>
-		<cfset ArrayAppend(aFilters,StructFromArgs(field=sField.original,operator="<>",value=""))>
-		<cfinvoke returnvariable="qRecords" component="#variables.DataMgr#" method="getRecords">
-			<cfinvokeargument name="tablename" value="#arguments.tablename#">
-			<cfinvokeargument name="fieldlist" value="#getPrimaryKeyFields(arguments.tablename)#,#arguments.fieldname#,#sField.original#">
-			<cfinvokeargument name="filters" value="#aFilters#">
-		</cfinvoke>
+		if ( result EQ Arguments.string ) {
+			if ( Right(Arguments.string,1) EQ "s" ) {
+				result = "#Arguments.string#es";
+			} else {
+				result = "#Arguments.string#s";
+			}
+		}
+	}
 
-		<cfloop query="qRecords">
-			<!--- Make thumbnail of original --->
-			<cfset makeThumb(arguments.tablename,arguments.fieldname,qRecords[sField.original][CurrentRow])>
-			<!--- Save data --->
-			<cfset sData = StructNew()>
-			<cfset sData[arguments.fieldname] = qRecords[sField.original][CurrentRow]>
-			<cfloop list="#getPrimaryKeyFields(arguments.tablename)#" index="pkfield">
-				<cfset sData[pkfield] = qRecords[pkfield][CurrentRow]>
-			</cfloop>
-			<cfset variables.DataMgr.updateRecord(arguments.tablename,sData)>
-		</cfloop>
+	return result;
+}
 
-	</cfif>
+public function transformField(
+	required struct field,
+	string transformer=""
+) {
+	var sField = Arguments.field;
+	var sType = 0;
+	var att = "";
+	var isListField = false;
 
-</cffunction>
-
-<cffunction name="pluralize" access="public" returntype="string" output="false" hint="">
-	<cfargument name="string" type="string" required="yes">
-
-	<cfset var result = arguments.string>
-
-	<cfif Len(Trim(result))>
-		<cfif StructKeyExists(variables,"Pluralizer")>
-			<cfset result = variables.Pluralizer.pluralize(arguments.string)>
-		</cfif>
-
-		<cfif result EQ arguments.string>
-			<cfif Right(arguments.string,1) EQ "s">
-				<cfset result = "#arguments.string#es">
-			<cfelse>
-				<cfset result = "#arguments.string#s">
-			</cfif>
-		</cfif>
-	</cfif>
-
-	<cfreturn result>
-</cffunction>
-
-<cffunction name="transformField" access="public" returntype="any" output="false" hint="">
-	<cfargument name="field" type="struct" required="yes">
-	<cfargument name="transformer" type="string" default="">
-
-	<cfset var sField = arguments.field>
-	<cfset var sType = 0>
-	<cfset var att = "">
-	<cfset var isListField = false>
-
-	<!--- If a transformer is present, adjust accordingly. --->
-	<cfif Len(arguments.transformer) AND StructKeyExists(sField,"type")>
-		<cfset sType = getTypeData(sField.type,arguments.transformer)>
-		<cfif StructCount(sType)>
-			<!--- Set all attributes --->
-			<cfloop collection="#sType#" item="att">
-				<cfif
+	//If a transformer is present, adjust accordingly.
+	if ( Len(Arguments.transformer) AND StructKeyExists(sField,"type") ) {
+		sType = getTypeData(sField.type,Arguments.transformer);
+		if ( StructCount(sType) ) {
+			// Set all attributes
+			for ( att in sType ) {
+				if (
 						att NEQ "name"
 					AND	NOT ( Len(att) GT Len("lcase_") AND Left(att,Len("lcase_")) EQ "lcase_" )
 					AND	NOT ( StructKeyExists(sField,att) AND Len(sField[att]) AND att NEQ "type" )
-				>
-					<cfset sField[att] = sType[att]>
-				</cfif>
-			</cfloop>
-			<cfset sType = getTypeData(sField.type)>
-			<!--- Set all attributes --->
-			<cfif StructCount(sType)>
-				<cfloop collection="#sType#" item="att">
-					<cfif
+				) {
+					sField[att] = sType[att];
+				}
+			}
+			sType = getTypeData(sField.type);
+			// Set all attributes
+			if ( StructCount(sType) ) {
+				for ( att in sType ) {
+					if (
 							att NEQ "name"
 						AND	NOT ( Len(att) GT Len("lcase_") AND Left(att,Len("lcase_")) EQ "lcase_" )
 						AND	NOT ( StructKeyExists(sField,att) AND Len(sField[att]) )
-					>
-						<cfset sField[att] = sType[att]>
-					</cfif>
-				</cfloop>
-			</cfif>
-		<cfelse>
-			<cfset sField = StructNew()>
-		</cfif>
-	<cfelse>
-		<cfif StructKeyExists(sField,"type") AND Len(Trim(sField.type))>
-			<cfset sType = getTypeData(sField.type)>
-			<!--- Set all attributes --->
-			<cfif StructCount(sType)>
-				<cfloop collection="#sType#" item="att">
-					<cfif
+					) {
+						sField[att] = sType[att];
+					}
+				}
+			}
+		} else {
+			sField = {};
+		}
+	} else {
+		if ( StructKeyExists(sField,"type") AND Len(Trim(sField.type)) ) {
+			sType = getTypeData(sField.type);
+			// Set all attributes
+			if ( StructCount(sType) ) {
+				for ( att in sType ) {
+					if (
 							att NEQ "name"
 						AND	NOT ( Len(att) GT Len("lcase_") AND Left(att,Len("lcase_")) EQ "lcase_" )
 						AND	NOT ( StructKeyExists(sField,att) AND Len(sField[att]) )
-					>
-						<cfset sField[att] = sType[att]>
-					</cfif>
-				</cfloop>
-			</cfif>
-		</cfif>
-	</cfif>
-	<!--- Default size shouldn't exceed 50 --->
-	<cfif
+					) {
+						sField[att] = sType[att];
+					}
+				}
+			}
+		}
+	}
+
+	// Default size shouldn't exceed 50
+	if (
 			StructKeyExists(sField,"Length")
 		AND	isNumeric(sField.Length)
 		AND	sField.Length GT 50
-		AND	NOT StructKeyExists(sField,"size")>
-		<cfset sField["size"] = 50>
-	</cfif>
-	<cfif StructKeyExists(sField,"Default") AND arguments.transformer EQ "sebField">
-		<cfset sField["defaultValue"] = sField["Default"]>
-	</cfif>
+		AND	NOT StructKeyExists(sField,"size")
+	) {
+		sField["size"] = 50;
+	}
+	if ( StructKeyExists(sField,"Default") AND Arguments.transformer EQ "sebField" ) {
+		sField["defaultValue"] = sField["Default"];
+	}
 
-	<!--- Set values from attributes scoped for this transformer --->
-	<cfif Len(arguments.transformer)>
-		<cfloop collection="#sField#" item="att">
-			<cfif
+	// Set values from attributes scoped for this transformer \
+	if ( Len(Arguments.transformer) ) {
+		for ( att in sField ) {
+			if (
 					ListLen(att,"_") EQ 2
-				AND	ListFirst(att,"_") EQ arguments.transformer
-			>
-				<cfset sField[ListLast(att,"_")] = sField[att]>
-			</cfif>
-		</cfloop>
-	</cfif>
+				AND	ListFirst(att,"_") EQ Arguments.transformer
+			) {
+				sField[ListLast(att,"_")] = sField[att];
+			}
+		}
+	}
 
-	<!---<cfif arguments.transformer EQ "sebColumn">
-		<cfset sField["dbfield"] = sField["name"]>
-		<cfif NOT StructKeyExists(sField,"label")>
-			<cfset sField["label"] = sField["name"]>
-		</cfif>
-		<cfif NOT StructKeyExists(sField,"header")>
-			<cfset sField["header"] = sField["label"]>
-		</cfif>
-	</cfif>--->
+	/*
+	if ( Arguments.transformer EQ "sebColumn" ) {
+		sField["dbfield"] = sField["name"];
+		if ( NOT StructKeyExists(sField,"label") ) {
+			sField["label"] = sField["name"];
+		}
+		if ( NOT StructKeyExists(sField,"header") ) {
+			sField["header"] = sField["label"];
+		}
+	}
+	*/
 
-	<cfset isListField = ( StructKeyExists(sField,"relation") AND StructKeyExists(sField.relation,"type") AND isSimpleValue(sField.relation.type) AND sField.relation.type EQ "list" )>
+	isListField = ( StructKeyExists(sField,"relation") AND StructKeyExists(sField.relation,"type") AND isSimpleValue(sField.relation.type) AND sField.relation.type EQ "list" );
 
-	<cfif
-			StructKeyExists(arguments,"transformer")
-		AND	arguments.transformer EQ "sebField"
-	>
-		<cfif isListField>
-			<cfset sField.type="checkbox">
-		<!---<cfelseif StructKeyExists(sField,"relation")>
-			<cfset sField = StructNew()>--->
-		</cfif>
-	</cfif>
+	if (
+			StructKeyExists(Arguments,"transformer")
+		AND	Arguments.transformer EQ "sebField"
+	) {
+		if ( isListField ) {
+			sField.type="checkbox";
+		/*
+		} else if ( StructKeyExists(sField,"relation") ) {
+			sField = {};
+		*/
+		}
+	}
 
-	<!--- If field has attribute name matching transformer value with a value of "false", ditch field --->
-	<cfif Len(arguments.transformer) AND StructKeyExists(sField,arguments.transformer) AND sField[arguments.transformer] IS false>
-		<cfset sField = StructNew()>
-	</cfif>
+	// If field has attribute name matching transformer value with a value of "false", ditch field
+	if (
+		Len(Arguments.transformer)
+		AND
+		StructKeyExists(sField,Arguments.transformer)
+		AND
+		sField[Arguments.transformer] IS false
+	) {
+		sField = {};
+	}
 
-	<cfreturn sField>
-</cffunction>
+	return sField;
+}
 
-<cffunction name="getFieldsArray" access="public" returntype="array" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="transformer" type="string" default="">
+public array function getFieldsArray(
+	required string tablename,
+	string transformer=""
+) {
+	var aFields = getFieldsArrayInternal(transformer=Arguments.transformer,tablename=Arguments.tablename);
+	var ii = 0;
+	var sField = 0;
 
-	<cfset var aFields = getFieldsArrayInternal(transformer=arguments.transformer,tablename=arguments.tablename)>
-	<cfset var ii = 0>
-	<cfset var sField = 0>
-
-	<cfloop index="ii" from="#ArrayLen(aFields)#" to="1" step="-1">
-		<cfif
+	for ( ii=1; ii LTE ArrayLen(aFields); ii++ ) {
+		if (
 			(
 					(
-							arguments.transformer EQ "sebField"
-						OR	arguments.transformer EQ "sebColumn"
+							Arguments.transformer EQ "sebField"
+						OR	Arguments.transformer EQ "sebColumn"
 					)
 				AND	StructKeyExists(aFields[ii],"relation")
 				AND	NOT (
@@ -691,252 +721,265 @@
 						AND	aFields[ii].relation.type EQ "list"
 					)
 			)
-		><!--- ( StructKeyExists(aFields[ii],"type") AND aFields[ii].type NEQ "relation" ) --->
-			<cfset ArrayDeleteAt(aFields,ii)>
-		<cfelseif
+		) {// ( StructKeyExists(aFields[ii],"type") AND aFields[ii].type NEQ "relation" )
+			ArrayDeleteAt(aFields,ii);
+		} else if (
 				(
-						arguments.transformer EQ "sebField"
-					OR	arguments.transformer EQ "sebColumn"
+						Arguments.transformer EQ "sebField"
+					OR	Arguments.transformer EQ "sebColumn"
 				)
 			AND	(
 						( StructKeyExists(aFields[ii],"type") AND ListFirst(aFields[ii].type,":") EQ "pk" )
 					OR	( StructKeyExists(aFields[ii],"PrimaryKey") AND aFields[ii].PrimaryKey IS true )
 				)
-		>
-			<cfset ArrayDeleteAt(aFields,ii)>
-		<cfelseif arguments.transformer EQ "sebField" AND StructKeyExists(aFields[ii],"type") AND aFields[ii].type EQ "thumb">
-			<cfset ArrayDeleteAt(aFields,ii)>
-		<cfelseif arguments.transformer EQ "sebColumn" AND StructKeyExists(aFields[ii],"type")>
-			<!--- Sorter must always come first --->
-			<!---<cfif aFields[ii].type EQ "Sorter" AND ii GT 1>
-				<cfset sField = Duplicate(aFields[ii])>
-				<cfset ArrayDeleteAt(aFields,ii)>
-				<cfset ArrayPrepend(aFields,sField)>
-				<cfset ii = ArrayLen(aFields)>--->
-			<cfif aFields[ii].type EQ "delete">
-				<cfset ArrayDeleteAt(aFields,ii)>
-			</cfif>
-		</cfif>
-	</cfloop>
+		) {
+			ArrayDeleteAt(aFields,ii);
+		} else if ( Arguments.transformer EQ "sebField" AND StructKeyExists(aFields[ii],"type") AND aFields[ii].type EQ "thumb" ) {
+			ArrayDeleteAt(aFields,ii);
+		} else if ( Arguments.transformer EQ "sebColumn" AND StructKeyExists(aFields[ii],"type") ) {
+			// Sorter must always come first
+			/*
+			if ( aFields[ii].type EQ "Sorter" AND ii GT 1 ) {
+				sField = Duplicate(aFields[ii]);
+				ArrayDeleteAt(aFields,ii);
+				ArrayPrepend(aFields,sField);
+				ii = ArrayLen(aFields);
+			*/
+			if ( aFields[ii].type EQ "delete" ) {
+				ArrayDeleteAt(aFields,ii);
+			}
+		}
+	}
 
-	<cfloop index="ii" from="1" to="#ArrayLen(aFields)#" step="1">
-		<cfif arguments.transformer EQ "sebColumn" AND StructKeyExists(aFields[ii],"type")>
-			<cfset sField = Duplicate(aFields[ii])>
-			<cfset ArrayDeleteAt(aFields,ii)>
-			<cfset ArrayPrepend(aFields,sField)>
-		</cfif>
-	</cfloop>
+	for ( ii=1; ii LTE ArrayLen(aFields); ii++ ) {
+		if ( Arguments.transformer EQ "sebColumn" AND StructKeyExists(aFields[ii],"type") ) {
+			sField = Duplicate(aFields[ii]);
+			ArrayDeleteAt(aFields,ii);
+			ArrayPrepend(aFields,sField);
+		}
+	}
 
-	<cfreturn aFields>
-</cffunction>
+	return aFields;
+}
 
-<cffunction name="getFieldsArrayInternal" access="public" returntype="array" output="no">
-	<cfargument name="transformer" type="string" default="">
-	<cfargument name="tablename" type="string" required="yes">
+public array function getFieldsArrayInternal(
+	string transformer="",
+	required string tablename
+) {
+	var aRawFields = Duplicate(Variables.sMetaData[Arguments.tablename].fields);
+	var aFields = [];
+	var ii = 0;
+	var sField = 0;
 
-	<cfset var aRawFields = Duplicate(variables.sMetaData[arguments.tablename].fields)>
-	<cfset var aFields = ArrayNew(1)>
-	<cfset var ii = 0>
-	<cfset var sField = 0>
+	for ( ii=1; ii LTE ArrayLen(aRawFields); ii++ ) {
+		sField = transformField(aRawFields[ii],Arguments.transformer);
+		if ( StructCount(sField) ) {
+			ArrayAppend(aFields,sField);
+		}
+	}
 
-	<cfloop index="ii" from="1" to="#ArrayLen(aRawFields)#" step="1">
-		<cfset sField = transformField(aRawFields[ii],arguments.transformer)>
-		<cfif StructCount(sField)>
-			<cfset ArrayAppend(aFields,sField)>
-		</cfif>
-	</cfloop>
+	// For DataMgr, if a table has multiple pk:identity, none should increment
+	if ( StructKeyExists(Arguments,"transformer") AND Arguments.transformer EQ "DataMgr" ) {
+		aFields = alterDataMgrIncrements(aFields);
+	}
 
-	<!--- For DataMgr, if a table has multiple pk:identity, none should increment --->
-	<cfif StructKeyExists(arguments,"transformer") AND arguments.transformer EQ "DataMgr">
-		<cfset aFields = alterDataMgrIncrements(aFields)>
-	</cfif>
+	return aFields;
+}
 
-	<cfreturn aFields>
-</cffunction>
+private boolean function hasOrdinalArgs(required struct Args) {
+	var ii = 0;
 
-<cffunction name="hasOrdinalArgs" access="private" returntype="boolean" output="no">
-	<cfargument name="Args" type="struct" required="yes">
+	if ( NOT StructCount(Args) ) {
+		return false;
+	}
 
-	<cfset var ii = 0>
+	for ( ii in Args ) {
+		if ( NOT isNumeric(ii) ) {
+			return false;
+		}
+	}
 
-	<cfif NOT StructCount(Args)>
-		<cfreturn false>
-	</cfif>
+	return true;
+}
 
-	<cfloop item="ii" collection="#Args#">
-		<cfif NOT isNumeric(ii)>
-			<cfreturn false>
-		</cfif>
-	</cfloop>
+/**
+* @fieldlist A list of fields to return. If left blank, all fields will be returned.
+*/
+public query function getPKRecord(
+	required string tablename,
+	required struct data,
+	string fieldlist=""
+) {
+	var sData = Arguments.data;
+	var pkfields = 0;
+	var ii = 0;
+	var qRecord = QueryNew("none");
+	var pklist = "";
+	var sPKs = {};
+	var sTable = {table=Arguments.tablename};
 
-	<cfreturn true>
-</cffunction>
+	pkfields = Variables.DataMgr.getPKFields(Arguments.tablename);
 
-<cffunction name="getPKRecord" access="public" returntype="query" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" required="yes">
-	<cfargument name="fieldlist" type="string" default="" hint="A list of fields to return. If left blank, all fields will be returned.">
+	if ( NOT ArrayLen(pkfields) ) {
+		throw(message="getRecord can only be used against tables with at least one primary key field.",type="Manager");
+	}
 
-	<cfset var in = arguments.data>
-	<cfset var pkfields = 0>
-	<cfset var ii = 0>
-	<cfset var qRecord = QueryNew("none")>
-	<cfset var pklist = "">
-	<cfset var sPKs = {}>
-	<cfset var sTable = {table=Arguments.tablename}>
+	// Make a list of pkfields
+	for ( ii=1; ii LTE ArrayLen(pkfields); ii++ ) {
+		pklist = ListAppend(pklist,pkfields[ii].ColumnName);
+	}
 
-	<cfset pkfields = variables.DataMgr.getPKFields(arguments.tablename)>
+	// Set argument names if not given by names
+	if (
+			hasOrdinalArgs(sData)
+		AND	ArrayLen(sData) GTE ArrayLen(pkfields)
+		AND NOT StructKeyExists(sData,pkfields[1].ColumnName)
+	) {
+		for ( ii=1; ii LTE ArrayLen(pkfields); ii++ ) {
+			sData[pkfields[ii].ColumnName] = sData[ii];
+		}
+	}
 
-	<cfif NOT ArrayLen(pkfields)>
-		<cfthrow message="getRecord can only be used against tables with at least one primary key field." type="Manager">
-	</cfif>
-
-	<!--- Make a list of pkfields --->
-	<cfloop index="ii" from="1" to="#ArrayLen(pkfields)#" step="1">
-		<cfset pklist = ListAppend(pklist,pkfields[ii].ColumnName)>
-	</cfloop>
-
-	<!--- Set argument names if not given by names --->
-	<cfif
-			hasOrdinalArgs(in)
-		AND	ArrayLen(in) GTE ArrayLen(pkfields)
-		AND NOT StructKeyExists(in,pkfields[1].ColumnName)
-	>
-		<cfloop index="ii" from="1" to="#ArrayLen(pkfields)#" step="1">
-			<cfset in[pkfields[ii].ColumnName] = in[ii]>
-		</cfloop>
-	</cfif>
-
-	<!--- Delete any arguments that aren't simple and primary keys --->
-	<cfloop collection="#in#" item="ii">
-		<cfif
+	// Delete any Arguments that aren't simple and primary keys
+	for ( ii in sData ) {
+		if (
 				(
-							StructKeyExists(in,ii)
-						AND	isSimpleValue(in[ii])
+							StructKeyExists(sData,ii)
+						AND	isSimpleValue(sData[ii])
 						AND	ListFindNoCase(pklist,ii)
-						AND	Len(in[ii])
+						AND	Len(sData[ii])
 					)
-		>
-			<cfset sPKs[ii] = in[ii]>
-		</cfif>
-	</cfloop>
+		) {
+			sPKs[ii] = sData[ii];
+		}
+	}
 
-	<!--- If all pks are passed in, retrieve record --->
-	<cfif ArrayLen(pkfields) GT 0 AND StructCount(in) GT 0 AND ArrayLen(pkfields) EQ StructCount(in)>
-		<cfinvoke returnvariable="qRecord" component="#variables.DataMgr#" method="getRecord">
-			<cfinvokeargument name="tablename" value="#arguments.tablename#">
-			<cfinvokeargument name="data" value="#sPKs#">
-			<cfinvokeargument name="fieldlist" value="#arguments.fieldlist#">
-		</cfinvoke>
-	</cfif>
+	// If all pks are passed in, retrieve record
+	if (
+		ArrayLen(pkfields) GT 0
+		AND
+		StructCount(sData) GT 0
+		AND
+		ArrayLen(pkfields) EQ StructCount(sData)
+	) {
+		qRecord = Variables.DataMgr.getRecord(
+			tablename=Arguments.tablename,
+			data=sPKs,
+			fieldlist=Arguments.fieldlist
+		);
+	}
 
-	<cfreturn qRecord>
-</cffunction>
+	return qRecord;
+}
 
-<cffunction name="getRecord" access="public" returntype="query" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" required="yes">
+public query function getRecord(
+	required string tablename,
+	required struct data
+) {
+	var qRecord = 0;
 
-	<cfset var qRecord = 0>
+	Arguments.isGetRecord = true;
 
-	<cfset arguments.isGetRecord = true>
+	Arguments = alterArgs(ArgumentCollection=Arguments);
+	Arguments.data = makeNamedPKArgs(tablename=Arguments.tablename,data=Arguments.data);
 
-	<cfset arguments = alterArgs(argumentCollection=arguments)>
-	<cfset arguments.data = makeNamedPKArgs(tablename=arguments.tablename,data=arguments.data)>
+	if ( NOT StructKeyExists(Arguments,"fieldlist") ) {
+		Arguments.fieldlist = "";
+	}
 
-	<cfif NOT StructKeyExists(arguments,"fieldlist")>
-		<cfset arguments.fieldlist = "">
-	</cfif>
+	qRecord = Variables.DataMgr.getRecord(ArgumentCollection=Arguments);
 
-	<cfset qRecord = variables.DataMgr.getRecord(argumentCollection=arguments)>
+	return alterRecords(Arguments.tablename,qRecord);
+}
 
-	<cfreturn alterRecords(arguments.tablename,qRecord)>
-</cffunction>
+public query function getRecords(
+	required string tablename,
+	required struct data
+) {
+	return alterRecords(Arguments.tablename,Variables.DataMgr.getRecords(ArgumentCollection=alterArgs(ArgumentCollection=Arguments)));
+}
 
-<cffunction name="getRecords" access="public" returntype="query" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" default="#StructNew()#">
+public array function getRecordsSQL(
+	required string tablename,
+	required struct data="#{}#"
+) {
+	return Variables.DataMgr.getRecordsSQL(ArgumentCollection=alterArgs(ArgumentCollection=Arguments));
+}
 
-	<cfreturn alterRecords(arguments.tablename,variables.DataMgr.getRecords(argumentCollection=alterArgs(argumentCollection=arguments)))>
-</cffunction>
+public boolean function isRecordDeletable(
+	required string tablename,
+	struct data="#{}#",
+	query query
+) {
+	var result = true;
+	var qRecord = 0;
+	var sMetaData = getMetaStruct();
+	var sTableData = sMetaData[Arguments.tablename];
+	var col = "";
+	var negate = false;
 
-<cffunction name="getRecordsSQL" access="public" returntype="array" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" default="#StructNew()#">
+	if ( StructKeyExists(Arguments,"query") ) {
+		qRecord = Arguments.query;
+	} else {
+		qRecord = getRecord(tablename=Arguments.tablename,data=Arguments.data);
+	}
 
-	<cfreturn variables.DataMgr.getRecordsSQL(argumentCollection=alterArgs(argumentCollection=arguments))>
-</cffunction>
+	// Check "deletable" attribute/property of table
+	if ( result IS true AND StructKeyExists(sTableData,"deletable") AND Len(sTableData.deletable) ) {
+		if ( isBoolean(sTableData.deletable) ) {
+			result = sTableData.deletable;
+		} else {
+			col = sTableData.deletable;
+			if ( Left(sTableData.deletable,1) EQ "!" ) {
+				col = ReplaceNoCase(col,"!",1);
+				negate = true;
+			}
+			if ( ListFindNoCase(qRecord.ColumnList,col) ) {
+				if ( isBoolean(qRecord[col][1]) ) {
+					result = qRecord[col][1];
+					if ( negate ) {
+						result = NOT result;
+					}
+				}
+			}
+		}
+	}
 
-<cffunction name="isRecordDeletable" access="public" returntype="boolean" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" default="#StructNew()#">
-	<cfargument name="query" type="query" required="false">
+	// Check for no deletes for related records
+	if ( result IS true ) {
+		result = Variables.DataMgr.isDeletable(tablename=Arguments.tablename,data=Arguments.data,qRecord=qRecord);
+	}
 
-	<cfset var result = true>
-	<cfset var qRecord = 0>
-	<cfset var sMetaData = getMetaStruct()>
-	<cfset var sTableData = sMetaData[arguments.tablename]>
-	<cfset var col = "">
-	<cfset var negate = false>
+	return result;
+}
 
-	<cfif StructKeyExists(arguments,"query")>
-		<cfset qRecord = arguments.query>
-	<cfelse>
-		<cfset qRecord = getRecord(tablename=arguments.tablename,data=arguments.data)>
-	</cfif>
+public void function removeRecord(
+	required string tablename,
+	required struct data="#{}#"
+) {
+	var sData = limitPKArgs(Arguments.tablename,makeNamedPKArgs(Arguments.tablename,Arguments.data,"removeRecord"));
+	var aFileFields = getFileFields(tablename=Arguments.tablename);
+	var ii = 0;
+	var qRecord = getRecord(tablename=Arguments.tablename,data=sData);
+	var sRecord = 0;
+	var conflicttables = Variables.DataMgr.getDeletionConflicts(tablename=Arguments.tablename,data=sData,qRecord=qRecord);
+	var sCascadeDeletions = Variables.DataMgr.getCascadeDeletions(tablename=Arguments.tablename,data=sData,qRecord=qRecord);
+	var qRecords = 0;
+	var isLogicalDelete = Variables.DataMgr.isLogicalDeletion(Arguments.tablename);
+	
+	if ( qRecord.RecordCount EQ 1 ) {
+		// ToDo: Handle conflicts from cascade
+		if ( Len(conflicttables) ) {
+			throw(
+				message="You cannot delete a record in #Arguments.tablename# when associated records exist in #conflicttables#.",
+				type="Manager",
+				errorcode="NoDeletesWithRelated"
+			);
+		}
 
-	<!--- Check "deletable" attribute/property of table --->
-	<cfif result IS true AND StructKeyExists(sTableData,"deletable") AND Len(sTableData.deletable)>
-		<cfif isBoolean(sTableData.deletable)>
-			<cfset result = sTableData.deletable>
-		<cfelse>
-			<cfset col = sTableData.deletable>
-			<cfif Left(sTableData.deletable,1) EQ "!">
-				<cfset col = ReplaceNoCase(col,"!",1)>
-				<cfset negate = true>
-			</cfif>
-			<cfif ListFindNoCase(qRecord.ColumnList,col)>
-				<cfif isBoolean(qRecord[col][1])>
-					<cfset result = qRecord[col][1]>
-					<cfif negate>
-						<cfset result = NOT result>
-					</cfif>
-				</cfif>
-			</cfif>
-		</cfif>
-	</cfif>
-
-	<!--- Check for no deletes for related records --->
-	<cfif result IS true>
-		<cfset result = variables.DataMgr.isDeletable(tablename=arguments.tablename,data=arguments.data,qRecord=qRecord)>
-	</cfif>
-
-	<cfreturn result>
-</cffunction>
-
-<cffunction name="removeRecord" access="public" returntype="void" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" default="#StructNew()#">
-
-	<cfset var in = limitPKArgs(arguments.tablename,makeNamedPKArgs(arguments.tablename,arguments.data,"removeRecord"))>
-	<cfset var aFileFields = getFileFields(tablename=arguments.tablename)>
-	<cfset var ii = 0>
-	<cfset var qRecord = getRecord(tablename=arguments.tablename,data=in)>
-	<cfset var conflicttables = variables.DataMgr.getDeletionConflicts(tablename=arguments.tablename,data=in,qRecord=qRecord)>
-	<cfset var sCascadeDeletions = variables.DataMgr.getCascadeDeletions(tablename=arguments.tablename,data=in,qRecord=qRecord)>
-	<cfset var qRecords = 0>
-	<cfset var isLogicalDelete = variables.DataMgr.isLogicalDeletion(arguments.tablename)>
-
-	<cfif qRecord.RecordCount EQ 1>
-
-		<!--- ToDo: Handle conflicts from cascade --->
-		<cfif Len(conflicttables)>
-			<cfthrow message="You cannot delete a record in #arguments.tablename# when associated records exist in #conflicttables#." type="Manager" errorcode="NoDeletesWithRelated">
-		</cfif>
-
-		<!--- Delete any files --->
-		<cfloop index="ii" from="1" to="#ArrayLen(aFileFields)#" step="1">
-			<cfif
+		// Delete any files
+		for ( ii=1; ii LTE ArrayLen(aFileFields); ii++ ) {
+			if (
 					Len(qRecord[aFileFields[ii].name][1])
 				AND	(
 							(
@@ -954,847 +997,904 @@
 									)
 							)
 					)
-			>
-				<cfset variables.FileMgr.deleteFile(qRecord[aFileFields[ii].name][1],aFileFields[ii].Folder)>
-			</cfif>
-		</cfloop>
+			) {
+				Variables.FileMgr.deleteFile(qRecord[aFileFields[ii].name][1],aFileFields[ii].Folder);
+			}
+		}
 
-		<cfset variables.DataMgr.deleteRecord(arguments.tablename,in)>
+		notifyEvent(
+			"beforeRemove",
+			{
+				tablename="#Arguments.tablename#",
+				action="beforeDelete",
+				data="#Arguments.data#",
+				Args="#Arguments#",
+				method="deleteRecord"
+			}
+		);
 
-		<!--- Perform cascade deletes --->
-		<cfloop item="ii" collection="#sCascadeDeletions#">
-			<cfset qRecords = variables.DataMgr.getRecords(tablename=ii,data=sCascadeDeletions[ii],fieldlist=getPrimaryKeyFields(ii))>
-			<cfloop query="qRecords">
-				<cfset removeRecord(tablename=ii,data=QueryRowToStruct(qRecords,CurrentRow))>
-			</cfloop>
-		</cfloop>
+		// Perform cascade deletes
+		for ( ii in sCascadeDeletions ) {
+			qRecords = Variables.DataMgr.getRecords(tablename=ii,data=sCascadeDeletions[ii],fieldlist=getPrimaryKeyFields(ii));
+			for ( sRecord in qRecords ) {
+				/*
+				If Manager knows about the table, it should handle the deletion. Otherwise let DataMgr do it.
+				(Manager needs to handle in case there are files to delete - if it doesn't know about then there aren't any)
+				*/
+				if ( StructKeyExists(Variables.sMetaData,ii) ) {
+					removeRecord(tablename=ii,data=sRecord);
+				} else {
+					Variables.DataMgr.deleteRecord(tablename=ii,data=sRecord);
+				}
+			}
+		}
 
-	</cfif>
+		Variables.DataMgr.deleteRecord(Arguments.tablename,sData);
 
-	<cfset notifyEvent("removeRecord",Arguments)>
+	}
 
-</cffunction>
+	notifyEvent("removeRecord",Arguments);
 
-<cffunction name="copyRecord" access="public" returntype="string" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" default="#StructNew()#">
-	<cfargument name="CopyChildren" type="boolean" required="no">
-	<cfargument name="CopyFiles" type="boolean" default="true">
+}
 
-	<cfset var in = Duplicate(arguments.data)>
-	<cfset var aFileFields = getFileFields(tablename=arguments.tablename)>
-	<cfset var qRecord = 0>
-	<cfset var sRecord = 0>
-	<cfset var ii = 0>
-	<cfset var result = "">
-	<cfset var path = "">
-	<cfset var pkfields = getPrimaryKeyFields(arguments.tablename)>
-	<cfset var table = "">
-	<cfset var sChildren = 0>
-	<cfset var qChildren = 0>
-	<cfset var childpkfields = 0>
-	<cfset var sFTables = 0>
+public string function copyRecord(
+	required string tablename,
+	required struct data="#{}#",
+	boolean CopyChildren,
+	boolean CopyFiles="true"
+) {
+	var sData = Duplicate(Arguments.data);
+	var aFileFields = getFileFields(tablename=Arguments.tablename);
+	var qRecord = 0;
+	var sRecord = 0;
+	var ii = 0;
+	var result = "";
+	var path = "";
+	var pkfields = getPrimaryKeyFields(Arguments.tablename);
+	var table = "";
+	var sChildren = 0;
+	var qChildren = 0;
+	var childpkfields = 0;
+	var sFTables = 0;
+	var sChild = 0;
 
-	<cfset arguments.OnExists = "insert">
+	Arguments.OnExists = "insert";
 
-	<cfset StructDelete(arguments,"data")>
+	StructDelete(Arguments,"data");
 
-	<cfset qRecord = getPKRecord(tablename=arguments.tablename,data=in,fieldlist=getFieldListFromArray(getFieldsArray(arguments.tablename)))>
-	<cfset sRecord = QueryRowToStruct(qRecord)>
+	qRecord = getPKRecord(tablename=Arguments.tablename,data=sData,fieldlist=getFieldListFromArray(getFieldsArray(Arguments.tablename)));
+	sRecord = QueryRowToStruct(qRecord);
 
-	<cfset StructAppend(in,sRecord,"no")>
+	StructAppend(sData,sRecord,"no");
 
-	<!--- Copy any associated files --->
-	<cfif ArrayLen(aFileFields) AND arguments.CopyFiles>
-		<cfloop index="ii" from="1" to="#ArrayLen(aFileFields)#" step="1">
-			<!--- If the file name is passed in (with a new value) then action has already been taken against it --->
-			<cfif
+	// Copy any associated files
+	if ( ArrayLen(aFileFields) AND Arguments.CopyFiles ) {
+		for ( ii=1; ii LTE ArrayLen(aFileFields); ii++ ) {
+			// If the file name is passed in (with a new value) then action has already been taken against it
+			if (
 					Len(sRecord[aFileFields[ii].name])
 				AND	NOT (
-								StructKeyExists(in,aFileFields[ii].name)
-							AND	in[aFileFields[ii].name] NEQ sRecord[aFileFields[ii].name]
+								StructKeyExists(sData,aFileFields[ii].name)
+							AND	sData[aFileFields[ii].name] NEQ sRecord[aFileFields[ii].name]
 						)
-			>
-				<cfset in[aFileFields[ii].name] = variables.FileMgr.makeFileCopy(sRecord[aFileFields[ii].name],aFileFields[ii].folder)>
-			</cfif>
-		</cfloop>
-	</cfif>
+			) {
+				sData[aFileFields[ii].name] = Variables.FileMgr.makeFileCopy(sRecord[aFileFields[ii].name],aFileFields[ii].folder);
+			}
+		}
+	}
+	
+	// Ditch primary keys
+	for ( ii in ListToArray(pkfields) ) {
+		StructDelete(sData,ii);
+	}
 
-	<!--- Ditch primary keys --->
-	<cfloop list="#pkfields#" index="ii">
-		<cfset StructDelete(in,ii)>
-	</cfloop>
+	Arguments.data = sData;
 
-	<cfset arguments.data = in>
+	result = saveRecord(ArgumentCollection=Arguments);
 
-	<cfset result = saveRecord(argumentCollection=arguments)>
-
-	<cfif
+	if (
 			( StructKeyExists(Arguments,"CopyChildren") AND Arguments.CopyChildren IS true )
 		AND	qRecord.RecordCount
 		AND	(
-					StructKeyExists(variables.sMetaData[arguments.tablename],"childtables")
-				AND	Len(variables.sMetaData[arguments.tablename]["childtables"])
+					StructKeyExists(Variables.sMetaData[Arguments.tablename],"childtables")
+			AND	Len(Variables.sMetaData[Arguments.tablename]["childtables"])
 			)
 		AND	ListLen(pkfields) EQ 1
-	>
-		<cfloop index="table" list="#variables.sMetaData[arguments.tablename].childtables#">
-			<cfset sChildren = StructNew()>
-			<cfset sFTables = Variables.DataMgr.getFTableFields(table)>
-			<cfif StructKeyExists(sFTables,arguments.tablename)>
-				<cfset sChildren[sFTables[arguments.tablename]] = qRecord[pkfields][1]>
-				<cfset childpkfields = getPrimaryKeyFields(table)>
-				<cfset qChildren = getRecords(tablename=table,data=sChildren,fieldlist=childpkfields)>
-				<cfoutput query="qChildren">
-					<cfset sRecord = StructNew()>
-					<cfset sRecord[sFTables[arguments.tablename]] = result>
-					<cfloop index="ii" list="#childpkfields#">
-						<cfset sRecord[ii] = qChildren[ii][CurrentRow]>
-					</cfloop>
-					<cfset copyRecord(tablename=table,data=sRecord,CopyChildren=true)>
-				</cfoutput>
-			</cfif>
-		</cfloop>
-	</cfif>
+	) {
+		for ( table in ListToArray(Variables.sMetaData[Arguments.tablename].childtables) ) {
+			sChildren = {};
+			sFTables = Variables.DataMgr.getFTableFields(table);
+			if ( StructKeyExists(sFTables,Arguments.tablename) ) {
+				sChildren[sFTables[Arguments.tablename]] = qRecord[pkfields][1];
+				childpkfields = getPrimaryKeyFields(table);
+				qChildren = getRecords(tablename=table,data=sChildren,fieldlist=childpkfields);
+				for ( sChild in qChildren ) {
+					sRecord = {};
+					sRecord[sFTables[Arguments.tablename]] = result;
+					for ( ii in ArrayToList(childpkfields) ) {
+						sRecord[ii] = sChild[ii];
+					}
+					copyRecord(tablename=table,data=sRecord,CopyChildren=true);
+				}
+			}
+		}
+	}
 
-	<cfset notifyEvent("copyRecord",Arguments,result)>
+	notifyEvent("copyRecord",Arguments,result);
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="copyRecordChildren" access="public" returntype="void" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" default="#StructNew()#">
-</cffunction>
+public void function copyRecordChildren(
+	required string tablename,
+	struct data="#{}#"
+) {
 
-<cffunction name="saveRecord" access="public" returntype="string" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" default="#StructNew()#">
-	<cfargument name="OnExists" type="string" required="no" hint="defaults to update.">
+}
 
-	<cfset var in = arguments.data>
-	<cfset var aFileFields = 0>
-	<cfset var ii = 0>
-	<cfset var qRecord = 0>
-	<cfset var result = "">
-	<cfset var FormField = "">
-	<cfset var FileResult = "">
-	<cfset var isUpload = false>
-	<cfset var isFormUpload = false>
-	<cfset var isFileHandling = false>
-	<cfset var sTable = {table=Arguments.tablename}>
+/**
+* @OnExists defaults to update.
+*/
+public string function saveRecord(
+	required string tablename,
+	struct data="#{}#",
+	string OnExists
+) {
+	var sData = Arguments.data;
+	var aFileFields = 0;
+	var ii = 0;
+	var qRecord = 0;
+	var result = "";
+	var FormField = "";
+	var FileResult = "";
+	var isUpload = false;
+	var isFormUpload = false;
+	var isFileHandling = false;
+	var sTable = {table=Arguments.tablename};
+	var sUploadArgs = 0;
 
-	<cfset aFileFields = getFileFields(tablename=arguments.tablename,data=arguments.data)>
+	aFileFields = getFileFields(tablename=Arguments.tablename,data=Arguments.data);
 
-	<!--- Default OnExists to update, but use key from data if it exists --->
-	<cfif NOT StructKeyExists(arguments,"OnExists")>
-		<cfif StructKeyExists(in,"OnExists")>
-			<cfset arguments.OnExists = in.OnExists>
-		<cfelse>
-			<cfset arguments.OnExists = "update">
-		</cfif>
-	</cfif>
+	// Default OnExists to update, but use key from data if it exists
+	if ( NOT StructKeyExists(Arguments,"OnExists") ) {
+		if ( StructKeyExists(sData,"OnExists") ) {
+			Arguments.OnExists = sData.OnExists;
+		} else {
+			Arguments.OnExists = "update";
+		}
+	}
 
-	<!--- Take actions on any file fields --->
-	<cfif ArrayLen(aFileFields) AND StructCount(in)>
-		<cfset qRecord = getPKRecord(tablename=arguments.tablename,data=in,fieldlist=getFieldListFromArray(aFileFields))>
-		<cfloop index="ii" from="1" to="#ArrayLen(aFileFields)#">
-			<cfset FormField = aFileFields[ii].name>
-			<cfif
-					StructKeyExists(in,"#aFileFields[ii].name#_FormField")
-				AND	StructKeyExists(Form,"#in['#aFileFields[ii].name#_FormField']#")
-			>
-				<cfset FormField = in['#aFileFields[ii].name#_FormField']>
-			</cfif>
-			<cfset isUpload = false>
-			<cfset isFormUpload = isUpload>
-			<cfif StructKeyExists(in,aFileFields[ii].name)>
-				<cfif StructKeyExists(Form,FormField)>
-					<cfset isUpload = FileExists(Form[FormField])>
-					<cfset isFormUpload = isUpload>
-				</cfif>
-				<cfif NOT isUpload>
-						<cfset isUpload = FileExists(in[aFileFields[ii].name])>
-				</cfif>
-			</cfif>
-			<!---<cfif aFileFields[ii].name EQ "FileRecording">
-				<cfdump var="#aFileFields[ii]#">
-				<cfdump var="#isUpload#">
-				<cfabort>
-			</cfif>--->
-			<cfif isUpload>
-				<cfset isFileHandling = true>
-				<!--- Ditch old file if it is being replaced my new upload. --->
-				<cfif qRecord.RecordCount AND Len(qRecord[aFileFields[ii].name][1])>
-					<cfset variables.FileMgr.deleteFile(qRecord[aFileFields[ii].name][1],aFileFields[ii].Folder)>
-				</cfif>
+	// Take actions on any file fields
+	if ( ArrayLen(aFileFields) AND StructCount(sData) ) {
+		qRecord = getPKRecord(tablename=Arguments.tablename,data=sData,fieldlist=getFieldListFromArray(aFileFields));
+		for ( ii=1; ii LTE ArrayLen(aFileFields); ii++ ) {
+			FormField = aFileFields[ii].name;
+			if (
+					StructKeyExists(sData,"#aFileFields[ii].name#_FormField")
+				AND	StructKeyExists(Form,"#sData['#aFileFields[ii].name#_FormField']#")
+			) {
+				FormField = sData['#aFileFields[ii].name#_FormField'];
+			}
+			isUpload = false;
+			isFormUpload = isUpload;
+			if ( StructKeyExists(sData,aFileFields[ii].name) ) {
+				if ( StructKeyExists(Form,FormField) ) {
+					isUpload = FileExists(Form[FormField]);
+					isFormUpload = isUpload;
+				}
+				if ( NOT isUpload ) {
+					isUpload = FileExists(sData[aFileFields[ii].name]);
+				}
+			}
+			/*
+			if ( aFileFields[ii].name EQ "FileRecording" ) {
+				writeDump(aFileFields[ii]);
+				writeDump(isUpload);
+				abort;
+			}
+			*/
+			if ( isUpload ) {
+				isFileHandling = true;
+				// Ditch old file if it is being replaced my new upload.
+				if ( qRecord.RecordCount AND Len(qRecord[aFileFields[ii].name][1]) ) {
+					Variables.FileMgr.deleteFile(qRecord[aFileFields[ii].name][1],aFileFields[ii].Folder);
+				}
 
-				<cfif isFormUpload>
-					<cfinvoke returnvariable="FileResult" component="#variables.FileMgr#" method="uploadFile">
-						<cfif isFormUpload>
-							<cfinvokeargument name="FieldName" value="#FormField#">
-						<cfelse>
-							<cfinvokeargument name="FieldName" value="#in[aFileFields[ii].name]#">
-						</cfif>
-						<cfinvokeargument name="Folder" value="#aFileFields[ii].Folder#">
-						<cfif StructKeyExists(aFileFields[ii],"NameConflict")>
-							<cfinvokeargument name="NameConflict" value="#aFileFields[ii].NameConflict#">
-						</cfif>
-						<cfif StructKeyExists(aFileFields[ii],"accept")>
-							<cfinvokeargument name="accept" value="#aFileFields[ii].accept#">
-						</cfif>
-						<cfif StructKeyExists(aFileFields[ii],"extensions")>
-							<cfinvokeargument name="extensions" value="#aFileFields[ii].extensions#">
-						</cfif>
-						<cfinvokeargument name="return" value="name">
-					</cfinvoke>
-					<cfif isStruct(FileResult) AND StructKeyExists(FileResult,"ServerFile")>
-						<cfset in[aFileFields[ii].name] = FileResult["ServerFile"]>
-					</cfif>
-					<cfif isSimpleValue(FileResult)>
-						<cfset in[aFileFields[ii].name] = FileResult>
-					</cfif>
-					<cfif StructKeyExists(in,aFileFields[ii].name) AND isSimpleValue(in[aFileFields[ii].name])>
-						<cfif NOT StructKeyExists(aFileFields[ii],"Length")>
-							<cfset aFileFields[ii].Length = 50>
-						</cfif>
-						<cfset in[aFileFields[ii].name] = fixFileName(in[aFileFields[ii].name],variables.FileMgr.getDirectory(aFileFields[ii].Folder),aFileFields[ii].Length)>
-					</cfif>
-				<cfelse>
-					<cfset Variables.FileMgr.makeFileCopy(in[aFileFields[ii].name],aFileFields[ii].Folder)>
-					<!---<cffile destination="#Variables.FileMgr.getDirectory(aFileFields[ii].Folder)#" source="#in[aFileFields[ii].name]#" action="copy">--->
-					<cfset in[aFileFields[ii].name] = getFileFromPath(in[aFileFields[ii].name])>
-				</cfif>
-			</cfif>
-		</cfloop>
+				if ( isFormUpload ) {
+					
+					sUploadArgs = {"return":"name","Folder":aFileFields[ii].Folder};
+					if ( isFormUpload ) {
+						sUploadArgs["FieldName"] = FormField;
+					} else {
+						sUploadArgs["FieldName"] = sData[aFileFields[ii].name];
+					}
+					if ( StructKeyExists(aFileFields[ii],"NameConflict") ) {
+						sUploadArgs["NameConflict"] = aFileFields[ii].NameConflict;
+					}
+					if ( StructKeyExists(aFileFields[ii],"accept") ) {
+						sUploadArgs["accept"] = aFileFields[ii].accept;
+					}
+					if ( StructKeyExists(aFileFields[ii],"extensions") ) {
+						sUploadArgs["extensions"] = aFileFields[ii].extensions;
+					}
+					FileResult = Variables.FileMgr.uploadFile(ArgumentCollection=sUploadArgs);
 
-		<cfif isFileHandling>
-			<!--- fit any images into box (if possible) --->
-			<cfset in = adjustImages(tablename=arguments.tablename,data=in)>
-			<!--- Delete any files that are cleared out --->
-			<cfif qRecord.RecordCount>
-				<cfloop index="ii" from="1" to="#ArrayLen(aFileFields)#" step="1">
-					<cfif Len(qRecord[aFileFields[ii].name][1]) AND StructKeyExists(in,aFileFields[ii].name) AND NOT Len(Trim(in[aFileFields[ii].name]))>
-						<cfset variables.FileMgr.deleteFile(qRecord[aFileFields[ii].name][1],aFileFields[ii].Folder)>
-					</cfif>
-				</cfloop>
-			</cfif>
-		</cfif>
-	</cfif>
+					if ( isStruct(FileResult) AND StructKeyExists(FileResult,"ServerFile") ) {
+						sData[aFileFields[ii].name] = FileResult["ServerFile"];
+					}
+					if ( isSimpleValue(FileResult) ) {
+						sData[aFileFields[ii].name] = FileResult;
+					}
+					if ( StructKeyExists(sData,aFileFields[ii].name) AND isSimpleValue(sData[aFileFields[ii].name]) ) {
+						if ( NOT StructKeyExists(aFileFields[ii],"Length") ) {
+							aFileFields[ii].Length = 50;
+						}
+						sData[aFileFields[ii].name] = fixFileName(sData[aFileFields[ii].name],Variables.FileMgr.getDirectory(aFileFields[ii].Folder),aFileFields[ii].Length);
+					}
+				} else {
+					Variables.FileMgr.makeFileCopy(sData[aFileFields[ii].name],aFileFields[ii].Folder);
+					//FileCopy(sData[aFileFields[ii].name],Variables.FileMgr.getDirectory(aFileFields[ii].Folder));
+					sData[aFileFields[ii].name] = getFileFromPath(sData[aFileFields[ii].name]);
+				}
+			}
+		}
 
-	<cfset Arguments.data = in>
+		if ( isFileHandling ) {
+			// fit any images into box (if possible)
+			sData = adjustImages(tablename=Arguments.tablename,data=sData);
+			// Delete any files that are cleared out
+			if ( qRecord.RecordCount ) {
+				for ( ii=1; ii LTE ArrayLen(aFileFields); ii++ ) {
+					if (
+						Len(qRecord[aFileFields[ii].name][1])
+						AND
+						StructKeyExists(sData,aFileFields[ii].name)
+						AND
+						NOT Len(Trim(sData[aFileFields[ii].name]))
+					) {
+						Variables.FileMgr.deleteFile(qRecord[aFileFields[ii].name][1],aFileFields[ii].Folder);
+					}
+				}
+			}
+		}
+	}
 
-	<cfset arguments.alterargs_for = "save">
-	<cfset result = variables.DataMgr.insertRecord(argumentCollection=alterArgs(argumentCollection=arguments))>
+	Arguments.data = sData;
 
-	<cfset notifyEvent("saveRecord",Arguments,result)>
+	result = saveRecordDataOnly(ArgumentCollection=Arguments);
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="getFieldListFromArray" access="private" returntype="string" output="false">
-	<cfargument name="aFields" type="array" required="yes">
+public string function saveRecordDataOnly(
+	required string tablename,
+	struct data="#{}#",
+	string OnExists
+) {
+	var result = 0;
 
-	<cfset var result = "">
-	<cfset var ii = 0>
+	Arguments.alterargs_for = "save";
+	result = Variables.DataMgr.insertRecord(ArgumentCollection=alterArgs(ArgumentCollection=Arguments));
 
-	<cfloop index="ii" from="1" to="#ArrayLen(arguments.aFields)#" step="1">
-		<cfset result = ListAppend(result,arguments.aFields[ii].name)>
-	</cfloop>
+	notifyEvent("saveRecord",Arguments,result);
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="getFileFields" access="public" returntype="array" output="false">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" default="#StructNew()#">
+private string function getFieldListFromArray(required array aFields) {
+	var result = "";
+	var sField = 0;
 
-	<cfset var aResults = 0>
-	<cfset var in = 0>
-	<cfset var aFields = 0>
-	<cfset var ii = 0>
+	for (sField in Arguments.aFields ) {
+		result = ListAppend(result,sField.name);
+	}
 
-	<cfif NOT StructKeyExists(variables.sMetaData[arguments.tablename],"fields_files")>
+	return result;
+}
 
-		<cfset aResults = ArrayNew(1)>
-		<cfset in = arguments.data>
-		<cfset aFields = getFieldsArray(tablename=arguments.tablename)>
+public array function getFileFields(
+	required string tablename,
+	struct data="#{}#"
+) {
+	var aResults = 0;
+	var sData = 0;
+	var aFields = 0;
+	var ii = 0;
 
-		<cfloop index="ii" from="1" to="#ArrayLen(aFields)#" step="1">
-			<cfif
+	if ( NOT StructKeyExists(Variables.sMetaData[Arguments.tablename],"fields_files") ) {
+
+		aResults = [];
+		sData = Arguments.data;
+		aFields = getFieldsArray(tablename=Arguments.tablename);
+
+		for ( ii=1; ii LTE ArrayLen(aFields); ii++ ) {
+			if (
 					( StructKeyExists(aFields[ii],"Folder") AND	Len(aFields[ii].Folder) )
 				AND	(
 							(
-									StructCount(in) EQ 0
-								OR	StructKeyExists(in,aFields[ii].name)
+									StructCount(sData) EQ 0
+								OR	StructKeyExists(sData,aFields[ii].name)
 							)
 						OR	(
 									StructKeyExists(aFields[ii],"original")
-								AND	StructKeyExists(in,aFields[ii].original)
+								AND	StructKeyExists(sData,aFields[ii].original)
 							)
 					)
-			>
-				<cfset ArrayAppend(aResults,aFields[ii])>
-			</cfif>
-		</cfloop>
+			) {
+				ArrayAppend(aResults,aFields[ii]);
+			}
+		}
 
-		<cfset variables.sMetaData[arguments.tablename]["fields_files"] = aResults>
-	</cfif>
+		Variables.sMetaData[Arguments.tablename]["fields_files"] = aResults;
+	}
 
-	<cfreturn variables.sMetaData[arguments.tablename]["fields_files"]>
-</cffunction>
+	return Variables.sMetaData[Arguments.tablename]["fields_files"];
+}
 
-<cffunction name="alterRecords" access="public" returntype="query" output="false" hint="">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="query" type="query" required="yes">
+public query function alterRecords(
+	required string tablename,
+	required query query
+) {
+	//var sTable = Variables.sMetaData[Arguments.tablename];
+	var aFields = getFieldsArray(Arguments.tablename);
+	var sFields = getFieldsStruct(Arguments.tablename);
+	var ii = 0;
+	var FolderFields = "";
+	var field = "";
+	var aPaths = [];
+	var aURLs = [];
+	var sRow = 0;
 
-	<!---<cfset var sTable = variables.sMetaData[arguments.tablename]>--->
-	<cfset var aFields = getFieldsArray(arguments.tablename)>
-	<cfset var sFields = getFieldsStruct(arguments.tablename)>
-	<cfset var ii = 0>
-	<cfset var FolderFields = "">
-	<cfset var field = "">
-	<cfset var aPaths = ArrayNew(1)>
-	<cfset var aURLs = ArrayNew(1)>
+	if ( Len(Trim(Variables.FileMgr.getUploadPath())) OR Len(Trim(Variables.FileMgr.getUploadURL())) ) {
+		for ( ii=1; ii LTE ArrayLen(aFields); ii++ ) {
+			if ( StructKeyExists(aFields[ii],"Folder") AND Len(Trim(aFields[ii].Folder)) ) {
+				FolderFields = ListAppend(FolderFields,aFields[ii].name);
+			}
+		}
 
-	<cfif Len(Trim(variables.FileMgr.getUploadPath())) OR Len(Trim(variables.FileMgr.getUploadURL()))>
-		<cfloop index="ii" from="1" to="#ArrayLen(aFields)#" step="1">
-			<cfif StructKeyExists(aFields[ii],"Folder") AND Len(Trim(aFields[ii].Folder))>
-				<cfset FolderFields = ListAppend(FolderFields,aFields[ii].name)>
-			</cfif>
-		</cfloop>
+		if ( Len(FolderFields) ) {
+			for ( field in ListToArray(FolderFields) ) {
+				if (
+					Len(Trim(Variables.FileMgr.getUploadPath()))
+					AND
+					ListFindNoCase(Arguments.query.ColumnList,field)
+					AND
+					NOT ListFindNoCase(Arguments.query.ColumnList,"#field#URL")
+				) {
+					aPaths = [];
+					for ( sRow in Arguments.query ) {
+						if ( Len(Trim(sRow[field])) ) {
+							ArrayAppend(aPaths,"#Variables.FileMgr.getFilePath(sRow[field],sFields[field].Folder)#");
+						} else {
+							ArrayAppend(aPaths,"");
+						}
+					}
+					QueryAddColumn(Arguments.query,"#field#Path",aPaths);
+				}
+				if (
+					Len(Trim(Variables.FileMgr.getUploadURL()))
+					AND
+					ListFindNoCase(Arguments.query.ColumnList,field)
+					AND
+					NOT ListFindNoCase(Arguments.query.ColumnList,"#field#URL")
+				) {
+					aURLs = [];
+					for ( sRow in Arguments.query ) {
+						if ( Len(Trim(sRow[field])) ) {
+							ArrayAppend(aURLs,"#Variables.FileMgr.getFileURL(sRow[field],sFields[field].Folder)#");
+						} else {
+							ArrayAppend(aURLs,"");
+						}
+					}
+					QueryAddColumn(Arguments.query,"#field#URL",aURLs);
+				}
+			}
+		}
+	}
 
-		<cfif Len(FolderFields)>
-			<cfloop index="field" list="#FolderFields#">
-				<cfif Len(Trim(variables.FileMgr.getUploadPath())) AND ListFindNoCase(arguments.query.ColumnList,field) AND NOT ListFindNoCase(arguments.query.ColumnList,"#field#URL")>
-					<cfset aPaths = ArrayNew(1)>
-					<cfloop query="arguments.query">
-						<cfif Len(Trim(arguments.query[field][CurrentRow]))>
-							<cfset ArrayAppend(aPaths,"#variables.FileMgr.getFilePath(arguments.query[field][CurrentRow],sFields[field].Folder)#")>
-						<cfelse>
-							<cfset ArrayAppend(aPaths,"")>
-						</cfif>
-					</cfloop>
-					<cfset QueryAddColumn(arguments.query,"#field#Path",aPaths)>
-				</cfif>
-				<cfif Len(Trim(variables.FileMgr.getUploadURL())) AND ListFindNoCase(arguments.query.ColumnList,field) AND NOT ListFindNoCase(arguments.query.ColumnList,"#field#URL")>
-					<cfset aURLs = ArrayNew(1)>
-					<cfloop query="arguments.query">
-						<cfif Len(Trim(arguments.query[field][CurrentRow]))>
-							<cfset ArrayAppend(aURLs,"#variables.FileMgr.getFileURL(arguments.query[field][CurrentRow],sFields[field].Folder)#")>
-						<cfelse>
-							<cfset ArrayAppend(aURLs,"")>
-						</cfif>
-					</cfloop>
-					<cfset QueryAddColumn(arguments.query,"#field#URL",aURLs)>
-				</cfif>
-			</cfloop>
-		</cfif>
-	</cfif>
+	return Arguments.query;
+}
 
-	<cfreturn arguments.query>
-</cffunction>
+public struct function alterArgs(string alterargs_for="get") {
+	var sArgs = StructFromArgs(Arguments);
+	var sMetaData = 0;
+	var sTableData = 0;
+	var sSort = 0;
+	var dmargs = 0;
+	var dmarg = "";
 
-<cffunction name="alterArgs" access="public" returntype="struct" output="false" hint="">
-	<cfargument name="alterargs_for" type="string" default="get">
+	if ( Arguments.alterargs_for EQ "save" ) {
+		dmargs = getDataMgrSaveRecordArgs();
+	} else {
+		dmargs = getDataMgrGetRecordsArgs();
+	}
 
-	<cfset var sArgs = StructFromArgs(arguments)>
-	<cfset var sMetaData = 0>
-	<cfset var sTableData = 0>
-	<cfset var sSort = 0>
-	<cfset var dmargs = 0>
-	<cfset var dmarg = "">
+	// Any data args that match DataMgr args should be copied there
+	if ( StructKeyExists(Arguments,"data") ) {
+		if ( StructKeyExists(Arguments.data,"data") ) {
+			StructAppend(Arguments.data,Arguments.data.data,"no");
+		}
+		for ( dmarg in ListToArray(dmargs) ) {
+			if ( StructKeyExists(sArgs.data,dmarg) AND NOT StructKeyExists(sArgs,dmarg) ) {
+				sArgs[dmarg] = sArgs.data[dmarg];
+			}
+		}
+	}
 
-	<cfif arguments.alterargs_for EQ "save">
-		<cfset dmargs = getDataMgrSaveRecordArgs()>
-	<cfelse>
-		<cfset dmargs = getDataMgrGetRecordsArgs()>
-	</cfif>
+	if ( Arguments.alterargs_for EQ "get" ) {
+		sMetaData = getMetaStruct();
+		sTableData = sMetaData[sArgs.tablename];
+		// Default list to fields marked "isOnList=true" for multi-record queries (if none are marked, empty string will retrieve all fields)
+		if ( NOT StructKeyExists(sArgs,"fieldlist") ) {
+			if ( StructKeyExists(Arguments,"isGetRecord") ) {
+				sArgs.fieldlist = "";
+			} else {
+				sArgs.fieldlist = sTableData["listfields"];
+			}
+		}
 
-	<!--- Any data args that match DataMgr args should be copied there --->
-	<cfif StructKeyExists(arguments,"data")>
-		<cfif StructKeyExists(arguments.data,"data")>
-			<cfset StructAppend(arguments.data,arguments.data.data,"no")>
-		</cfif>
-		<cfloop list="#dmargs#" index="dmarg">
-			<cfif StructKeyExists(sArgs.data,dmarg) AND NOT StructKeyExists(sArgs,dmarg)>
-				<cfset sArgs[dmarg] = sArgs.data[dmarg]>
-			</cfif>
-		</cfloop>
-	</cfif>
+		if ( NOT ( StructKeyExists(sArgs,"sortfield") ) ) {
+			if ( StructKeyExists(sTableData,"orderby") AND NOT ( StructKeyExists(sArgs,"orderby") ) ) {
+				sArgs["orderby"] = sTableData["orderby"];
+			} else {
+				sSort = getTableSort(sArgs.tablename,sArgs.fieldlist);
+				if ( StructKeyExists(sSort,"field") ) {
+					sArgs["sortfield"] = sSort.field;
+					sArgs["sortdir"] = sSort.dir;
+				}
+			}
+		}
+	}
 
-	<cfif arguments.alterargs_for EQ "get">
-		<cfset sMetaData = getMetaStruct()>
-		<cfset sTableData = sMetaData[sArgs.tablename]>
-		<!--- Default list to fields marked "isOnList=true" for multi-record queries (if none are marked, empty string will retrieve all fields) --->
-		<cfif NOT StructKeyExists(sArgs,"fieldlist")>
-			<cfif StructKeyExists(arguments,"isGetRecord")>
-				<cfset sArgs.fieldlist = "">
-			<cfelse>
-				<cfset sArgs.fieldlist = sTableData["listfields"]>
-			</cfif>
-		</cfif>
+	StructDelete(Arguments,"alterargs_for");
 
-		<cfif NOT ( StructKeyExists(sArgs,"sortfield") )>
-			<cfif StructKeyExists(sTableData,"orderby") AND NOT ( StructKeyExists(sArgs,"orderby") )>
-				<cfset sArgs["orderby"] = sTableData["orderby"]>
-			<cfelse>
-				<cfset sSort = getTableSort(sArgs.tablename,sArgs.fieldlist)>
-				<cfif StructKeyExists(sSort,"field")>
-					<cfset sArgs["sortfield"] = sSort.field>
-					<cfset sArgs["sortdir"] = sSort.dir>
-				</cfif>
-			</cfif>
-		</cfif>
-	</cfif>
+	return sArgs;
+}
 
-	<cfset StructDelete(arguments,"alterargs_for")>
+/**
+* I make sure DataMgr isn't given multiple increments.
+*/
+private array function alterDataMgrIncrements(required array aFields) {
+	var ii = 0;
+	var incCount = 0;
 
-	<cfreturn sArgs>
-</cffunction>
+	for ( ii=1; ii LTE ArrayLen(Arguments.aFields); ii++ ) {
+		if (
+				( StructKeyExists(Arguments.aFields[ii],"Increment") AND Arguments.aFields[ii].Increment IS true )
+			OR	( StructKeyExists(Arguments.aFields[ii],"PrimaryKey") AND Arguments.aFields[ii].PrimaryKey IS true )
+		) {
+			incCount = incCount + 1;
+		}
+	}
+	if ( incCount GT 1 ) {
+		for ( ii=1; ii LTE ArrayLen(Arguments.aFields); ii++ ) {
+			if ( StructKeyExists(Arguments.aFields[ii],"Increment") AND Arguments.aFields[ii].Increment EQ 1 ) {
+				Arguments.aFields[ii]["Increment"] = false;
+			}
+		}
+	}
 
-<cffunction name="alterDataMgrIncrements" access="private" returntype="array" output="no" hint="I make sure DataMgr isn't given multiple increments.">
-	<cfargument name="aFields" type="array" required="true">
+	return Arguments.aFields;
+}
 
-	<cfset var ii = 0>
-	<cfset var incCount = 0>
+private string function getWidth(
+	required struct struct,
+	required imagedata
+) {
+	var data = Arguments.struct;
+	var result = imagedata.width;
 
-	<cfloop index="ii" from="1" to="#ArrayLen(arguments.aFields)#" step="1">
-		<cfif
-				( StructKeyExists(arguments.aFields[ii],"Increment") AND arguments.aFields[ii].Increment IS true )
-			OR	( StructKeyExists(arguments.aFields[ii],"PrimaryKey") AND arguments.aFields[ii].PrimaryKey IS true )
-		>
-			<cfset incCount = incCount + 1>
-		</cfif>
-	</cfloop>
-	<cfif incCount GT 1>
-		<cfloop index="ii" from="1" to="#ArrayLen(arguments.aFields)#" step="1">
-			<cfif StructKeyExists(arguments.aFields[ii],"Increment") AND arguments.aFields[ii].Increment EQ 1>
-				<cfset arguments.aFields[ii]["Increment"] = false>
-			</cfif>
-		</cfloop>
-	</cfif>
+	if (
+		( StructKeyExists(data,"MaxWidth") AND isNumeric(data.MaxWidth) AND data.MaxWidth GT 0 )
+		AND
+		imagedata.width GT data.MaxWidth
+	) {
+		result = Int(data.MaxWidth);
+	} else if (
+		( StructKeyExists(data,"MaxSmallSide") AND isNumeric(data.MaxSmallSide) AND data.MaxSmallSide GT 0 )
+		AND
+		imagedata.height GTE imagedata.width
+	) {
+		result = Int(data.MaxSmallSide);
+	}
 
-	<cfreturn arguments.aFields>
-</cffunction>
+	return result;
+}
 
-<cffunction name="getWidth" access="private" returntype="string" output="no">
-	<cfargument name="struct" type="struct" required = "yes">
-	<cfargument name="imagedata" type="any" required="yes">
+private string function getHeight(
+	required struct struct,
+	required imagedata
+) {
+	var data = Arguments.struct;
+	var result = imagedata.height;
 
-	<cfset var data = arguments.struct>
-	<cfset var result = imagedata.width>
-
-	<cfif
-			( StructKeyExists(data,"MaxWidth") AND isNumeric(data.MaxWidth) AND data.MaxWidth GT 0 )
-		AND	imagedata.width GT data.MaxWidth
-	>
-		<cfset result = Int(data.MaxWidth)>
-	<cfelseif
-			( StructKeyExists(data,"MaxSmallSide") AND isNumeric(data.MaxSmallSide) AND data.MaxSmallSide GT 0 )
-		AND	imagedata.height GTE imagedata.width
-	>
-		<cfset result = Int(data.MaxSmallSide)>
-	</cfif>
-
-	<cfreturn result>
-</cffunction>
-
-<cffunction name="getHeight" access="private" returntype="string" output="no">
-	<cfargument name="struct" type="struct" required="yes">
-	<cfargument name="imagedata" type="any" required="yes">
-
-	<cfset var data = arguments.struct>
-	<cfset var result = imagedata.height>
-
-	<cfif
+	if (
 			( StructKeyExists(data,"MaxHeight") AND isNumeric(data.MaxHeight) AND data.MaxHeight GT 0 )
 		AND	imagedata.height GT data.MaxHeight
-	>
-		<cfset result = Int(data.MaxHeight)>
-	<cfelseif
+	) {
+		result = Int(data.MaxHeight);
+	} else if (
 			( StructKeyExists(data,"MaxSmallSide") AND isNumeric(data.MaxSmallSide) AND data.MaxSmallSide GT 0 )
 		AND	imagedata.width GTE imagedata.height
-	>
-		<cfset result = Int(data.MaxSmallSide)>
-	</cfif>
+	) {
+		result = Int(data.MaxSmallSide);
+	}
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="limitPKArgs" access="public" returntype="struct" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" required="yes">
+public struct function limitPKArgs(
+	required string tablename,
+	required struct data
+) {
+	var pkfields = Variables.DataMgr.getPKFields(Arguments.tablename);
+	var sPKField = 0;
+	var sPKArgs = {};
+	var pkfield = "";
 
-	<cfset var pkfields = variables.DataMgr.getPKFields(arguments.tablename)>
-	<cfset var ii = 0>
-	<cfset var sPKArgs = StructNew()>
-	<cfset var pkfield = "">
+	// Remove non-PK columns from struct
+	for ( sPKField in pkfields ) {
+		pkfield = sPKField.ColumnName;
+		if ( StructKeyExists(Arguments.data,pkfield) ) {
+			sPKArgs[pkfield] = Arguments.data[pkfield];
+		}
+	}
 
-	<!--- Remove non-PK columns from struct --->
-	<cfloop index="ii" from="1" to="#ArrayLen(pkfields)#" step="1">
-		<cfset pkfield = pkfields[ii].ColumnName>
-		<cfif StructKeyExists(arguments.data,pkfield)>
-			<cfset sPKArgs[pkfield] = arguments.data[pkfield]>
-		</cfif>
-	</cfloop>
+	return sPKArgs;
+}
 
-	<cfreturn sPKArgs>
-</cffunction>
+public struct function makeNamedPKArgs(
+	required string tablename,
+	required struct data,
+	string method="getRecord"
+) {
+	var pkfields = Variables.DataMgr.getPKFields(Arguments.tablename);
+	var ii = 0;
 
-<cffunction name="makeNamedPKArgs" access="public" returntype="struct" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" required="yes">
-	<cfargument name="method" type="string" default="getRecord">
+	if ( NOT ArrayLen(pkfields) ) {
+		throw(message="#Arguments.method# can only be used against tables with at least one primary key field.",type="Manager");
+	}
 
-	<cfset var pkfields = variables.DataMgr.getPKFields(arguments.tablename)>
-	<cfset var ii = 0>
+	// Set argument names if not given by names
+	if (
+			StructCount(Arguments.data) GTE ArrayLen(pkfields)
+		AND	NOT StructKeyExists(Arguments.data,pkfields[1].ColumnName)
+	) {
+		for ( ii=1; ii LTE ArrayLen(pkfields); ii++ ) {
+			if (
+					StructKeyExists(Arguments.data,ii)
+				AND	NOT StructKeyExists(Arguments.data,pkfields[ii].ColumnName)
+			) {
+				Arguments.data[pkfields[ii].ColumnName] = Arguments.data[ii];
+				StructDelete(Arguments.data,ii);
+			}
+		}
+	}
 
-	<cfif NOT ArrayLen(pkfields)>
-		<cfthrow message="#arguments.method# can only be used against tables with at least one primary key field." type="Manager">
-	</cfif>
+	return StructCopy(Arguments.data);
+}
 
-	<!--- Set argument names if not given by names --->
-	<cfif
-			StructCount(arguments.data) GTE ArrayLen(pkfields)
-		AND	NOT StructKeyExists(arguments.data,pkfields[1].ColumnName)
-	>
-		<cfloop index="ii" from="1" to="#ArrayLen(pkfields)#" step="1">
-			<cfif
-					StructKeyExists(arguments.data,ii)
-				AND	NOT StructKeyExists(arguments.data,pkfields[ii].ColumnName)
-			>
-				<cfset arguments.data[pkfields[ii].ColumnName] = arguments.data[ii]>
-				<cfset StructDelete(arguments.data,ii)>
-			</cfif>
-		</cfloop>
-	</cfif>
+private void function setTable(required string tablename) {
 
-	<cfreturn StructCopy(arguments.data)>
-</cffunction>
+	lock name="Manager_#Arguments.tablename#" timeout="30" {
+		if ( NOT StructKeyExists(Variables.sMetaData,Arguments.tablename) ) {
+			Variables.sMetaData[Arguments.tablename] = {};
+			Variables.sMetaData[Arguments.tablename]["fieldlist"] = "";
+			Variables.sMetaData[Arguments.tablename]["fields"] = [];
+			Variables.sMetaData[Arguments.tablename]["listfields"] = "";
+			Variables.sMetaData[Arguments.tablename]["fields"] = [];
+			Variables.sMetaData[Arguments.tablename]["sFields"] = {};
+			Variables.sMetaData[Arguments.tablename]["_sortfield"] = "";
+			Variables.sMetaData[Arguments.tablename]["_sortdir"] = "";
+			Variables.sMetaData[Arguments.tablename]["hasFileFields"] = false;
+			Variables.sMetaData[Arguments.tablename]["sAttributes"] = {};
+		}
+	}
 
-<cffunction name="setTable" access="private" returntype="void" output="false" hint="">
-	<cfargument name="tablename" type="string" required="yes">
+}
 
-	<cflock name="Manager_#arguments.tablename#" timeout="30">
-		<cfif NOT StructKeyExists(variables.sMetaData,arguments.tablename)>
-			<cfset variables.sMetaData[arguments.tablename] = StructNew()>
-			<cfset variables.sMetaData[arguments.tablename]["fieldlist"] = "">
-			<cfset variables.sMetaData[arguments.tablename]["fields"] = ArrayNew(1)>
-			<cfset variables.sMetaData[arguments.tablename]["listfields"] = "">
-			<cfset variables.sMetaData[arguments.tablename]["fields"] = ArrayNew(1)>
-			<cfset variables.sMetaData[arguments.tablename]["sFields"] = StructNew()>
-			<cfset variables.sMetaData[arguments.tablename]["_sortfield"] = "">
-			<cfset variables.sMetaData[arguments.tablename]["_sortdir"] = "">
-			<cfset variables.sMetaData[arguments.tablename]["hasFileFields"] = false>
-			<cfset variables.sMetaData[arguments.tablename]["sAttributes"] = StructNew()>
-		</cfif>
-	</cflock>
+private struct function getTableSort(
+	required string tablename,
+	string fieldlist
+) {
+	var table = Arguments.tablename;
+	var sTable = Variables.sMetaData[table];
+	var aFields = sTable["fields"];
+	var sField = 0;
+	var ii = 0;
 
-</cffunction>
+	var aSortDefaults = [];
+	var aSorters = [];
 
-<cffunction name="getTableSort" access="private" returntype="struct" output="false" hint="">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="fieldlist" type="string" required="no">
+	var sResult = {};
 
-	<cfset var table = arguments.tablename>
-	<cfset var sTable = variables.sMetaData[table]>
-	<cfset var aFields = sTable["fields"]>
-	<cfset var sField = 0>
-	<cfset var ii = 0>
+	if ( NOT (StructKeyExists(Arguments,"fieldlist") AND Len(Arguments.fieldlist) ) ) {
+		Arguments.fieldlist = Variables.sMetaData[Arguments.tablename]["fieldlist"];
+	}
 
-	<cfset var aSortDefaults = ArrayNew(1)>
-	<cfset var aSorters = ArrayNew(1)>
+	// Set internal sort field and direction
+	if ( StructKeyExists(sTable,"sortfield") AND ListFindNoCase(Arguments.fieldlist,sTable["sortfield"]) ) {
+		sResult["field"] = sTable["sortfield"];
+		if ( StructKeyExists(sTable,"sortdir") ) {
+			sResult["dir"] = sTable["sortdir"];
+		}
+	} else {
+		for ( sField in aFields ) {
 
-	<cfset var sResult = StructNew()>
-
-	<cfif NOT (StructKeyExists(arguments,"fieldlist") AND Len(arguments.fieldlist) )>
-		<cfset arguments.fieldlist = variables.sMetaData[arguments.tablename]["fieldlist"]>
-	</cfif>
-
-	<!--- Set internal sort field and direction --->
-	<cfif StructKeyExists(sTable,"sortfield") AND ListFindNoCase(arguments.fieldlist,sTable["sortfield"])>
-		<cfset sResult["field"] = sTable["sortfield"]>
-		<cfif StructKeyExists(sTable,"sortdir")>
-			<cfset sResult["dir"] = sTable["sortdir"]>
-		</cfif>
-	<cfelse>
-		<cfloop index="ii" from="1" to="#ArrayLen(aFields)#">
-			<cfset sField = aFields[ii]>
-
-			<cfif ListFindNoCase(arguments.fieldlist,sField.name)>
-				<!--- Check for sort (apply to table if none exists) --->
-				<cfif StructKeyExists(sField,"defaultSort") AND ListFindNoCase("ASC,DESC",sField.defaultSort)>
-					<cfset ArrayAppend(aSortDefaults,StructFromArgs(field=sField.name,dir=sField.defaultSort))>
-				</cfif>
-				<cfif
+			if ( ListFindNoCase(Arguments.fieldlist,sField.name) ) {
+				// Check for sort (apply to table if none exists)
+				if ( StructKeyExists(sField,"defaultSort") AND ListFindNoCase("ASC,DESC",sField.defaultSort) ) {
+					ArrayAppend(aSortDefaults,StructFromArgs(field=sField.name,dir=sField.defaultSort));
+				}
+				if (
 						(StructKeyExists(sField,"Special") AND sField.Special EQ "Sorter")
 					OR	(StructKeyExists(sField,"type") AND sField.type EQ "Sorter")
-				>
-					<cfset ArrayAppend(aSorters,StructFromArgs(field=sField.name,dir="ASC"))>
-				</cfif>
-			</cfif>
-		</cfloop>
+				) {
+					ArrayAppend(aSorters,StructFromArgs(field=sField.name,dir="ASC"));
+				}
+			}
+		}
+		
+		if ( ArrayLen(aSorters) ) {
+			for ( ii=1; ii LTE ArrayLen(aSorters); ii++ ) {
+				if ( ListFindNoCase(Arguments.fieldlist,aSorters[ii]["field"]) ) {
+					sResult = aSorters[ii];
+					break;
+				}
+			}
+		} else if ( ArrayLen(aSortDefaults) ) {
+			for ( ii=1; ii LTE ArrayLen(aSortDefaults); ii++ ) {
+				if ( ListFindNoCase(Arguments.fieldlist,aSortDefaults[ii]["field"]) ) {
+					sResult = aSortDefaults[ii];
+					break;
+				}
+			}
+		} else if ( StructKeyExists(sTable,"labelField") ) {
+			sResult["field"] = sTable["labelField"];
+		}
+	}
 
-		<cfif ArrayLen(aSorters)>
-			<cfloop index="ii" from="1" to="#ArrayLen(aSorters)#" step="1">
-				<cfif ListFindNoCase(arguments.fieldlist,aSorters[ii]["field"])>
-					<cfset sResult = aSorters[ii]>
-					<cfbreak>
-				</cfif>
-			</cfloop>
-		<cfelseif ArrayLen(aSortDefaults)>
-			<cfloop index="ii" from="1" to="#ArrayLen(aSortDefaults)#" step="1">
-				<cfif ListFindNoCase(arguments.fieldlist,aSortDefaults[ii]["field"])>
-					<cfset sResult = aSortDefaults[ii]>
-					<cfbreak>
-				</cfif>
-			</cfloop>
-		<cfelseif StructKeyExists(sTable,"labelField")>
-			<cfset sResult["field"] = sTable["labelField"]>
-		</cfif>
-	</cfif>
+	if ( StructKeyExists(sResult,"field") AND NOT StructKeyExists(sResult,"dir") ) {
+		sResult["dir"] = "ASC";
+	}
 
-	<cfif StructKeyExists(sResult,"field") AND NOT StructKeyExists(sResult,"dir")>
-		<cfset sResult["dir"] = "ASC">
-	</cfif>
+	return sResult;
+}
 
-	<cfreturn sResult>
-</cffunction>
+public function setField(
+	required string tablename,
+	required string fieldname,
+	string type
+) {
+	var sField = Duplicate(Arguments);
+	var ii = 0;
+	var sDataMgrField = 0;
 
-<cffunction name="setField" access="public" returntype="any" output="false" hint="">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="fieldname" type="string" required="yes">
-	<cfargument name="type" type="string" required="no">
+	StructDelete(sField,"tablename");
+	StructDelete(sField,"fieldname");
+	sField["name"] = Arguments.fieldname;
 
-	<cfset var sField = Duplicate(arguments)>
-	<cfset var ii = 0>
-	<cfset var sDataMgrField = 0>
-
-	<cfset StructDelete(sField,"tablename")>
-	<cfset StructDelete(sField,"fieldname")>
-	<cfset sField["name"] = arguments.fieldname>
-
-	<!--- Expand folder --->
-	<cfif
+	// Expand folder
+	if (
 			StructKeyExists(sField,"Folder")
-		AND	StructKeyExists(variables.sMetaData[arguments.tablename],"folder")
+		AND	StructKeyExists(Variables.sMetaData[Arguments.tablename],"folder")
 		AND	NOT (
 					StructKeyExists(sField,"ExpandFolder")
 				AND	sField.ExpandFolder IS false
 			)
-	>
-		<cfset sField["Folder"] = ListPrepend(sField["Folder"],variables.sMetaData[arguments.tablename].folder)>
-	</cfif>
+	) {
+		sField["Folder"] = ListPrepend(sField["Folder"],Variables.sMetaData[Arguments.tablename].folder);
+	}
 
-	<!--- Default URLvar for foreign keys --->
-	<cfif NOT StructKeyExists(sField,"urlvar")>
-		<cfif
-				StructKeyExists(arguments,"type")
-			AND	ListFirst(arguments.type,":") EQ "fk"
-		>
-			<cfset sField["urlvar"] = LCase(sField["name"])>
-			<cfif Right(sField["urlvar"],2) EQ "id">
-				<cfset sField["urlvar"] = Left(sField["urlvar"],Len(sField["urlvar"])-2)>
-				<cfif Right(sField["urlvar"],1) EQ "_">
-					<cfset sField["urlvar"] = Left(sField["urlvar"],Len(sField["urlvar"])-1)>
-				</cfif>
-			</cfif>
-		<cfelseif
-				StructKeyExists(arguments,"fentity")
-			AND	Len(arguments.fentity)
-		>
-			<cfset sField["urlvar"] = LCase(makeCompName(arguments.fentity))>
-		</cfif>
-	</cfif>
+	// Default URLvar for foreign keys
+	if ( NOT StructKeyExists(sField,"urlvar") ) {
+		if (
+				StructKeyExists(Arguments,"type")
+			AND	ListFirst(Arguments.type,":") EQ "fk"
+		) {
+			sField["urlvar"] = LCase(sField["name"]);
+			if ( Right(sField["urlvar"],2) EQ "id" ) {
+				sField["urlvar"] = Left(sField["urlvar"],Len(sField["urlvar"])-2);
+				if ( Right(sField["urlvar"],1) EQ "_" ) {
+					sField["urlvar"] = Left(sField["urlvar"],Len(sField["urlvar"])-1);
+				}
+			}
+		} else if (
+				StructKeyExists(Arguments,"fentity")
+			AND	Len(Arguments.fentity)
+		) {
+			sField["urlvar"] = LCase(makeCompName(Arguments.fentity));
+		}
+	}
 
-	<!--- Only set fields with a type or a relation --->
-	<cfif StructKeyExists(arguments,"type") OR StructKeyExists(arguments,"relation")>
-		<!--- Make sure a table exists for this field --->
-		<cfset setTable(arguments.tablename)>
-		<cfif ListFindNoCase(variables.sMetaData[arguments.tablename]["fieldlist"],arguments.fieldname)>
-			<!--- Update field --->
-			<cfloop index="ii" from="1" to="#ArrayLen(variables.sMetaData[arguments.tablename].fields)#">
-				<cfif variables.sMetaData[arguments.tablename].fields[ii].name EQ arguments.fieldname>
-					<cfset variables.sMetaData[arguments.tablename].fields[ii] = sField>
-				</cfif>
-			</cfloop>
-		<cfelse>
-			<!--- Add field --->
-			<cfset ArrayAppend(variables.sMetaData[arguments.tablename]["fields"],sField)>
-			<cfset variables.sMetaData[arguments.tablename]["fieldlist"] = ListAppend(variables.sMetaData[arguments.tablename]["fieldlist"],arguments.fieldname)>
-			<cfif StructKeyExists(arguments,"isOnList") AND isBoolean(arguments.isOnList) AND arguments.isOnList>
-				<cfset variables.sMetaData[arguments.tablename]["listfields"] = ListAppend(variables.sMetaData[arguments.tablename]["listfields"],arguments.fieldname)>
-			</cfif>
-		</cfif>
-		<cfset variables.sMetaData[arguments.tablename]["sFields"][arguments.fieldname] = sField>
-		<cfset StructDelete(variables.sMetaData[arguments.tablename]["sFields"][arguments.fieldname],"isInTableCreation")>
+	// Only set fields with a type or a relation
+	if ( StructKeyExists(Arguments,"type") OR StructKeyExists(Arguments,"relation") ) {
+		// Make sure a table exists for this field
+		setTable(Arguments.tablename);
+		if ( ListFindNoCase(Variables.sMetaData[Arguments.tablename]["fieldlist"],Arguments.fieldname) ) {
+			// Update field
+			for ( ii=1; ii LTE ArrayLen(Variables.sMetaData[Arguments.tablename].fields); ii++ ) {
+				if ( Variables.sMetaData[Arguments.tablename].fields[ii].name EQ Arguments.fieldname ) {
+					Variables.sMetaData[Arguments.tablename].fields[ii] = sField;
+				}
+			}
+		} else {
+			//Add field
+			ArrayAppend(Variables.sMetaData[Arguments.tablename]["fields"],sField);
+			Variables.sMetaData[Arguments.tablename]["fieldlist"] = ListAppend(Variables.sMetaData[Arguments.tablename]["fieldlist"],Arguments.fieldname);
+			if ( StructKeyExists(Arguments,"isOnList") AND isBoolean(Arguments.isOnList) AND Arguments.isOnList ) {
+				Variables.sMetaData[Arguments.tablename]["listfields"] = ListAppend(Variables.sMetaData[Arguments.tablename]["listfields"],Arguments.fieldname);
+			}
+		}
+		Variables.sMetaData[Arguments.tablename]["sFields"][Arguments.fieldname] = sField;
+		StructDelete(Variables.sMetaData[Arguments.tablename]["sFields"][Arguments.fieldname],"isInTableCreation");
 
-		<cfif NOT ( StructKeyExists(arguments,"isInTableCreation") AND isBoolean(arguments.isInTableCreation) AND arguments.isInTableCreation )>
-			<cfset sDataMgrField = transformField(Duplicate(sField),"DataMgr")>
-			<cfset sDataMgrField["tablename"] = arguments.tablename>
-			<cfset sDataMgrField["ColumnName"] = arguments.fieldname>
-			<cfset variables.DataMgr.setColumn(argumentCollection=sDataMgrField)>
+		if (
+			NOT (
+				StructKeyExists(Arguments,"isInTableCreation")
+				AND
+				isBoolean(Arguments.isInTableCreation)
+				AND
+				Arguments.isInTableCreation
+			)
+		) {
+			sDataMgrField = transformField(Duplicate(sField),"DataMgr");
+			sDataMgrField["tablename"] = Arguments.tablename;
+			sDataMgrField["ColumnName"] = Arguments.fieldname;
+			Variables.DataMgr.setColumn(ArgumentCollection=sDataMgrField);
 
-			<!--- Make any thumbnails for new thumbnail field --->
-			<cfif isThumbField(arguments.tablename,arguments.fieldname)>
-				<cfset makeThumbs(arguments.tablename,arguments.fieldname)>
-			</cfif>
-		</cfif>
+			// Make any thumbnails for new thumbnail field
+			if ( isThumbField(Arguments.tablename,Arguments.fieldname) ) {
+				makeThumbs(Arguments.tablename,Arguments.fieldname);
+			}
+		}
 
+		if ( StructKeyExists(sField,"Folder") ) {
+			Variables.FileMgr.makeFolder(sField.Folder);
+			Variables.sMetaData[Arguments.tablename]["hasFileFields"] = true;
+		}
+		
+	}
 
-		<cfif StructKeyExists(sField,"Folder")>
-			<cfset variables.FileMgr.makeFolder(sField.Folder)>
-			<cfset variables.sMetaData[arguments.tablename]["hasFileFields"] = true>
-		</cfif>
+}
 
-	</cfif>
+public function loadXml(required xml) {
+	var xIn = XmlParse(Arguments.xml);
+	var table = "";
+	var aInTables = 0;
+	var tt = 0;
+	lock name="Manager_loadXml#Variables.UUID#" timeout="60" throwontimeout="yes" {
+		adjustXml(xIn);
 
-</cffunction>
+		loadXmlStruct(xIn);
 
-<cffunction name="loadXml" access="public" returntype="any" output="false" hint="">
-	<cfargument name="xml" type="any" required="yes">
+		loadDataMgrXml(xIn);
 
-	<cfset var xIn = XmlParse(arguments.xml)>
-	<cfset var table = "">
-	<cfset var aInTables = 0>
-	<cfset var tt = 0>
+		aInTables = XmlSearch(xIn,"//table[string-length(@name)>0]");
 
-	<cflock name="Manager_loadXml#variables.UUID#" timeout="60" throwontimeout="yes">
-		<cfset adjustXml(xIn)>
+		// Make thumbnails
+		for ( tt=1; tt LTE ArrayLen(aInTables); tt++ ) {
+			table = aInTables[tt].XmlAttributes["name"];
+			if ( Variables.sMetaData[table]["hasFileFields"] IS true ) {
+				makeThumbs(table);
+			}
+		}
+	}
 
-		<cfset loadXmlStruct(xIn)>
+	return xIn;
+}
 
-		<cfset loadDataMgrXml(xIn)>
+public function adjustXml(required xml) {
+	var xDef = 0;
+	var aTables = 0;
+	var aFTables = 0;
+	var table = "";
+	var ftable = "";
+	var aFields = 0;
+	var tt = 0;
+	var ff = 0;
+	var ll = 0;
+	var sField = "";
+	var xField = "";
+	var special = "";
+	var xType = 0;
+	var insertAt = 0;
 
-		<cfset aInTables = XmlSearch(xIn,"//table[string-length(@name)>0]")>
+	if ( isSimpleValue(Arguments.xml) ) {
+		xDef = XmlParse(Arguments.xml);
+	} else if ( isXMLDoc(Arguments.xml) ) {
+		xDef = Arguments.xml;
+	} else {
+		throw(message="XML argument of loadXmlStruct must be XML.",type="Manager");
+	}
 
-		<!--- Make thumbnails --->
-		<cfloop index="tt" from="1" to="#ArrayLen(aInTables)#">
-			<cfset table = aInTables[tt].XmlAttributes["name"]>
-			<cfif variables.sMetaData[table]["hasFileFields"] IS true>
-				<cfset makeThumbs(table)>
-			</cfif>
-		</cfloop>
-	</cflock>
+	xDef = applyTableDefaults(xDef);
+	xDef = applyEntities(xDef);
+	xDef = applySecurityPermissions(xDef);
 
-	<cfreturn xIn>
-</cffunction>
+	aTables = XmlSearch(xDef,"//table[string-length(@name)>0]");
 
-<cffunction name="adjustXml" access="public" returntype="any" output="false" hint="">
-	<cfargument name="xml" type="any" required="yes">
+	//Table/Field pre-processing
+	for ( tt=1; tt LTE ArrayLen(aTables); tt++ ) {
+		table = aTables[tt].XmlAttributes["name"];
+		// Create entry for table if not already in memory
+		setTable(table);
 
-	<cfset var xDef = 0>
-	<cfset var aTables = 0>
-	<cfset var aFTables = 0>
-	<cfset var table = "">
-	<cfset var ftable = "">
-	<cfset var aFields = 0>
-	<cfset var tt = 0>
-	<cfset var ff = 0>
-	<cfset var ll = 0>
-	<cfset var sField = "">
-	<cfset var xField = "">
-	<cfset var special = "">
-	<cfset var xType = 0>
-	<cfset var insertAt = 0>
+		if ( NOT StructKeyExists(aTables[tt].XmlAttributes,"deletable") ) {
+			aTables[tt].XmlAttributes["deletable"] = "isDeletable";
+		}
 
-	<cfif isSimpleValue(arguments.xml)>
-		<cfset xDef = XmlParse(arguments.xml)>
-	<cfelseif isXMLDoc(arguments.xml)>
-		<cfset xDef = arguments.xml>
-	<cfelse>
-		<cfthrow message="XML argument of loadXmlStruct must be XML." type="Manager">
-	</cfif>
+		// Update table properties
+		StructAppend(Variables.sMetaData[table]["sAttributes"],aTables[tt].XmlAttributes,"yes");
+		StructAppend(Variables.sMetaData[table],aTables[tt].XmlAttributes,"yes");
+		StructDelete(Variables.sMetaData[table],"name");
 
-	<cfset xDef = applyTableDefaults(xDef)>
-	<cfset xDef = applyEntities(xDef)>
-	<cfset xDef = applySecurityPermissions(xDef)>
+		if ( NOT StructKeyExists(aTables[tt].XmlAttributes,"methodSingular") ) {
+			if ( StructKeyExists(Variables.sMetaData[table],"methodSingular") ) {
+				aTables[tt].XmlAttributes["methodSingular"] = Variables.sMetaData[table]["methodSingular"];
+			} else if ( StructKeyExists(aTables[tt].XmlAttributes,"labelSingular") ) {
+				aTables[tt].XmlAttributes["methodSingular"] = makeCompName(aTables[tt].XmlAttributes["labelSingular"]);
+				Variables.sMetaData[table]["methodSingular"] = aTables[tt].XmlAttributes["methodSingular"];
+			}
+		}
+		if ( NOT StructKeyExists(aTables[tt].XmlAttributes,"methodPlural") ) {
+			if ( StructKeyExists(Variables.sMetaData[table],"methodPlural") ) {
+				aTables[tt].XmlAttributes["methodPlural"] = Variables.sMetaData[table]["methodPlural"];
+			} else if ( StructKeyExists(aTables[tt].XmlAttributes,"labelPlural") ) {
+				aTables[tt].XmlAttributes["methodPlural"] = makeCompName(aTables[tt].XmlAttributes["labelPlural"]);
+				Variables.sMetaData[table]["methodPlural"] = aTables[tt].XmlAttributes["methodPlural"];
+			}
+		}
 
-	<cfset aTables = XmlSearch(xDef,"//table[string-length(@name)>0]")>
+		aFields = XmlSearch(xDef,"//table[@name='#table#']//field[string-length(@name)>0]");
 
-	<!--- Table/Field pre-processing --->
-	<cfloop index="tt" from="1" to="#ArrayLen(aTables)#">
-		<cfset table = aTables[tt].XmlAttributes["name"]>
-		<!--- Create entry for table if not already in memory --->
-		<cfset setTable(table)>
-
-		<cfif NOT StructKeyExists(aTables[tt].XmlAttributes,"deletable")>
-			<cfset aTables[tt].XmlAttributes["deletable"] = "isDeletable">
-		</cfif>
-
-		<!--- Update table properties --->
-		<cfset StructAppend(variables.sMetaData[table]["sAttributes"],aTables[tt].XmlAttributes,"yes")>
-		<cfset StructAppend(variables.sMetaData[table],aTables[tt].XmlAttributes,"yes")>
-		<cfset StructDelete(variables.sMetaData[table],"name")>
-
-		<cfif NOT StructKeyExists(aTables[tt].XmlAttributes,"methodSingular")>
-			<cfif StructKeyExists(variables.sMetaData[table],"methodSingular")>
-				<cfset aTables[tt].XmlAttributes["methodSingular"] = variables.sMetaData[table]["methodSingular"]>
-			<cfelseif StructKeyExists(aTables[tt].XmlAttributes,"labelSingular")>
-				<cfset aTables[tt].XmlAttributes["methodSingular"] = makeCompName(aTables[tt].XmlAttributes["labelSingular"])>
-				<cfset variables.sMetaData[table]["methodSingular"] = aTables[tt].XmlAttributes["methodSingular"]>
-			</cfif>
-		</cfif>
-		<cfif NOT StructKeyExists(aTables[tt].XmlAttributes,"methodPlural")>
-			<cfif StructKeyExists(variables.sMetaData[table],"methodPlural")>
-				<cfset aTables[tt].XmlAttributes["methodPlural"] = variables.sMetaData[table]["methodPlural"]>
-			<cfelseif StructKeyExists(aTables[tt].XmlAttributes,"labelPlural")>
-				<cfset aTables[tt].XmlAttributes["methodPlural"] = makeCompName(aTables[tt].XmlAttributes["labelPlural"])>
-				<cfset variables.sMetaData[table]["methodPlural"] = aTables[tt].XmlAttributes["methodPlural"]>
-			</cfif>
-		</cfif>
-
-		<cfset aFields = XmlSearch(xDef,"//table[@name='#table#']//field[string-length(@name)>0]")>
-
-		<!--- Create primary key field from pkfield attribute --->
-		<cfif
+		// Create primary key field from pkfield attribute
+		if (
 				StructKeyExists(aTables[tt].XmlAttributes,"pkfield")
 			AND	Len(Trim(aTables[tt].XmlAttributes.pkfield))
-			AND	NOT StructKeyExists(variables.sMetaData[table].sFields,variables.sMetaData[table].pkfield)
-			AND	NOT ArrayLen(XmlSearch(xDef,"//table[@name='#table#']//field[@name='#variables.sMetaData[table].pkfield#']"))
-		>
-			<!--- Look for existing pkfield --->
-			<cfloop index="ff" from="1" to="#ArrayLen(aFields)#">
-				<cfif StructKeyExists(aFields[ff],"type") AND Len(aFields[ff].type) AND ListFirst(aFields[ff].type,":") EQ "pk">
-					<cfthrow message="Primary key for #table# defined in pkfield attribute (#variables.sMetaData[table].pkfield#) does not match a field defined as a primary key." type="Manager">
-				</cfif>
-			</cfloop>
+			AND	NOT StructKeyExists(Variables.sMetaData[table].sFields,Variables.sMetaData[table].pkfield)
+			AND	NOT ArrayLen(XmlSearch(xDef,"//table[@name='#table#']//field[@name='#Variables.sMetaData[table].pkfield#']"))
+		) {
+			// Look for existing pkfield
+			for ( ff=1; ff LTE ArrayLen(aFields); ff++ ) {
+				if ( StructKeyExists(aFields[ff],"type") AND Len(aFields[ff].type) AND ListFirst(aFields[ff].type,":") EQ "pk" ) {
+					throw(message="Primary key for #table# defined in pkfield attribute (#Variables.sMetaData[table].pkfield#) does not match a field defined as a primary key.",type="Manager");
+				}
+			}
 
-			<!--- No errors? Then create the field --->
-			<cfset xField = XmlElemNew(xDef,"field")>
-			<cfset xField.XmlAttributes["name"] = variables.sMetaData[table].pkfield>
-			<cfset xField.XmlAttributes["type"] = "pk:integer">
+			// No errors? Then create the field
+			xField = XmlElemNew(xDef,"field");
+			xField.XmlAttributes["name"] = Variables.sMetaData[table].pkfield;
+			xField.XmlAttributes["type"] = "pk:integer";
 
-			<cfset ArrayPrepend(aTables[tt].XmlChildren,Duplicate(xField))>
-		</cfif>
+			ArrayPrepend(aTables[tt].XmlChildren,Duplicate(xField));
+		}
 
-		<!--- Create label field from labelField attribute --->
-		<cfif
+		// Create label field from labelField attribute
+		if (
 				StructKeyExists(aTables[tt].XmlAttributes,"labelField")
 			AND	Len(Trim(aTables[tt].XmlAttributes.labelField))
-			AND	NOT ListFindNoCase(variables.sMetaData[table].fieldlist,variables.sMetaData[table].labelField)
-			AND	NOT StructKeyExists(variables.sMetaData[table].sFields,variables.sMetaData[table].labelField)
-			AND	NOT ArrayLen(XmlSearch(xDef,"//table[@name='#table#']//field[@name='#variables.sMetaData[table].labelField#']"))
-		>
+			AND	NOT ListFindNoCase(Variables.sMetaData[table].fieldlist,Variables.sMetaData[table].labelField)
+			AND	NOT StructKeyExists(Variables.sMetaData[table].sFields,Variables.sMetaData[table].labelField)
+			AND	NOT ArrayLen(XmlSearch(xDef,"//table[@name='#table#']//field[@name='#Variables.sMetaData[table].labelField#']"))
+		) {
+			xField = XmlElemNew(xDef,"field");
+			xField.XmlAttributes["name"] = Variables.sMetaData[table].labelField;
+			xField.XmlAttributes["label"] = Variables.sMetaData[table]["labelSingular"];
+			xField.XmlAttributes["type"] = "text";
+			xField.XmlAttributes["required"] = "true";
 
-			<cfset xField = XmlElemNew(xDef,"field")>
-			<cfset xField.XmlAttributes["name"] = variables.sMetaData[table].labelField>
-			<cfset xField.XmlAttributes["label"] = variables.sMetaData[table]["labelSingular"]>
-			<cfset xField.XmlAttributes["type"] = "text">
-			<cfset xField.XmlAttributes["required"] = "true">
+			if (
+					StructKeyExists(Variables.sMetaData[table],"labelLength")
+				AND	isNumeric(Variables.sMetaData[table].labelLength)
+				AND	Variables.sMetaData[table].labelLength GT 0
+			) {
+				xField.XmlAttributes["Length"] = Int(Variables.sMetaData[table].labelLength);
+			} else {
+				xField.XmlAttributes["Length"] = 120;
+			}
 
-			<cfif
-					StructKeyExists(variables.sMetaData[table],"labelLength")
-				AND	isNumeric(variables.sMetaData[table].labelLength)
-				AND	variables.sMetaData[table].labelLength GT 0
-			>
-				<cfset xField.XmlAttributes["Length"] = Int(variables.sMetaData[table].labelLength)>
-			<cfelse>
-				<cfset xField.XmlAttributes["Length"] = 120>
-			</cfif>
-
-			<cfset insertAt = Min(
+			insertAt = Min(
 				ArrayLen(
 					XmlSearch(
 						xDef,
@@ -1807,52 +1907,50 @@
 						"//table[@name='#table#']//field[starts-with(@type,'pk:')]"
 					)
 				) + 1
-			)>
+			);
 
-			<cfif insertAt GTE ArrayLen(aTables[tt].XmlChildren)>
-				<cfset ArrayAppend(aTables[tt].XmlChildren,xField)>
-			<cfelse>
-				<cfset ArrayInsertAt(aTables[tt].XmlChildren,insertAt,xField)>
-			</cfif>
+			if ( insertAt GTE ArrayLen(aTables[tt].XmlChildren) ) {
+				ArrayAppend(aTables[tt].XmlChildren,xField);
+			} else {
+				ArrayInsertAt(aTables[tt].XmlChildren,insertAt,xField);
+			}
+		}
 
-		</cfif>
-
-		<!--- Add Special fields --->
-		<cfif
-				StructKeyExists(variables.sMetaData[table],"Specials")
-			AND	Len(Trim(variables.sMetaData[table].Specials))
-		>
-			<cfloop list="#variables.sMetaData[table].Specials#" index="special">
-				<cfif
-						ListFindNoCase(variables.TypeNames,special)
+		// Add Special fields
+		if (
+				StructKeyExists(Variables.sMetaData[table],"Specials")
+			AND	Len(Trim(Variables.sMetaData[table].Specials))
+		) {
+			for ( special in ListToArray(Variables.sMetaData[table].Specials) ) {
+				if (
+						ListFindNoCase(Variables.TypeNames,special)
 					AND	NOT ArrayLen(XmlSearch(aTables[tt],"/field[@type='#special#']"))
-				>
-					<cfset xField = XmlElemNew(xDef,"field")>
-					<cfset xField.XmlAttributes["type"] = special>
-					<cfif special EQ "CreationDate" OR special EQ "LastUpdatedDate">
-						<cfset xField.XmlAttributes["sebcolumn"] = false>
-					</cfif>
-					<cfset ArrayAppend(aTables[tt].XmlChildren,xField)>
-				</cfif>
-			</cfloop>
-		</cfif>
+				) {
+					xField = XmlElemNew(xDef,"field");
+					xField.XmlAttributes["type"] = special;
+					if ( special EQ "CreationDate" OR special EQ "LastUpdatedDate" ) {
+						xField.XmlAttributes["sebcolumn"] = false;
+					}
+					ArrayAppend(aTables[tt].XmlChildren,xField);
+				}
+			}
+		}
 
-		<!--- Add help for image sizes --->
-		<cfloop index="ff" from="1" to="#ArrayLen(aFields)#">
-			<cfset xField = aFields[ff]>
-			<cfif
+		// Add help for image sizes
+		for ( xField in aFields ) {
+			if (
 					StructKeyExists(xField.XmlAttributes,"type")
 				AND	xField.XmlAttributes["type"] EQ "image"
 				AND	( StructKeyExists(xField.XmlAttributes,"MaxWidth") AND Val(xField.XmlAttributes["MaxWidth"]) )
 				AND	( StructKeyExists(xField.XmlAttributes,"MaxHeight") AND Val(xField.XmlAttributes["MaxHeight"]) )
 				AND	NOT ( StructKeyExists(xField.XmlAttributes,"help") AND Len(xField.XmlAttributes["help"]) )
-			>
-				<cfset xField.XmlAttributes["help"] = '( At least #xField.XmlAttributes["MaxWidth"]#px X #xField.XmlAttributes["MaxHeight"]#px )'>
-			</cfif>
-		</cfloop>
+			) {
+				xField.XmlAttributes["help"] = '( At least #xField.XmlAttributes["MaxWidth"]#px X #xField.XmlAttributes["MaxHeight"]#px )';
+			}
+		}
 
-		<!--- Add "IN" filter for pk field --->
-		<cfif
+		// Add "IN" filter for pk field
+		if (
 				StructKeyExists(aTables[tt].XmlAttributes,"pkfield")
 			AND	StructKeyExists(aTables[tt].XmlAttributes,"methodPlural")
 			AND	ArrayLen(
@@ -1869,813 +1967,834 @@
 						)
 					)
 				)
-		>
-			<cfset xField = XmlElemNew(xDef,"filter")>
-			<cfset xField.XmlAttributes["name"] = LCase(aTables[tt].XmlAttributes.methodPlural)>
-			<cfset xField.XmlAttributes["field"] = aTables[tt].XmlAttributes.pkfield>
-			<cfset xField.XmlAttributes["operator"] = "IN">
-			<cfset ArrayAppend(aTables[tt].XmlChildren,Duplicate(xField))>
+		) {
+			xField = XmlElemNew(xDef,"filter");
+			xField.XmlAttributes["name"] = LCase(aTables[tt].XmlAttributes.methodPlural);
+			xField.XmlAttributes["field"] = aTables[tt].XmlAttributes.pkfield;
+			xField.XmlAttributes["operator"] = "IN";
+			ArrayAppend(aTables[tt].XmlChildren,Duplicate(xField));
 
-			<cfset xField = XmlElemNew(xDef,"filter")>
-			<cfset xField.XmlAttributes["name"] = "exclude">
-			<cfset xField.XmlAttributes["field"] = aTables[tt].XmlAttributes.pkfield>
-			<cfset xField.XmlAttributes["operator"] = "NOT IN">
-			<cfset ArrayAppend(aTables[tt].XmlChildren,Duplicate(xField))>
-		</cfif>
+			xField = XmlElemNew(xDef,"filter");
+			xField.XmlAttributes["name"] = "exclude";
+			xField.XmlAttributes["field"] = aTables[tt].XmlAttributes.pkfield;
+			xField.XmlAttributes["operator"] = "NOT IN";
+			ArrayAppend(aTables[tt].XmlChildren,Duplicate(xField));
+		}
 
-	</cfloop>
+	}
 
-	<!--- Handle Fields with ftable attributes --->
-	<cfset adjustXmlFTableFields(xDef)>
+	// Handle Fields with ftable attributes
+	adjustXmlFTableFields(xDef);
 
-	<!--- Add names to fields with only types --->
-	<cfset adjustXmlAddNamesToTypes(xDef)>
+	// Add names to fields with only types
+	adjustXmlAddNamesToTypes(xDef);
 
-	<cfloop index="tt" from="1" to="#ArrayLen(aTables)#">
-		<cfset table = aTables[tt].XmlAttributes["name"]>
-		<cfset aFields = XmlSearch(xDef,"//table[@name='#table#']//field[string-length(@name)>0]")>
-		<!--- Add filters for fentities --->
-		<cfloop index="ff" from="1" to="#ArrayLen(aFields)#">
-			<cfif
+	for ( tt=1; tt LTE ArrayLen(aTables); tt++ ) {
+		table = aTables[tt].XmlAttributes["name"];
+		aFields = XmlSearch(xDef,"//table[@name='#table#']//field[string-length(@name)>0]");
+		// Add filters for fentities
+		for ( ff=1; ff LTE ArrayLen(aFields); ff++ ) {
+			if (
 					StructKeyHasLen(aFields[ff].XmlAttributes,"fentity")
 				AND	NOT (
 							StructKeyHasLen(aTables[tt].XmlAttributes,"entity")
 						AND	aFields[ff].XmlAttributes["fentity"] EQ aTables[tt].XmlAttributes["entity"]
 					)
-			>
-				<cfset xField = XmlElemNew(xDef,"filter")>
-				<cfset xField.XmlAttributes["name"] = Pluralize(makeCompName(aFields[ff].XmlAttributes["fentity"]))>
-				<cfset xField.XmlAttributes["field"] = aFields[ff].XmlAttributes["name"]>
-				<cfset xField.XmlAttributes["operator"] = "IN">
-				<cfset ArrayAppend(aTables[tt].XmlChildren,Duplicate(xField))>
-			</cfif>
-		</cfloop>
-	</cfloop>
+			) {
+				xField = XmlElemNew(xDef,"filter");
+				xField.XmlAttributes["name"] = Pluralize(makeCompName(aFields[ff].XmlAttributes["fentity"]));
+				xField.XmlAttributes["field"] = aFields[ff].XmlAttributes["name"];
+				xField.XmlAttributes["operator"] = "IN";
+				ArrayAppend(aTables[tt].XmlChildren,Duplicate(xField));
+			}
+		}
+	}
+	
+	return xDef;
+}
 
-	<cfreturn xDef>
-</cffunction>
+private function adjustXmlFTableFields(required xDef) {
+	var axFields = XmlSearch(xDef,"//field[string-length(@ftable)>0]");
+	var xField = 0;
+	var xTable = 0;
+	var ff = 0;
+	var table = "";
+	var ftable = "";
+	var axFTables = 0;
+	var xFTable = 0;
+	var xLabelField = 0;
+	var NumField = "";
+	var xNumField = 0;
+	var HasField = "";
+	var xHasField = 0;
+	var xListField = 0;
+	var xListNamesField = 0;
+	var isMany2Many = 0;
 
-<cffunction name="adjustXmlFTableFields" access="private" returntype="any" output="false" hint="">
-	<cfargument name="xDef" type="any" required="true">
+	for ( ff=1; ff LTE ArrayLen(axFields); ff++ ) {
+		xField = axFields[ff];
+		xTable = xField.XmlParent;
+		table = xTable.XmlAttributes["name"];
+		ftable = xField.XmlAttributes["ftable"];
+		axFTables = XmlSearch(xDef,"//table[@name='#ftable#']");
+		if ( ArrayLen(axFTables) ) {
+			
+			xFTable = axFTables[1];
 
-	<cfset var axFields = XmlSearch(xDef,"//field[string-length(@ftable)>0]")>
-	<cfset var xField = 0>
-	<cfset var xTable = 0>
-	<cfset var ff = 0>
-	<cfset var table = "">
-	<cfset var ftable = "">
-	<cfset var axFTables = 0>
-	<cfset var xFTable = 0>
-	<cfset var xLabelField = 0>
-	<cfset var NumField = "">
-	<cfset var xNumField = 0>
-	<cfset var HasField = "">
-	<cfset var xHasField = 0>
-	<cfset var xListField = 0>
-	<cfset var xListNamesField = 0>
-	<cfset var isMany2Many = 0>
+			if ( NOT StructKeyExists(xField.XmlAttributes,"subcomp") ) {
+				if ( StructKeyExists(Variables.sMetaData, ftable) AND StructKeyExists(Variables.sMetaData[ftable],"methodPlural") ) {
+					xField.XmlAttributes["subcomp"] = makeCompName(Variables.sMetaData[ftable]["methodPlural"]);
+				} else if ( StructKeyExists(xFTable.XmlAttributes,"methodPlural") ) {
+					xField.XmlAttributes["subcomp"] = makeCompName(xFTable.XmlAttributes["methodPlural"]);
+				}
+			}
 
-	<cfloop index="ff" from="1" to="#ArrayLen(axFields)#" step="1">
-		<cfset xField = axFields[ff]>
-		<cfset xTable = xField.XmlParent>
-		<cfset table = xTable.XmlAttributes["name"]>
-		<cfset ftable = xField.XmlAttributes["ftable"]>
-		<cfset axFTables = XmlSearch(xDef,"//table[@name='#ftable#']")>
-		<cfif ArrayLen(axFTables)>
-
-			<cfset xFTable = axFTables[1]>
-
-			<cfif NOT StructKeyExists(xField.XmlAttributes,"subcomp")>
-				<cfif StructKeyExists(variables.sMetaData, ftable) AND StructKeyExists(variables.sMetaData[ftable],"methodPlural")>
-					<cfset xField.XmlAttributes["subcomp"] = makeCompName(variables.sMetaData[ftable]["methodPlural"])>
-				<cfelseif StructKeyExists(xFTable.XmlAttributes,"methodPlural")>
-					<cfset xField.XmlAttributes["subcomp"] = makeCompName(xFTable.XmlAttributes["methodPlural"])>
-				</cfif>
-			</cfif>
-
-			<cfif
+			if (
 					StructKeyExists(xField.XmlAttributes,"jointype")
 				AND	(
 							xField.XmlAttributes["jointype"] EQ "many"
 						OR	xField.XmlAttributes["jointype"] EQ "list"
 						OR	xField.XmlAttributes["jointype"] EQ "many2many"
 					)
-			>
-				<cfset isMany2Many = ( xField.XmlAttributes["jointype"] EQ "many2many" OR ArrayLen(XmlSearch(xDef,"//table[@name='#ftable#']/field[@ftable='#table#'][@jointype='many' or @jointype='list' or @jointype='many2many']")) )>
-				<cfif NOT StructKeyExists(xField.XmlAttributes,"type")>
-					<cfset xField.XmlAttributes["type"] = "Relation">
-				</cfif>
-				<cfif NOT StructKeyExists(xField.XmlAttributes,"name")>
-					<cfif StructKeyExists(xField.XmlAttributes,"fentity")>
-						<cfset xField.XmlAttributes["name"] = Pluralize(makeCompName(xField.XmlAttributes["fentity"]))>
-					<cfelseif StructKeyExists(variables.sMetaData,ftable)>
-						<cfset xField.XmlAttributes["name"] = makeCompName(variables.sMetaData[ftable]["methodPlural"])>
-					</cfif>
-					<cfif table EQ ftable>
-						<cfset xField.XmlAttributes.name = "Related#xField.XmlAttributes.name#">
-					</cfif>
-				</cfif>
-				<cfif NOT StructKeyExists(xField.XmlAttributes,"Label")>
-					<cfif StructKeyExists(variables.sMetaData, ftable) AND StructKeyExists(variables.sMetaData[ftable],"labelPlural")>
-						<cfset xField.XmlAttributes["Label"] = variables.sMetaData[ftable]["labelPlural"]>
-						<cfif table EQ ftable>
-							<cfset xField.XmlAttributes.Label = "Related #xField.XmlAttributes.Label#">
-						</cfif>
-					</cfif>
-				</cfif>
-				<cfif NOT StructKeyExists(xField.XmlAttributes,"OldField")>
-					<cfset xField.XmlAttributes["OldField"] = getPrimaryKeyFields(ftable,xDef)>
-					<cfif ListLen(xField.XmlAttributes["OldField"]) NEQ 1>
-						<!---<cfthrow message="You must provide a field name for joins with #ftable# as no single primary key field could be found." type="Manager">--->
-						<cfset StructDelete(xField.XmlAttributes,"OldField")>
-					</cfif>
-				</cfif>
-				<cfif NOT StructKeyExists(xField.XmlAttributes,"jointable")>
-					<cfset xField.XmlAttributes["jointable"] = getJoinTableName(xDef,table,ftable)>
-				</cfif>
-				<cfset ArrayAppend(xField.XmlChildren,XmlElemNew(xDef,"relation"))>
-				<cfset xField.XmlChildren[1].XmlAttributes["type"] = "list">
-				<cfset xField.XmlChildren[1].XmlAttributes["table"] = ftable>
-				<cfset xField.XmlChildren[1].XmlAttributes["field"] = getPrimaryKeyFields(ftable,xDef)>
-				<cfset xField.XmlChildren[1].XmlAttributes["join-table"] = xField.XmlAttributes["jointable"]>
-				<cfset xField.XmlChildren[1].XmlAttributes["local-table-join-field"] = getPrimaryKeyFields(table,xDef)>
-				<cfset xField.XmlChildren[1].XmlAttributes["join-table-field-local"] = getPrimaryKeyFields(table,xDef)>
-				<cfset xField.XmlChildren[1].XmlAttributes["join-table-field-remote"] = getPrimaryKeyFields(ftable,xDef)>
-				<cfset xField.XmlChildren[1].XmlAttributes["remote-table-join-field"] = getPrimaryKeyFields(ftable,xDef)>
-				<cfif table EQ ftable>
-					<cfset xField.XmlChildren[1].XmlAttributes["join-table-field-remote"] = "Related#getPrimaryKeyFields(ftable,xDef)#">
-					<cfif StructKeyExists(xField.XmlAttributes,"bidirectional") AND isBoolean(xField.XmlAttributes["bidirectional"])>
-						<cfset xField.XmlChildren[1].XmlAttributes["bidirectional"] = xField.XmlAttributes["bidirectional"]>
-					<cfelse>
-						<cfset xField.XmlChildren[1].XmlAttributes["bidirectional"] = true>
-					</cfif>
-				</cfif>
-				<cfif NOT StructKeyExists(xField.XmlAttributes,"listshowfield")>
-					<cfif StructKeyExists(variables.sMetaData, ftable) AND StructKeyExists(variables.sMetaData[ftable],"methodSingular")>
-						<cfset xField.XmlAttributes["listshowfield"] = makeCompName(variables.sMetaData[ftable]["methodSingular"] & "Names")>
-						<cfif table EQ ftable>
-							<cfset xField.XmlAttributes.listshowfield = "Related#xField.XmlAttributes.listshowfield#">
-						</cfif>
-					</cfif>
-				</cfif>
-				<cfif StructKeyExists(xField.XmlAttributes,"listshowfield")>
-					<!--- Add label and has relation fields (if they don't exists) --->
-					<cfif NOT ArrayLen( XmlSearch(xDef,"//table[@name='#table#']/field[@name='#xField.XmlAttributes.listshowfield#']") )>
-						<cfset xLabelField = XmlElemNew(xDef,"field")>
-						<cfset xLabelField.XmlAttributes["name"] = xField.XmlAttributes.listshowfield>
-						<cfset xLabelField.XmlAttributes["label"] = xField.XmlAttributes.label>
-						<cfset ArrayAppend(xLabelField.XmlChildren,XmlElemNew(xDef,"relation"))>
-						<cfset xLabelField.XmlChildren[1].XmlAttributes["type"] = "list">
-						<cfset xLabelField.XmlChildren[1].XmlAttributes["table"] = ftable>
-						<cfset xLabelField.XmlChildren[1].XmlAttributes["field"] = variables.sMetaData[ftable]["labelField"]>
-						<cfset xLabelField.XmlChildren[1].XmlAttributes["join-table"] = xField.XmlAttributes["jointable"]>
-						<cfset xLabelField.XmlChildren[1].XmlAttributes["local-table-join-field"] = getPrimaryKeyFields(table,xDef)>
-						<cfset xLabelField.XmlChildren[1].XmlAttributes["join-table-field-local"] = getPrimaryKeyFields(table,xDef)>
-						<cfset xLabelField.XmlChildren[1].XmlAttributes["join-table-field-remote"] = getPrimaryKeyFields(ftable,xDef)>
-						<cfset xLabelField.XmlChildren[1].XmlAttributes["remote-table-join-field"] = getPrimaryKeyFields(ftable,xDef)>
-						<cfset ArrayAppend(xTable.XmlChildren,xLabelField)>
-					</cfif>
-				</cfif>
-				<!--- Add Num and Has relation fields (if they don't exist) --->
-				<cfif table EQ ftable>
-					<cfset NumField = "NumRelated#xTable.XmlAttributes.methodPlural#">
-					<cfset HasField = "hasRelated#xTable.XmlAttributes.methodPlural#">
-				<cfelse>
-					<cfset NumField = "Num#xTable.XmlAttributes.methodPlural#">
-					<cfset HasField = "has#xTable.XmlAttributes.methodPlural#">
-				</cfif>
-				<cfif NOT ArrayLen(XmlSearch(xFTable,"/field[@name='#NumField#']"))>
-					<cfset xNumField = XmlElemNew(xDef,"field")>
-					<cfset xNumField.XmlAttributes["name"] = NumField>
-					<cfset xNumField.XmlAttributes["label"] = xTable.XmlAttributes.labelPlural>
-					<cfif table EQ ftable>
-						<cfset xNumField.XmlAttributes.label = "Related #xNumField.XmlAttributes.label#">
-					</cfif>
-					<cfset xNumField.XmlAttributes["sebcolumn_type"] = "numeric">
-					<cfset ArrayAppend(xNumField.XmlChildren,XmlElemNew(xDef,"relation"))>
-					<cfset xNumField.XmlChildren[1].XmlAttributes["type"] = "count">
-					<cfset xNumField.XmlChildren[1].XmlAttributes["table"] = xField.XmlAttributes["jointable"]>
-					<cfset xNumField.XmlChildren[1].XmlAttributes["field"] = getPrimaryKeyFields(table,xDef)>
-					<cfset xNumField.XmlChildren[1].XmlAttributes["join-field-local"] = getPrimaryKeyFields(ftable,xDef)>
-					<cfset xNumField.XmlChildren[1].XmlAttributes["join-field-remote"] = getPrimaryKeyFields(ftable,xDef)>
-					<cfif StructKeyExists(xField.XmlAttributes,"onRemoteDelete")>
-						<cfset xNumField.XmlChildren[1].XmlAttributes["onDelete"] = xField.XmlAttributes["onRemoteDelete"]>
-					</cfif>
-					<cfif ListLen(xNumField.XmlChildren[1].XmlAttributes["join-field-local"]) EQ 1>
-						<cfset ArrayAppend(xFTable.XmlChildren,xNumField)>
-					</cfif>
-				</cfif>
-				<cfif NOT ArrayLen(XmlSearch(xFTable,"/field[@name='#HasField#']"))>
-					<cfset xHasField = XmlElemNew(xDef,"field")>
-					<cfset xHasField.XmlAttributes["name"] = HasField>
-					<cfset xHasField.XmlAttributes["label"] = "Has #xTable.XmlAttributes.labelPlural#?">
-					<cfif table EQ ftable>
-						<cfset xHasField.XmlAttributes.label = "Has Child #xNumField.XmlAttributes.label#s?">
-					</cfif>
-					<cfset xHasField.XmlAttributes["sebcolumn_type"] = "yesno">
-					<cfset ArrayAppend(xHasField.XmlChildren,XmlElemNew(xDef,"relation"))>
-					<cfset xHasField.XmlChildren[1].XmlAttributes["type"] = "has">
-					<cfset xHasField.XmlChildren[1].XmlAttributes["field"] = NumField>
-					<cfset ArrayAppend(xFTable.XmlChildren,xHasField)>
-				</cfif>
-			<cfelse>
-				<cfif NOT StructKeyExists(xField.XmlAttributes,"type")>
-					<cfset xField.XmlAttributes["type"] = "fk:integer">
-				</cfif>
-				<cfif NOT StructKeyExists(xField.XmlAttributes,"name")>
-					<cfset xField.XmlAttributes["name"] = getPrimaryKeyFields(ftable,xDef)>
-					<cfif ListLen(xField.XmlAttributes["name"]) NEQ 1>
-						<cfthrow message="You must provide a field name for joins with #ftable# as no single primary key field could be found." type="Manager">
-					</cfif>
-					<cfif table EQ ftable>
-						<cfset xField.XmlAttributes.name = "Parent#xField.XmlAttributes.name#">
-					</cfif>
-				</cfif>
-				<cfif NOT StructKeyExists(xField.XmlAttributes,"Label")>
-					<cfif StructKeyExists(variables.sMetaData, ftable) AND StructKeyExists(variables.sMetaData[ftable],"labelSingular")>
-						<cfset xField.XmlAttributes["Label"] = variables.sMetaData[ftable]["labelSingular"]>
-						<cfif table EQ ftable>
-							<cfset xField.XmlAttributes.Label = "Parent #xField.XmlAttributes.Label#">
-						</cfif>
-					</cfif>
-				</cfif>
-				<cfif NOT StructKeyExists(xField.XmlAttributes,"listshowfield")>
-					<cfif StructKeyExists(variables.sMetaData, ftable) AND StructKeyExists(variables.sMetaData[ftable],"methodSingular")>
-						<cfset xField.XmlAttributes["listshowfield"] = makeCompName(variables.sMetaData[ftable]["methodSingular"])>
-						<cfif table EQ ftable>
-							<cfset xField.XmlAttributes.listshowfield = "Parent#xField.XmlAttributes.listshowfield#">
-						</cfif>
-					</cfif>
-				</cfif>
-				<cfif table EQ ftable AND NOT StructKeyExists(xField.XmlAttributes,"urlvar")>
-					<cfset xField.XmlAttributes["urlvar"] = LCase(makeCompName(variables.sMetaData[ftable]["methodSingular"]))>
-				</cfif>
+			) {
+				isMany2Many = ( xField.XmlAttributes["jointype"] EQ "many2many" OR ArrayLen(XmlSearch(xDef,"//table[@name='#ftable#']/field[@ftable='#table#'][@jointype='many' or @jointype='list' or @jointype='many2many']")) );
+				if ( NOT StructKeyExists(xField.XmlAttributes,"type") ) {
+					xField.XmlAttributes["type"] = "Relation";
+				}
+				if ( NOT StructKeyExists(xField.XmlAttributes,"name") ) {
+					if ( StructKeyExists(xField.XmlAttributes,"fentity") ) {
+						xField.XmlAttributes["name"] = Pluralize(makeCompName(xField.XmlAttributes["fentity"]));
+					} else if ( StructKeyExists(Variables.sMetaData,ftable) ) {
+						xField.XmlAttributes["name"] = makeCompName(Variables.sMetaData[ftable]["methodPlural"]);
+					}
+					if ( table EQ ftable ) {
+						xField.XmlAttributes.name = "Related#xField.XmlAttributes.name#";
+					}
+				}
+				if ( NOT StructKeyExists(xField.XmlAttributes,"Label") ) {
+					if ( StructKeyExists(Variables.sMetaData, ftable) AND StructKeyExists(Variables.sMetaData[ftable],"labelPlural") ) {
+						xField.XmlAttributes["Label"] = Variables.sMetaData[ftable]["labelPlural"];
+						if ( table EQ ftable ) {
+							xField.XmlAttributes.Label = "Related #xField.XmlAttributes.Label#";
+						}
+					}
+				}
+				/*
+				if ( NOT StructKeyExists(xField.XmlAttributes,"OldField") ) {
+					xField.XmlAttributes["OldField"] = getPrimaryKeyFields(ftable,xDef);
+					if ( ListLen(xField.XmlAttributes["OldField"]) NEQ 1 ) {
+						//throw(message="You must provide a field name for joins with #ftable# as no single primary key field could be found.",type="Manager");
+						StructDelete(xField.XmlAttributes,"OldField");
+					}
+				}
+				*/
+				if ( NOT StructKeyExists(xField.XmlAttributes,"jointable") ) {
+					xField.XmlAttributes["jointable"] = getJoinTableName(xDef,table,ftable);
+				}
+				ArrayAppend(xField.XmlChildren,XmlElemNew(xDef,"relation"));
+				xField.XmlChildren[1].XmlAttributes["type"] = "list";
+				xField.XmlChildren[1].XmlAttributes["table"] = ftable;
+				xField.XmlChildren[1].XmlAttributes["field"] = getPrimaryKeyFields(ftable,xDef);
+				xField.XmlChildren[1].XmlAttributes["join-table"] = xField.XmlAttributes["jointable"];
+				xField.XmlChildren[1].XmlAttributes["local-table-join-field"] = getPrimaryKeyFields(table,xDef);
+				xField.XmlChildren[1].XmlAttributes["join-table-field-local"] = getPrimaryKeyFields(table,xDef);
+				xField.XmlChildren[1].XmlAttributes["join-table-field-remote"] = getPrimaryKeyFields(ftable,xDef);
+				xField.XmlChildren[1].XmlAttributes["remote-table-join-field"] = getPrimaryKeyFields(ftable,xDef);
+				if ( table EQ ftable ) {
+					xField.XmlChildren[1].XmlAttributes["join-table-field-remote"] = "Related#getPrimaryKeyFields(ftable,xDef)#";
+					if ( StructKeyExists(xField.XmlAttributes,"bidirectional") AND isBoolean(xField.XmlAttributes["bidirectional"]) ) {
+						xField.XmlChildren[1].XmlAttributes["bidirectional"] = xField.XmlAttributes["bidirectional"];
+					} else {
+						xField.XmlChildren[1].XmlAttributes["bidirectional"] = true;
+					}
+				}
+				if ( NOT StructKeyExists(xField.XmlAttributes,"listshowfield") ) {
+					if ( StructKeyExists(Variables.sMetaData, ftable) AND StructKeyExists(Variables.sMetaData[ftable],"methodSingular") ) {
+						xField.XmlAttributes["listshowfield"] = makeCompName(Variables.sMetaData[ftable]["methodSingular"] & "Names");
+						if ( table EQ ftable ) {
+							xField.XmlAttributes.listshowfield = "Related#xField.XmlAttributes.listshowfield#";
+						}
+					}
+				}
+				if ( StructKeyExists(xField.XmlAttributes,"listshowfield") ) {
+					// Add label and has relation fields (if they don't exists)
+					if ( NOT ArrayLen( XmlSearch(xDef,"//table[@name='#table#']/field[@name='#xField.XmlAttributes.listshowfield#']") ) ) {
+						xLabelField = XmlElemNew(xDef,"field");
+						xLabelField.XmlAttributes["name"] = xField.XmlAttributes.listshowfield;
+						xLabelField.XmlAttributes["label"] = xField.XmlAttributes.label;
+						ArrayAppend(xLabelField.XmlChildren,XmlElemNew(xDef,"relation"));
+						xLabelField.XmlChildren[1].XmlAttributes["type"] = "list";
+						xLabelField.XmlChildren[1].XmlAttributes["table"] = ftable;
+						xLabelField.XmlChildren[1].XmlAttributes["field"] = Variables.sMetaData[ftable]["labelField"];
+						xLabelField.XmlChildren[1].XmlAttributes["join-table"] = xField.XmlAttributes["jointable"];
+						xLabelField.XmlChildren[1].XmlAttributes["local-table-join-field"] = getPrimaryKeyFields(table,xDef);
+						xLabelField.XmlChildren[1].XmlAttributes["join-table-field-local"] = getPrimaryKeyFields(table,xDef);
+						xLabelField.XmlChildren[1].XmlAttributes["join-table-field-remote"] = getPrimaryKeyFields(ftable,xDef);
+						xLabelField.XmlChildren[1].XmlAttributes["remote-table-join-field"] = getPrimaryKeyFields(ftable,xDef);
+						ArrayAppend(xTable.XmlChildren,xLabelField);
+					}
+				}
+				// Add Num and Has relation fields (if they don't exist)
+				var xHere = xTable;
+				var xThere = xFTable;
+				var runs = 0;
+				do {
+					if ( table EQ ftable ) {
+						NumField = "NumRelated#xThere.XmlAttributes.methodPlural#";
+						HasField = "hasRelated#xThere.XmlAttributes.methodPlural#";
+					} else {
+						NumField = "Num#xThere.XmlAttributes.methodPlural#";
+						HasField = "has#xThere.XmlAttributes.methodPlural#";
+					}
+					if ( NOT ArrayLen(XmlSearch(xHere,"/field[@name='#NumField#']")) ) {
+						xNumField = XmlElemNew(xDef,"field");
+						xNumField.XmlAttributes["name"] = NumField;
+						xNumField.XmlAttributes["label"] = xThere.XmlAttributes.labelPlural;
+						if ( table EQ ftable ) {
+							xNumField.XmlAttributes.label = "Related #xNumField.XmlAttributes.label#";
+						}
+						xNumField.XmlAttributes["sebcolumn_type"] = "numeric";
+						ArrayAppend(xNumField.XmlChildren,XmlElemNew(xDef,"relation"));
+						xNumField.XmlChildren[1].XmlAttributes["type"] = "count";
+						xNumField.XmlChildren[1].XmlAttributes["table"] = xField.XmlAttributes["jointable"];
+						xNumField.XmlChildren[1].XmlAttributes["field"] = getPrimaryKeyFields(xThere.XmlAttributes["name"],xDef);
+						xNumField.XmlChildren[1].XmlAttributes["join-field-local"] = getPrimaryKeyFields(xHere.XmlAttributes["name"],xDef);
+						xNumField.XmlChildren[1].XmlAttributes["join-field-remote"] = getPrimaryKeyFields(xHere.XmlAttributes["name"],xDef);
+						if ( StructKeyExists(xField.XmlAttributes,"onRemoteDelete") ) {
+							xNumField.XmlChildren[1].XmlAttributes["onDelete"] = xField.XmlAttributes["onRemoteDelete"];
+						}
+						if ( ListLen(xNumField.XmlChildren[1].XmlAttributes["join-field-local"]) EQ 1 ) {
+							ArrayAppend(xHere.XmlChildren,xNumField);
+						}
+					}
+					if ( NOT ArrayLen(XmlSearch(xHere,"/field[@name='#HasField#']")) ) {
+						xHasField = XmlElemNew(xDef,"field");
+						xHasField.XmlAttributes["name"] = HasField;
+						xHasField.XmlAttributes["label"] = "Has #xThere.XmlAttributes.labelPlural#?";
+						if ( table EQ ftable ) {
+							xHasField.XmlAttributes.label = "Has Child #xNumField.XmlAttributes.label#s?";
+						}
+						xHasField.XmlAttributes["sebcolumn_type"] = "yesno";
+						ArrayAppend(xHasField.XmlChildren,XmlElemNew(xDef,"relation"));
+						xHasField.XmlChildren[1].XmlAttributes["type"] = "has";
+						xHasField.XmlChildren[1].XmlAttributes["field"] = NumField;
+						ArrayAppend(xHere.XmlChildren,xHasField);
+					}
+					runs++;
+					xHere = xFTable;
+					xThere = xTable;
+				} while( table NEQ ftable AND runs LTE 2 );
+			} else {
+				if ( NOT StructKeyExists(xField.XmlAttributes,"type") ) {
+					xField.XmlAttributes["type"] = "fk:integer";
+				}
+				if ( NOT StructKeyExists(xField.XmlAttributes,"name") ) {
+					xField.XmlAttributes["name"] = getPrimaryKeyFields(ftable,xDef);
+					if ( ListLen(xField.XmlAttributes["name"]) NEQ 1 ) {
+						throw(message="You must provide a field name for joins with #ftable# as no single primary key field could be found.",type="Manager");
+					}
+					if ( table EQ ftable ) {
+						xField.XmlAttributes.name = "Parent#xField.XmlAttributes.name#";
+					}
+				}
+				if ( NOT StructKeyExists(xField.XmlAttributes,"Label") ) {
+					if ( StructKeyExists(Variables.sMetaData, ftable) AND StructKeyExists(Variables.sMetaData[ftable],"labelSingular") ) {
+						xField.XmlAttributes["Label"] = Variables.sMetaData[ftable]["labelSingular"];
+						if ( table EQ ftable ) {
+							xField.XmlAttributes.Label = "Parent #xField.XmlAttributes.Label#";
+						}
+					}
+				}
+				if ( NOT StructKeyExists(xField.XmlAttributes,"listshowfield") ) {
+					if ( StructKeyExists(Variables.sMetaData, ftable) AND StructKeyExists(Variables.sMetaData[ftable],"methodSingular") ) {
+						xField.XmlAttributes["listshowfield"] = makeCompName(Variables.sMetaData[ftable]["methodSingular"]);
+						if ( table EQ ftable ) {
+							xField.XmlAttributes.listshowfield = "Parent#xField.XmlAttributes.listshowfield#";
+						}
+					}
+				}
+				if ( table EQ ftable AND NOT StructKeyExists(xField.XmlAttributes,"urlvar") ) {
+					xField.XmlAttributes["urlvar"] = LCase(makeCompName(Variables.sMetaData[ftable]["methodSingular"]));
+				}
 
-				<cfif StructKeyExists(xField.XmlAttributes,"listshowfield")>
-					<!--- Add label and has relation fields (if they don't exists) --->
-					<cfif NOT ArrayLen( XmlSearch(xDef,"//table[@name='#table#']/field[@name='#xField.XmlAttributes.listshowfield#']") )>
-						<cfset xLabelField = XmlElemNew(xDef,"field")>
-						<cfset xLabelField.XmlAttributes["name"] = xField.XmlAttributes.listshowfield>
-						<cfset xLabelField.XmlAttributes["label"] = xField.XmlAttributes.label>
-						<cfset ArrayAppend(xLabelField.XmlChildren,XmlElemNew(xDef,"relation"))>
-						<cfset xLabelField.XmlChildren[1].XmlAttributes["type"] = "label">
-						<cfset xLabelField.XmlChildren[1].XmlAttributes["table"] = ftable>
-						<cfset xLabelField.XmlChildren[1].XmlAttributes["field"] = variables.sMetaData[ftable]["labelField"]>
-						<cfset xLabelField.XmlChildren[1].XmlAttributes["join-field-local"] = xField.XmlAttributes["name"]>
-						<cfset xLabelField.XmlChildren[1].XmlAttributes["join-field-remote"] = getPrimaryKeyFields(ftable,xDef)>
-						<cfif StructKeyExists(xField.XmlAttributes,"onMissing")>
-							<cfset xLabelField.XmlChildren[1].XmlAttributes["onMissing"] = xField.XmlAttributes["onMissing"]>
-						</cfif>
-						<cfif ListLen(xLabelField.XmlChildren[1].XmlAttributes["join-field-remote"]) EQ 1>
-							<cfset ArrayAppend(xTable.XmlChildren,xLabelField)>
-						</cfif>
-					</cfif>
-					<cfif NOT ArrayLen( XmlSearch(xDef,"//table[@name='#table#']/field[@name='Has#xField.XmlAttributes.listshowfield#']") )>
-						<cfset xHasField = XmlElemNew(xDef,"field")>
-						<cfset xHasField.XmlAttributes["name"] = "Has#xField.XmlAttributes.listshowfield#">
-						<cfset xHasField.XmlAttributes["label"] = "Has #xField.XmlAttributes.label#?">
-						<cfset ArrayAppend(xHasField.XmlChildren,XmlElemNew(xDef,"relation"))>
-						<cfset xHasField.XmlChildren[1].XmlAttributes["type"] = "has">
-						<cfset xHasField.XmlChildren[1].XmlAttributes["field"] = xField.XmlAttributes.listshowfield>
-						<cfset ArrayAppend(xTable.XmlChildren,xHasField)>
-					</cfif>
-				</cfif>
+				if ( StructKeyExists(xField.XmlAttributes,"listshowfield") ) {
+					// Add label and has relation fields (if they don't exists)
+					if ( NOT ArrayLen( XmlSearch(xDef,"//table[@name='#table#']/field[@name='#xField.XmlAttributes.listshowfield#']") ) ) {
+						xLabelField = XmlElemNew(xDef,"field");
+						xLabelField.XmlAttributes["name"] = xField.XmlAttributes.listshowfield;
+						xLabelField.XmlAttributes["label"] = xField.XmlAttributes.label;
+						ArrayAppend(xLabelField.XmlChildren,XmlElemNew(xDef,"relation"));
+						xLabelField.XmlChildren[1].XmlAttributes["type"] = "label";
+						xLabelField.XmlChildren[1].XmlAttributes["table"] = ftable;
+						xLabelField.XmlChildren[1].XmlAttributes["field"] = Variables.sMetaData[ftable]["labelField"];
+						xLabelField.XmlChildren[1].XmlAttributes["join-field-local"] = xField.XmlAttributes["name"];
+						xLabelField.XmlChildren[1].XmlAttributes["join-field-remote"] = getPrimaryKeyFields(ftable,xDef);
+						if ( StructKeyExists(xField.XmlAttributes,"onMissing") ) {
+							xLabelField.XmlChildren[1].XmlAttributes["onMissing"] = xField.XmlAttributes["onMissing"];
+						}
+						if ( ListLen(xLabelField.XmlChildren[1].XmlAttributes["join-field-remote"]) EQ 1 ) {
+							ArrayAppend(xTable.XmlChildren,xLabelField);
+						}
+					}
+					if ( NOT ArrayLen( XmlSearch(xDef,"//table[@name='#table#']/field[@name='Has#xField.XmlAttributes.listshowfield#']") ) ) {
+						xHasField = XmlElemNew(xDef,"field");
+						xHasField.XmlAttributes["name"] = "Has#xField.XmlAttributes.listshowfield#";
+						xHasField.XmlAttributes["label"] = "Has #xField.XmlAttributes.label#?";
+						ArrayAppend(xHasField.XmlChildren,XmlElemNew(xDef,"relation"));
+						xHasField.XmlChildren[1].XmlAttributes["type"] = "has";
+						xHasField.XmlChildren[1].XmlAttributes["field"] = xField.XmlAttributes.listshowfield;
+						ArrayAppend(xTable.XmlChildren,xHasField);
+					}
+				}
 
-				<!--- Add Num and Has relation field to ftable (if they don't exist) --->
-				<cfif table EQ ftable>
-					<cfset NumField = "NumChild#xTable.XmlAttributes.methodPlural#">
-					<cfset HasField = "hasChild#xTable.XmlAttributes.methodPlural#">
-				<cfelse>
-					<cfset NumField = "Num#xTable.XmlAttributes.methodPlural#">
-					<cfset HasField = "has#xTable.XmlAttributes.methodPlural#">
-				</cfif>
-				<cfif NOT ArrayLen(XmlSearch(xFTable,"/field[@name='#NumField#']"))>
-					<cfset xNumField = XmlElemNew(xDef,"field")>
-					<cfset xNumField.XmlAttributes["name"] = NumField>
-					<cfset xNumField.XmlAttributes["label"] = xTable.XmlAttributes.labelPlural>
-					<cfif table EQ ftable>
-						<cfset xNumField.XmlAttributes.label = "Child #xNumField.XmlAttributes.label#">
-					</cfif>
-					<cfset xNumField.XmlAttributes["sebcolumn_type"] = "numeric">
-					<cfset ArrayAppend(xNumField.XmlChildren,XmlElemNew(xDef,"relation"))>
-					<cfset xNumField.XmlChildren[1].XmlAttributes["type"] = "count">
-					<cfset xNumField.XmlChildren[1].XmlAttributes["table"] = table>
-					<cfset xNumField.XmlChildren[1].XmlAttributes["field"] = getPrimaryKeyFields(ftable,xDef)>
-					<cfset xNumField.XmlChildren[1].XmlAttributes["join-field-local"] = getPrimaryKeyFields(ftable,xDef)>
-					<cfset xNumField.XmlChildren[1].XmlAttributes["join-field-remote"] = xField.XmlAttributes["name"]>
-					<cfif StructKeyExists(xField.XmlAttributes,"onRemoteDelete")>
-						<cfset xNumField.XmlChildren[1].XmlAttributes["onDelete"] = xField.XmlAttributes["onRemoteDelete"]>
-					</cfif>
-					<cfif ListLen(xNumField.XmlChildren[1].XmlAttributes["join-field-local"]) EQ 1>
-						<cfset ArrayAppend(xFTable.XmlChildren,xNumField)>
-					</cfif>
-				</cfif>
-				<cfif NOT ArrayLen(XmlSearch(xFTable,"/field[@name='#HasField#']"))>
-					<cfset xHasField = XmlElemNew(xDef,"field")>
-					<cfset xHasField.XmlAttributes["name"] = HasField>
-					<cfset xHasField.XmlAttributes["label"] = "Has #xTable.XmlAttributes.labelPlural#?">
-					<cfif table EQ ftable>
-						<cfset xHasField.XmlAttributes.label = "Has Child #xNumField.XmlAttributes.label#s?">
-					</cfif>
-					<cfset xHasField.XmlAttributes["sebcolumn_type"] = "yesno">
-					<cfset ArrayAppend(xHasField.XmlChildren,XmlElemNew(xDef,"relation"))>
-					<cfset xHasField.XmlChildren[1].XmlAttributes["type"] = "has">
-					<cfset xHasField.XmlChildren[1].XmlAttributes["field"] = NumField>
-					<cfset ArrayAppend(xFTable.XmlChildren,xHasField)>
-				</cfif>
-			</cfif>
+				// Add Num and Has relation field to ftable (if they don't exist)
+				if ( table EQ ftable ) {
+					NumField = "NumChild#xTable.XmlAttributes.methodPlural#";
+					HasField = "hasChild#xTable.XmlAttributes.methodPlural#";
+				} else {
+					NumField = "Num#xTable.XmlAttributes.methodPlural#";
+					HasField = "has#xTable.XmlAttributes.methodPlural#";
+				}
+				if ( NOT ArrayLen(XmlSearch(xFTable,"/field[@name='#NumField#']")) ) {
+					xNumField = XmlElemNew(xDef,"field");
+					xNumField.XmlAttributes["name"] = NumField;
+					xNumField.XmlAttributes["label"] = xTable.XmlAttributes.labelPlural;
+					if ( table EQ ftable ) {
+						xNumField.XmlAttributes.label = "Child #xNumField.XmlAttributes.label#";
+					}
+					xNumField.XmlAttributes["sebcolumn_type"] = "numeric";
+					ArrayAppend(xNumField.XmlChildren,XmlElemNew(xDef,"relation"));
+					xNumField.XmlChildren[1].XmlAttributes["type"] = "count";
+					xNumField.XmlChildren[1].XmlAttributes["table"] = table;
+					xNumField.XmlChildren[1].XmlAttributes["field"] = getPrimaryKeyFields(ftable,xDef);
+					xNumField.XmlChildren[1].XmlAttributes["join-field-local"] = getPrimaryKeyFields(ftable,xDef);
+					xNumField.XmlChildren[1].XmlAttributes["join-field-remote"] = xField.XmlAttributes["name"];
+					if ( StructKeyExists(xField.XmlAttributes,"onRemoteDelete") ) {
+						xNumField.XmlChildren[1].XmlAttributes["onDelete"] = xField.XmlAttributes["onRemoteDelete"];
+					}
+					if ( ListLen(xNumField.XmlChildren[1].XmlAttributes["join-field-local"]) EQ 1 ) {
+						ArrayAppend(xFTable.XmlChildren,xNumField);
+					}
+				}
+				if ( NOT ArrayLen(XmlSearch(xFTable,"/field[@name='#HasField#']")) ) {
+					xHasField = XmlElemNew(xDef,"field");
+					xHasField.XmlAttributes["name"] = HasField;
+					xHasField.XmlAttributes["label"] = "Has #xTable.XmlAttributes.labelPlural#?";
+					if ( table EQ ftable ) {
+						xHasField.XmlAttributes.label = "Has Child #xNumField.XmlAttributes.label#s?";
+					}
+					xHasField.XmlAttributes["sebcolumn_type"] = "yesno";
+					ArrayAppend(xHasField.XmlChildren,XmlElemNew(xDef,"relation"));
+					xHasField.XmlChildren[1].XmlAttributes["type"] = "has";
+					xHasField.XmlChildren[1].XmlAttributes["field"] = NumField;
+					ArrayAppend(xFTable.XmlChildren,xHasField);
+				}
+			}
 
-			<cfif StructKeyExists(variables.sMetaData, ftable)>
-				<cfif NOT StructKeyExists(variables.sMetaData[ftable],"childtables")>
-					<cfset variables.sMetaData[ftable]["childtables"] = "">
-				</cfif>
-				<cfif NOT ListFindNoCase(variables.sMetaData[ftable]["childtables"],table)>
-					<cfset variables.sMetaData[ftable]["childtables"] = ListAppend(variables.sMetaData[ftable]["childtables"],table)>
-				</cfif>
-			</cfif>
-		</cfif>
-	</cfloop>
+			if ( StructKeyExists(Variables.sMetaData, ftable) ) {
+				if ( NOT StructKeyExists(Variables.sMetaData[ftable],"childtables") ) {
+					Variables.sMetaData[ftable]["childtables"] = "";
+				}
+				if ( NOT ListFindNoCase(Variables.sMetaData[ftable]["childtables"],table) ) {
+					Variables.sMetaData[ftable]["childtables"] = ListAppend(Variables.sMetaData[ftable]["childtables"],table);
+				}
+			}
+		}
+	}
 
-	<cfreturn xDef>
-</cffunction>
+	return xDef;
+}
 
-<cffunction name="getEntityTableName" access="private" returntype="string" output="false" hint="">
-	<cfargument name="entity" type="string" required="true">
-	<cfargument name="prefix" type="string" required="false">
-	<cfargument name="xDef" type="any" required="false">
-	<cfargument name="ErrorOnFail" type="boolean" default="true">
+private string function getEntityTableName(
+	required string entity,
+	string prefix,
+	xDef,
+	boolean ErrorOnFail="true"
+) {
+	var result = "";
+	var axTables = 0;
+	var xpath = "";
+	var table = "";
 
-	<cfset var result = "">
-	<cfset var axTables = 0>
-	<cfset var xpath = "">
-	<cfset var table = "">
+	// TODO: find without prefix
 
-	<!--- TODO: find without prefix --->
+	if ( StructKeyExists(Arguments,"xDef") ) {
+		applyTableDefaults(Arguments.xDef);
+		xpath = "//table";
+		if ( StructKeyExists(Arguments,"prefix") ) {
+			xpath = "#xpath#[@prefix='#Arguments.prefix#']";
+		}
+		xpath = "#xpath#[@entity='#Arguments.entity#'][string-length(@name)>0]";
 
-	<cfif StructKeyExists(arguments,"xDef")>
-		<cfset applyTableDefaults(arguments.xDef)>
-		<cfset xpath = "//table">
-		<cfif StructKeyExists(arguments,"prefix")>
-			<cfset xpath = "#xpath#[@prefix='#arguments.prefix#']">
-		</cfif>
-		<cfset xpath = "#xpath#[@entity='#arguments.entity#'][string-length(@name)>0]">
+		axTables = XmlSearch(xDef,xpath);
+		if ( ArrayLen(axTables) EQ 1 ) {
+			result = axTables[1].XmlAttributes["name"];
+		}
+	}
 
-		<cfset axTables = XmlSearch(xDef,xpath)>
-		<cfif ArrayLen(axTables) EQ 1>
-			<cfset result = axTables[1].XmlAttributes["name"]>
-		</cfif>
-	</cfif>
-
-	<cfif NOT Len(result)>
-		<cfloop collection="#variables.sMetaData#" item="table">
-			<cfif
-					StructKeyExists(variables.sMetaData[table],"entity")
-				AND	variables.sMetaData[table]["entity"] EQ arguments.entity
+	if ( NOT Len(result) ) {
+		for ( table in Variables.smetaData ) {
+			if (
+					StructKeyExists(Variables.sMetaData[table],"entity")
+				AND	Variables.sMetaData[table]["entity"] EQ Arguments.entity
 				AND	(
-							NOT StructKeyExists(arguments,"prefix")
+							NOT StructKeyExists(Arguments,"prefix")
 						OR	(
-									StructKeyExists(variables.sMetaData[table],"prefix")
-								AND	variables.sMetaData[table]["prefix"] EQ arguments.prefix
+									StructKeyExists(Variables.sMetaData[table],"prefix")
+								AND	Variables.sMetaData[table]["prefix"] EQ Arguments.prefix
 							)
 
 					)
-			>
-				<cfset result = ListAppend(result,table)>
-				<cfbreak>
-			</cfif>
-		</cfloop>
-	</cfif>
+			) {
+				result = ListAppend(result,table);
+				break;
+			}
+		}
+	}
 
-	<cfif ListLen(result) GT 1>
-		<cfset result = "">
-	</cfif>
+	if ( ListLen(result) GT 1 ) {
+		result = "";
+	}
 
-	<cfif arguments.ErrorOnFail AND NOT Len(result)>
-		<cfif StructKeyExists(arguments,"prefix")>
-			<cfthrow message="Unable to determine table for entity #arguments.entity# with prefix #arguments.prefix#." type="Manager">
-		<cfelse>
-			<cfthrow message="Unable to determine table for entity #arguments.entity#." type="Manager">
-		</cfif>
-	</cfif>
+	if ( Arguments.ErrorOnFail AND NOT Len(result) ) {
+		if ( StructKeyExists(Arguments,"prefix") ) {
+			throw(message="Unable to determine table for entity #Arguments.entity# with prefix #Arguments.prefix#.",type="Manager");
+		} else {
+			throw(message="Unable to determine table for entity #Arguments.entity#.",type="Manager");
+		}
+	}
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="getJoinTableName" access="private" returntype="string" output="false" hint="">
-	<cfargument name="xDef" type="any" required="true">
-	<cfargument name="Table1" type="string" required="true">
-	<cfargument name="Table2" type="string" required="true">
+private string function getJoinTableName(
+	required xDef,
+	required string Table1,
+	required string Table2
+) {
+	var result = "";
+	var axTable1 = 0;
+	var axTable2 = 0;
+	var axFind = 0;
+	var sTables = {};
+	var table = "";
+	var OrderedTableNames = "";
 
-	<cfset var result = "">
-	<cfset var axTable1 = 0>
-	<cfset var axTable2 = 0>
-	<cfset var axFind = 0>
-	<cfset var sTables = StructNew()>
-	<cfset var table = "">
-	<cfset var OrderedTableNames = "">
+	applyTableDefaults(Arguments.xDef);
 
-	<cfset applyTableDefaults(Arguments.xDef)>
+	axTable1 = XmlSearch(Arguments.xDef,"//table[@name='#Arguments.Table1#']");
+	axTable2 = XmlSearch(Arguments.xDef,"//table[@name='#Arguments.Table2#']");
+	sTables[Arguments.Table1] = {};
+	sTables[Arguments.Table2] = {};
 
-	<cfset axTable1 = XmlSearch(Arguments.xDef,"//table[@name='#Arguments.Table1#']")>
-	<cfset axTable2 = XmlSearch(Arguments.xDef,"//table[@name='#Arguments.Table2#']")>
-	<cfset sTables[Arguments.Table1] = StructNew()>
-	<cfset sTables[Arguments.Table2] = StructNew()>
+	if ( ArrayLen(axTable1) EQ 1 AND ArrayLen(axTable2) EQ 1 ) {
+		sTables[Arguments.Table1]["xTable"] = axTable1[1];
+		sTables[Arguments.Table2]["xTable"] = axTable2[1];
+	} else {
+		throw(message="Unable to find both tables: #Arguments.Table1# and #Arguments.Table2# needed for a join relation.",type="Manager");
+	}
 
-	<cfif ArrayLen(axTable1) EQ 1 AND ArrayLen(axTable2) EQ 1>
-		<cfset sTables[Arguments.Table1]["xTable"] = axTable1[1]>
-		<cfset sTables[Arguments.Table2]["xTable"] = axTable2[1]>
-	<cfelse>
-		<cfthrow message="Unable to find both tables: #Arguments.Table1# and #Arguments.Table2# needed for a join relation." type="Manager">
-	</cfif>
+	sTables[Arguments.Table1]["name"] = Arguments.Table1;
+	sTables[Arguments.Table2]["name"] = Arguments.Table2;
+	for ( table in sTables ) {
+		if ( StructKeyExists(sTables[table]["xTable"].XmlAttributes,"prefix") ) {
+			sTables[table]["prefix"] = sTables[table]["xTable"].XmlAttributes["prefix"];
+		} else {
+			sTables[Arguments.Table2]["prefix"] = "";
+		}
+		sTables[table]["Root"] = sTables[table]["name"];
+		if ( Len(sTables[table]["prefix"]) AND Left(sTables[table]["name"],Len(sTables[table]["prefix"])) EQ sTables[table]["prefix"] ) {
+			sTables[table]["Root"] = ReplaceNoCase(sTables[table]["name"],sTables[table]["prefix"],"","ONE");
+		}
+	}
 
-	<cfset sTables[Arguments.Table1]["name"] = Arguments.Table1>
-	<cfset sTables[Arguments.Table2]["name"] = Arguments.Table2>
-	<cfloop collection="#sTables#" item="table">
-		<cfif StructKeyExists(sTables[table]["xTable"].XmlAttributes,"prefix")>
-			<cfset sTables[table]["prefix"] = sTables[table]["xTable"].XmlAttributes["prefix"]>
-		<cfelse>
-			<cfset sTables[Arguments.Table2]["prefix"] = "">
-		</cfif>
-		<cfset sTables[table]["Root"] = sTables[table]["name"]>
-		<cfif Len(sTables[table]["prefix"]) AND Left(sTables[table]["name"],Len(sTables[table]["prefix"])) EQ sTables[table]["prefix"]>
-			<cfset sTables[table]["Root"] = ReplaceNoCase(sTables[table]["name"],sTables[table]["prefix"],"","ONE")>
-		</cfif>
-	</cfloop>
+	OrderedTableNames = ListSort(StructKeyList(sTables),"text");
+	if ( sTables[Arguments.Table1]["prefix"] EQ sTables[Arguments.Table2]["prefix"] ) {
+		for ( table in ListToArray(OrderedTableNames) ) {
+			result = ListAppend(result,sTables[table]["Root"],"2");
+		}
+		result = sTables[Arguments.Table1]["prefix"] & result;
+	} else {
+		for ( table in ListToArray(OrderedTableNames) ) {
+			result = ListAppend(result,sTables[table]["name"],"2");
+		}
+	}
 
-	<cfset OrderedTableNames = ListSort(StructKeyList(sTables),"text")>
-	<cfif sTables[Arguments.Table1]["prefix"] EQ sTables[Arguments.Table2]["prefix"]>
-		<cfloop index="table" list="#OrderedTableNames#">
-			<cfset result = ListAppend(result,sTables[table]["Root"],"2")>
-		</cfloop>
-		<cfset result = sTables[Arguments.Table1]["prefix"] & result>
-	<cfelse>
-		<cfloop index="table" list="#OrderedTableNames#">
-			<cfset result = ListAppend(result,sTables[table]["name"],"2")>
-		</cfloop>
-	</cfif>
+	return result;
+}
 
-	<cfreturn result>
-</cffunction>
+public string function Security_getPermissions(required string tablename) {
+	var result = "";
 
-<cffunction name="Security_getPermissions" access="public" returntype="string" output="false">
-	<cfargument name="tablename" type="string" required="true">
+	if ( StructKeyExists(Variables.sSecurityPermissions,Arguments.tablename) ) {
+		result = Variables.sSecurityPermissions[Arguments.tablename];
+	}
 
-	<cfset var result = "">
+	return result;
+}
 
-	<cfif StructKeyExists(Variables.sSecurityPermissions,Arguments.tablename)>
-		<cfset result = Variables.sSecurityPermissions[Arguments.tablename]>
-	</cfif>
+private function Security_AddPermissions(required string Permissions) {
+	if ( Len(Arguments.Permissions) ) {
+		if ( StructKeyExists(Variables,"Security") ) {
+			Variables.Security.addPermissions(permissions=Arguments.Permissions,OnExists="update");
+		} else {
+			if ( NOT StructKeyExists(Variables,"Security_Permissions") ) {
+				Variables.Security_Permissions = "";
+			}
+			Variables.Security_Permissions = ListAppend(Variables.Security_Permissions,Arguments.Permissions);
+		}
+	}
+}
 
-	<cfreturn result>
-</cffunction>
+public function Security_Register(required Component) {
 
-<cffunction name="Security_AddPermissions" access="private" returntype="any" output="false">
-	<cfargument name="Permissions" type="string" required="yes">
+	Variables.Security = Arguments.Component;
 
-	<cfif Len(Arguments.Permissions)>
-		<cfif StructKeyExists(Variables,"Security")>
-			<cfinvoke component="#Variables.Security#" method="addPermissions" permissions="#Arguments.Permissions#" OnExists="update">
-			</cfinvoke>
-		<cfelse>
-			<cfif NOT StructKeyExists(Variables,"Security_Permissions")>
-				<cfset Variables.Security_Permissions = "">
-			</cfif>
-			<cfset Variables.Security_Permissions = ListAppend(Variables.Security_Permissions,Arguments.Permissions)>
-		</cfif>
-	</cfif>
+	if ( StructKeyExists(Variables,"Security_Permissions") ) {
+		Security_AddPermissions(Variables.Security_Permissions);
+		StructDelete(Variables,"Security_Permissions");
+	}
 
-</cffunction>
+}
 
-<cffunction name="Security_Register" access="public" returntype="any" output="false">
-	<cfargument name="Component" type="any" required="yes">
+private function adjustXmlAddNamesToTypes(required xDef) {
+	var axFields = XmlSearch(xDef,"//field[string-length(@type)>0][not(@name)]");
+	var xField = 0;
+	var xTable = 0;
+	var ff = 0;
+	var table = "";
+	var sType = 0;
 
-	<cfset Variables.Security = Arguments.Component>
+	for ( ff=1; ff LTE ArrayLen(axFields); ff++ ) {
+		xField = axFields[ff];
+		xTable = xField.XmlParent;
+		table = xTable.XmlAttributes["name"];
+		sType = getTypeData(xField.XmlAttributes.type);
+		if ( StructCount(sType) ) {
+			if ( StructKeyExists(sType,"defaultFieldName") ) {
+				xField.XmlAttributes["name"] = sType["defaultFieldName"];
+			} else {
+				if ( StructKeyExists(xTable.XmlAttributes,"entity") ) {
+					xField.XmlAttributes["name"] = makeCompName(xTable.XmlAttributes["entity"]) & xField.XmlAttributes["type"];
+				} else if ( StructKeyExists(xTable.XmlAttributes,"methodSingular") ) {
+					xField.XmlAttributes["name"] = makeCompName(xTable.XmlAttributes["methodSingular"]) & xField.XmlAttributes["type"];
+				} else if ( StructKeyExists(xTable.XmlAttributes,"labelSingular") ) {
+					xField.XmlAttributes["name"] = makeCompName(xTable.XmlAttributes["labelSingular"]) & xField.XmlAttributes["type"];
+				} else {
+					xField.XmlAttributes["name"] = xField.XmlAttributes["type"];
+				}
+			}
+			if ( StructKeyExists(sType,"defaultFieldLabel") AND NOT StructKeyExists(xField.XmlAttributes,"label") ) {
+				xField.XmlAttributes["label"] = sType["defaultFieldLabel"];
+			}
+		}
+	}
 
-	<cfif StructKeyExists(Variables,"Security_Permissions")>
-		<cfset Security_AddPermissions(Variables.Security_Permissions)>
-		<cfset StructDelete(Variables,"Security_Permissions")>
-	</cfif>
+	 return Arguments.xDef;
+}
 
-</cffunction>
+private function applyTableDefaults(required xDef) {
+	var axTablesRoot = XmlSearch(xDef,"/tables");
+	var axTables = 0;
+	var ii = 0;
+	var key = 0;
 
+	if ( StructCount(axTablesRoot[1].XmlAttributes) ) {
+		axTables = XmlSearch(xDef,"/tables/table");
+		for ( ii=1; ii LTE ArrayLen(axTables); ii++ ) {
+			for ( key in axTablesRoot[1].XmlAttributes ) {
+				if ( NOT StructKeyExists(axTables[ii].XmlAttributes,key) ) {
+					axTables[ii].XmlAttributes[key] = axTablesRoot[1].XmlAttributes[key];
+				}
+			}
+		}
+	}
 
-<cffunction name="adjustXmlAddNamesToTypes" access="private" returntype="any" output="false" hint="">
-	<cfargument name="xDef" type="any" required="true">
+	return Arguments.xDef;
+}
 
-	<cfset var axFields = XmlSearch(xDef,"//field[string-length(@type)>0][not(@name)]")>
-	<cfset var xField = 0>
-	<cfset var xTable = 0>
-	<cfset var ff = 0>
-	<cfset var table = "">
-	<cfset var sType = 0>
+private function applySecurityPermissions(required xDef) {
+	var axPermissions = XmlSearch(xDef,"//table[string-length(@permissions)>0]");
+	var ii = 0;
+	var key = "";
 
-	<cfloop index="ff" from="1" to="#ArrayLen(axFields)#">
-		<cfset xField = axFields[ff]>
-		<cfset xTable = xField.XmlParent>
-		<cfset table = xTable.XmlAttributes["name"]>
-		<cfset sType = getTypeData(xField.XmlAttributes.type)>
-		<cfif StructCount(sType)>
-			<cfif StructKeyExists(sType,"defaultFieldName")>
-				<cfset xField.XmlAttributes["name"] = sType["defaultFieldName"]>
-			<cfelse>
-				<cfif StructKeyExists(xTable.XmlAttributes,"entity")>
-					<cfset xField.XmlAttributes["name"] = makeCompName(xTable.XmlAttributes["entity"]) & xField.XmlAttributes["type"]>
-				<cfelseif StructKeyExists(xTable.XmlAttributes,"methodSingular")>
-					<cfset xField.XmlAttributes["name"] = makeCompName(xTable.XmlAttributes["methodSingular"]) & xField.XmlAttributes["type"]>
-				<cfelseif StructKeyExists(xTable.XmlAttributes,"labelSingular")>
-					<cfset xField.XmlAttributes["name"] = makeCompName(xTable.XmlAttributes["labelSingular"]) & xField.XmlAttributes["type"]>
-				<cfelse>
-					<cfset xField.XmlAttributes["name"] = xField.XmlAttributes["type"]>
-				</cfif>
-			</cfif>
-			<cfif StructKeyExists(sType,"defaultFieldLabel") AND NOT StructKeyExists(xField.XmlAttributes,"label")>
-				<cfset xField.XmlAttributes["label"] = sType["defaultFieldLabel"]>
-			</cfif>
-		</cfif>
-	</cfloop>
+	for ( ii=1; ii LTE ArrayLen(axPermissions); ii++ ) {
+		Security_AddPermissions(axPermissions[ii].XmlAttributes["permissions"]);
+		if ( StructKeyExists(axPermissions[ii].XmlAttributes,"name") ) {
+			if ( StructKeyExists(Variables.sSecurityPermissions,axPermissions[ii].XmlAttributes["name"]) ) {
+				for ( key in ListToArray(axPermissions[ii].XmlAttributes.permissions) ) {
+					if ( NOT ListFindNoCase(Variables.sSecurityPermissions[axPermissions[ii].XmlAttributes["name"]],key) ) {
+						Variables.sSecurityPermissions[axPermissions[ii].XmlAttributes["name"]] = ListAppend(Variables.sSecurityPermissions[axPermissions[ii].XmlAttributes["name"]],key);
+					}
+				}
+			} else {
+				Variables.sSecurityPermissions[axPermissions[ii].XmlAttributes["name"]] = axPermissions[ii].XmlAttributes.permissions;
+			}
+		/*
+		} else {
+			writeDump(axPermissions[ii]);
+			abort;
+		*/
+		}
+	}
 
-	 <cfreturn arguments.xDef>
-</cffunction>
+	return Arguments.xDef;
+}
 
-<cffunction name="applyTableDefaults" access="private" returntype="any" output="false" hint="">
-	<cfargument name="xDef" type="any" required="yes">
+private function hasPKFields(required xTable) {
+	var ff = 0;
 
-	<cfset var axTablesRoot = XmlSearch(xDef,"/tables")>
-	<cfset var axTables = 0>
-	<cfset var ii = 0>
-	<cfset var key = 0>
+	if (
+		StructKeyExists(xTable,"field")
+		AND
+		ArrayLen(xTable.field)
+	) {
+		for ( ff=1; ff LTE ArrayLen(xTable.field); ff++ ) {
+			if (
+				StructKeyExists(xTable.field.XmlAttributes,"type")
+				AND
+				ListFirst(xTable.field.XmlAttributes["type"],":") EQ "pk"
+			) {
+				return true;
+			}
+		}
+	}
 
-	<cfif StructCount(axTablesRoot[1].XmlAttributes)>
-		<cfset axTables = XmlSearch(xDef,"/tables/table")>
-		<cfloop index="ii" from="1" to="#ArrayLen(axTables)#" step="1">
-			<cfloop collection="#axTablesRoot[1].XmlAttributes#" item="key">
-				<cfif NOT StructKeyExists(axTables[ii].XmlAttributes,key)>
-					<cfset axTables[ii].XmlAttributes[key] = axTablesRoot[1].XmlAttributes[key]>
-				</cfif>
-			</cfloop>
-		</cfloop>
-	</cfif>
+	return false;
+}
 
-	<cfreturn arguments.xDef>
-</cffunction>
+private function applyEntities(required xDef) {
+	var xEntities = XmlSearch(xDef,"//table[string-length(@entity)>0]");
+	var ee = 0;
+	var prefix = "";
+	var base = "";
+	var root = "";
+	var sEntityTables = {};
+	var axFields = 0;
+	var ff = 0;
+	var axRelations = 0;
+	var rr = 0;
+	var prefixes = "";
+	var permissions = "";
+	var table = "";
+	var sEntity = 0;
 
-<cffunction name="applySecurityPermissions" access="private" returntype="any" output="false" hint="">
-	<cfargument name="xDef" type="any" required="yes">
+	for ( ee=1; ee LTE ArrayLen(xEntities); ee++ ) {
+		root = makeCompName(xEntities[ee].XmlAttributes.entity);
+		if ( StructKeyExists(xEntities[ee].XmlAttributes,"prefix") ) {
+			prefix = xEntities[ee].XmlAttributes.prefix;
+		} else {
+			prefix = "";
+		}
+		if ( Len(prefix) ) {
+			prefixes = ListAppend(prefixes,prefix);
+		}
+		if ( StructKeyExists(xEntities[ee].XmlAttributes,"base") ) {
+			base = makeCompName(xEntities[ee].XmlAttributes.base);
+		} else {
+			base = makeCompName(pluralize(xEntities[ee].XmlAttributes.entity));
+		}
+		if ( NOT StructKeyExists(xEntities[ee].XmlAttributes,"name") ) {
+			xEntities[ee].XmlAttributes["name"] = "#prefix##base#";
+		}
+		if ( StructKeyExists(xEntities[ee].XmlAttributes,"universal") AND xEntities[ee].XmlAttributes.universal IS true ) {
+			xEntities[ee].XmlAttributes["name"] = getUniversalTableName(entity=xEntities[ee].XmlAttributes.entity,tablename=xEntities[ee].XmlAttributes.name);
+		}
+		if ( StructKeyExists(Variables.sMetaData,xEntities[ee].XmlAttributes["name"]) AND StructKeyExists(Variables.sMetaData[xEntities[ee].XmlAttributes["name"]],"sAttributes") ) {
+			StructAppend(xEntities[ee].XmlAttributes,Variables.sMetaData[xEntities[ee].XmlAttributes["name"]]["sAttributes"],"no");
+		}
+		if ( NOT StructKeyExists(xEntities[ee].XmlAttributes,"labelSingular") ) {
+			xEntities[ee].XmlAttributes["labelSingular"] = xEntities[ee].XmlAttributes.entity;
+		}
+		if ( NOT StructKeyExists(xEntities[ee].XmlAttributes,"labelPlural") ) {
+			xEntities[ee].XmlAttributes["labelPlural"] = pluralize(xEntities[ee].XmlAttributes.labelSingular);
+		}
+		if ( NOT StructKeyExists(xEntities[ee].XmlAttributes,"methodSingular") ) {
+			xEntities[ee].XmlAttributes["methodSingular"] = makeCompName(xEntities[ee].XmlAttributes.entity);
+		}
+		if ( NOT StructKeyExists(xEntities[ee].XmlAttributes,"methodPlural") ) {
+			xEntities[ee].XmlAttributes["methodPlural"] = makeCompName(pluralize(xEntities[ee].XmlAttributes.entity));
+		}
+		if (
+			NOT (
+				StructKeyExists(xEntities[ee].XmlAttributes,"pkfield")
+				OR
+				hasPKFields(xEntities[ee])
+			)
+		) {
+			xEntities[ee].XmlAttributes["pkfield"] = "#root#ID";
+		}
+		if ( NOT StructKeyExists(xEntities[ee].XmlAttributes,"labelField") ) {
+			xEntities[ee].XmlAttributes["labelField"] = "#root#Name";
+		}
+		if ( NOT StructKeyExists(xEntities[ee].XmlAttributes,"folder") ) {
+			xEntities[ee].XmlAttributes["folder"] = "#Variables.FileMgr.PathNameFromString(base)#";
+			if ( Len(prefix) ) {
+				xEntities[ee].XmlAttributes["folder"] = ListPrepend(xEntities[ee].XmlAttributes["folder"],Variables.FileMgr.PathNameFromString(prefix));
+			}
+		}
+		sEntityTables[xEntities[ee].XmlAttributes.entity] = xEntities[ee].XmlAttributes.name;
+	}
 
-	<cfset var axPermissions = XmlSearch(xDef,"//table[string-length(@permissions)>0]")>
-	<cfset var ii = 0>
-	<cfset var key = "">
+	// Convert fentity fields to ftable fields
+	axFields = XmlSearch(xDef,"//field[string-length(@fentity)>0][not(@ftable)]");
+	for ( ff=1; ff LTE ArrayLen(axFields); ff++ ) {
+		if ( StructKeyExists(sEntityTables,axFields[ff].XmlAttributes["fentity"]) ) {
+			axFields[ff].XmlAttributes["ftable"] = sEntityTables[axFields[ff].XmlAttributes["fentity"]];
+		} else {
+			// TODO: Find elsewhere or throw exception
+		}
+	}
 
-	<cfloop index="ii" from="1" to="#ArrayLen(axPermissions)#" step="1">
-		<cfset Security_AddPermissions(axPermissions[ii].XmlAttributes["permissions"])>
-		<cfif StructKeyExists(axPermissions[ii].XmlAttributes,"name")>
-			<cfif StructKeyExists(variables.sSecurityPermissions,axPermissions[ii].XmlAttributes["name"])>
-				<cfloop list="#axPermissions[ii].XmlAttributes.permissions#" index="key">
-					<cfif NOT ListFindNoCase(variables.sSecurityPermissions[axPermissions[ii].XmlAttributes["name"]],key)>
-						<cfset variables.sSecurityPermissions[axPermissions[ii].XmlAttributes["name"]] = ListAppend(variables.sSecurityPermissions[axPermissions[ii].XmlAttributes["name"]],key)>
-					</cfif>
-				</cfloop>
-			<cfelse>
-				<cfset variables.sSecurityPermissions[axPermissions[ii].XmlAttributes["name"]] = axPermissions[ii].XmlAttributes.permissions>
-			</cfif>
-		<!---<cfelse>
-			<cfdump var="#axPermissions[ii]#">
-			<cfabort>--->
-		</cfif>
-	</cfloop>
+	axRelations = XmlSearch(xDef,"//relation[string-length(@entity)>0][not(@table)]");
+	for ( rr=1; rr LTE ArrayLen(axRelations); rr++ ) {
+		if ( StructKeyExists(sEntityTables,axRelations[rr].XmlAttributes["entity"]) ) {
+			axRelations[rr].XmlAttributes["table"] = sEntityTables[axRelations[rr].XmlAttributes["entity"]];
+		} else {
+			// TODO: Find elsewhere or throw exception
+		}
+	}
 
-	<cfreturn arguments.xDef>
-</cffunction>
+	xEntities = XmlSearch(xDef,"//data[string-length(@entity)>0]");
+	for ( ee=1; ee LTE ArrayLen(xEntities); ee++ ) {
+		sEntity = {
+			"Entity":xEntities[ee].XmlAttributes['entity'],
+			"xDef":Arguments.xDef
+		};
+		if ( StructKeyExists(xEntities[ee].XmlAttributes,"prefix") ) {
+			sEntity["prefix"] = xEntities[ee].XmlAttributes['prefix'];
+		}
 
-<cffunction name="applyEntities" access="private" returntype="any" output="false" hint="">
-	<cfargument name="xDef" type="any" required="yes">
+		xEntities[ee].XmlAttributes['table'] = getEntityTableName(ArgumentCollection=sEntity);
+	}
 
-	<cfset var xEntities = XmlSearch(xDef,"//table[string-length(@entity)>0]")>
-	<cfset var ee = 0>
-	<cfset var prefix = "">
-	<cfset var base = "">
-	<cfset var root = "">
-	<cfset var sEntityTables = StructNew()>
-	<cfset var axFields = 0>
-	<cfset var ff = 0>
-	<cfset var axRelations = 0>
-	<cfset var rr = 0>
-	<cfset var prefixes = "">
-	<cfset var permissions = "">
-	<cfset var table = "">
+	return Arguments.xDef;
+}
 
-	<cfloop index="ee" from="1" to="#ArrayLen(xEntities)#">
-		<cfset root = makeCompName(xEntities[ee].XmlAttributes.entity)>
-		<cfif StructKeyExists(xEntities[ee].XmlAttributes,"prefix")>
-			<cfset prefix = xEntities[ee].XmlAttributes.prefix>
-		<cfelse>
-			<cfset prefix = "">
-		</cfif>
-		<cfif Len(prefix)>
-			<cfset prefixes = ListAppend(prefixes,prefix)>
-		</cfif>
-		<cfif StructKeyExists(xEntities[ee].XmlAttributes,"base")>
-			<cfset base = makeCompName(xEntities[ee].XmlAttributes.base)>
-		<cfelse>
-			<cfset base = makeCompName(pluralize(xEntities[ee].XmlAttributes.entity))>
-		</cfif>
-		<cfif NOT StructKeyExists(xEntities[ee].XmlAttributes,"name")>
-			<cfset xEntities[ee].XmlAttributes["name"] = "#prefix##base#">
-		</cfif>
-		<cfif StructKeyExists(xEntities[ee].XmlAttributes,"universal") AND xEntities[ee].XmlAttributes.universal IS true>
-			<cfset xEntities[ee].XmlAttributes["name"] = getUniversalTableName(entity=xEntities[ee].XmlAttributes.entity,tablename=xEntities[ee].XmlAttributes.name)>
-		</cfif>
-		<cfif StructKeyExists(variables.sMetaData,xEntities[ee].XmlAttributes["name"]) AND StructKeyExists(variables.sMetaData[xEntities[ee].XmlAttributes["name"]],"sAttributes")>
-			<cfset StructAppend(xEntities[ee].XmlAttributes,variables.sMetaData[xEntities[ee].XmlAttributes["name"]]["sAttributes"],"no")>
-		</cfif>
-		<cfif NOT StructKeyExists(xEntities[ee].XmlAttributes,"labelSingular")>
-			<cfset xEntities[ee].XmlAttributes["labelSingular"] = xEntities[ee].XmlAttributes.entity>
-		</cfif>
-		<cfif NOT StructKeyExists(xEntities[ee].XmlAttributes,"labelPlural")>
-			<cfset xEntities[ee].XmlAttributes["labelPlural"] = pluralize(xEntities[ee].XmlAttributes.labelSingular)>
-		</cfif>
-		<cfif NOT StructKeyExists(xEntities[ee].XmlAttributes,"methodSingular")>
-			<cfset xEntities[ee].XmlAttributes["methodSingular"] = makeCompName(xEntities[ee].XmlAttributes.entity)>
-		</cfif>
-		<cfif NOT StructKeyExists(xEntities[ee].XmlAttributes,"methodPlural")>
-			<cfset xEntities[ee].XmlAttributes["methodPlural"] = makeCompName(pluralize(xEntities[ee].XmlAttributes.entity))>
-		</cfif>
-		<cfif NOT ( StructKeyExists(xEntities[ee].XmlAttributes,"pkfield") OR ArrayLen(XmlSearch(xEntities[ee],"//field[starts-with(@lcase_type,'pk:')]")) )>
-			<cfset xEntities[ee].XmlAttributes["pkfield"] = "#root#ID">
-		</cfif>
-		<cfif NOT StructKeyExists(xEntities[ee].XmlAttributes,"labelField")>
-			<cfset xEntities[ee].XmlAttributes["labelField"] = "#root#Name">
-		</cfif>
-		<cfif NOT StructKeyExists(xEntities[ee].XmlAttributes,"folder")>
-			<cfset xEntities[ee].XmlAttributes["folder"] = "#variables.FileMgr.PathNameFromString(base)#">
-			<cfif Len(prefix)>
-				<cfset xEntities[ee].XmlAttributes["folder"] = ListPrepend(xEntities[ee].XmlAttributes["folder"],variables.FileMgr.PathNameFromString(prefix))>
-			</cfif>
-		</cfif>
-		<cfset sEntityTables[xEntities[ee].XmlAttributes.entity] = xEntities[ee].XmlAttributes.name>
-	</cfloop>
+private function loadDataMgrXml(required xml) {
+	var xDef = Arguments.xml;
+	var tables = 0;
+	var table = "";
+	var sTables = {};
+	var xFields = 0;
+	var ii = 0;
+	var xField = 0;
+	var fieldname = "";
+	var sField = 0;
+	var att = 0;
 
-	<!--- Convert fentity fields to ftable fields --->
-	<cfset axFields = XmlSearch(xDef,"//field[string-length(@fentity)>0][not(@ftable)]")>
-	<cfloop index="ff" from="1" to="#ArrayLen(axFields)#">
-		<cfif StructKeyExists(sEntityTables,axFields[ff].XmlAttributes["fentity"])>
-			<cfset axFields[ff].XmlAttributes["ftable"] = sEntityTables[axFields[ff].XmlAttributes["fentity"]]>
-		<cfelse>
-			<!--- TODO: Find elsewhere or throw exception --->
-		</cfif>
-	</cfloop>
+	tables = ArrayToList(GetValueArray(xDef,"//tables/table[string-length(@name)>0]/@name"));
 
-	<cfset axRelations = XmlSearch(xDef,"//relation[string-length(@entity)>0][not(@table)]")>
-	<cfloop index="rr" from="1" to="#ArrayLen(axRelations)#">
-		<cfif StructKeyExists(sEntityTables,axRelations[rr].XmlAttributes["entity"])>
-			<cfset axRelations[rr].XmlAttributes["table"] = sEntityTables[axRelations[rr].XmlAttributes["entity"]]>
-		<cfelse>
-			<!--- TODO: Find elsewhere or throw exception --->
-		</cfif>
-	</cfloop>
+	for ( table in ListToArray(tables) ) {
+		sTables[table] = getFieldsStructInternal(transformer="DataMgr",tablename=table);
+	}
 
-	<cfset xEntities = XmlSearch(xDef,"//data[string-length(@entity)>0]")>
-	<cfloop index="ee" from="1" to="#ArrayLen(xEntities)#">
-		<cfinvoke method="getEntityTableName" returnvariable="table">
-			<cfinvokeargument name="Entity" value="#xEntities[ee].XmlAttributes['entity']#">
-			<cfinvokeargument name="xDef" value="#Arguments.xDef#">
-			<cfif StructKeyExists(xEntities[ee].XmlAttributes,"prefix")>
-				<cfinvokeargument name="prefix" value="#xEntities[ee].XmlAttributes['prefix']#">
-			</cfif>
-		</cfinvoke>
-		<cfset xEntities[ee].XmlAttributes['table'] = table>
-	</cfloop>
+	xFields = XmlSearch(xDef,"//tables/table[string-length(@name)>0]/field[string-length(@name)>0]");
 
-	<cfreturn arguments.xDef>
-</cffunction>
+	// Process fields to alter attributes for DataMgr needs
+	for ( ii=1; ii LTE ArrayLen(xFields); ii++ ) {
+		xField = xFields[ii];
+		table = xField.XmlParent.XmlAttributes["name"];
+		fieldname = xField.XmlAttributes["name"];
+		if ( StructKeyExists(sTables[table],fieldname) ) {
+			// Alter attributes for DataMgr 
+			sField = sTables[table][fieldname];
+			StructClear(xField.XmlAttributes);
+			for ( att in sField ) {
+				if ( StructKeyExists(sField,att) AND isSimpleValue(sField[att]) ) {
+					xField.XmlAttributes[att] = sField[att];
+				}
+			}
+			xField.XmlAttributes["ColumnName"] = sField["name"];
+			StructDelete(xField.XmlAttributes,"name");
+			StructDelete(xField.XmlAttributes,"type");
+		}
+	}
 
-<cffunction name="loadDataMgrXml" access="private" returntype="any" output="false" hint="">
-	<cfargument name="xml" type="any" required="yes">
+	Variables.DataMgr.loadXml(xDef,true,true);
 
-	<cfset var xDef = arguments.xml>
-	<cfset var tables = 0>
-	<cfset var table = "">
-	<cfset var sTables = StructNew()>
-	<cfset var xFields = 0>
-	<cfset var ii = 0>
-	<cfset var xField = 0>
-	<cfset var fieldname = "">
-	<cfset var sField = 0>
-	<cfset var att = 0>
+}
 
-	<cfset tables = ArrayToList(GetValueArray(xDef,"//tables/table[string-length(@name)>0]/@name"))>
+public void function loadXmlStruct(required xml) {
+	var xDef = 0;
+	var aTables = 0;
+	var table = "";
+	var aFields = 0;
+	var tt = 0;
+	var ff = 0;
+	var ll = 0;
+	var sField = "";
+	var key = "";
 
-	<cfloop list="#tables#" index="table">
-		<cfset sTables[table] = getFieldsStructInternal(transformer="DataMgr",tablename=table)>
-	</cfloop>
+	if ( isSimpleValue(Arguments.xml) ) {
+		xDef = XmlParse(Arguments.xml);
+	} else if ( isXMLDoc(Arguments.xml) ) {
+		xDef = Arguments.xml;
+	} else {
+		throw(message="XML argument of loadXmlStruct must be XML.",type="Manager");
+	}
+	aTables = XmlSearch(xDef,"//table[string-length(@name)>0]");
 
-	<cfset xFields = XmlSearch(xDef,"//tables/table[string-length(@name)>0]/field[string-length(@name)>0]")>
+	// Actually add the tables and fields
+	for ( tt=1; tt LTE ArrayLen(aTables); tt++ ) {
+		table = aTables[tt].XmlAttributes["name"];
+		Variables.sMetaData[table]["sFields"] = {};
+		aFields = XmlSearch(xDef,"//table[@name='#table#']//field[string-length(@name)>0]");
+		for ( ff=1; ff LTE ArrayLen(aFields); ff++ ) {
+			sField = Duplicate(aFields[ff].XmlAttributes);
+			sField["tablename"] = table;
+			sField["fieldname"] = aFields[ff].XmlAttributes.name;
+			// If a relation element is included, make a key for the element
+			if ( StructKeyExists(aFields[ff],"relation") ) {
+				sField["relation"] = {};
+				sField["relation"] = Duplicate(aFields[ff].relation.XmlAttributes);
+				if ( StructKeyExists(aFields[ff].relation,"filter") ) {
+					sField["relation"]["filters"] = [];
+					for ( ll=1; ll LTE ArrayLen(aFields[ff].relation.filter); ll++ ) {
+						ArrayAppend(sField["relation"]["filters"],aFields[ff].relation.filter[ll].XmlAttributes);
+					}
+				}
+			}
 
-	<!--- Process fields to alter attributes for DataMgr needs --->
-	<cfloop index="ii" from="1" to="#ArrayLen(xFields)#" step="1">
-		<cfset xField = xFields[ii]>
-		<cfset table = xField.XmlParent.XmlAttributes["name"]>
-		<cfset fieldname = xField.XmlAttributes["name"]>
-		<cfif StructKeyExists(sTables[table],fieldname)>
-			<!--- Alter attributes for DataMgr --->
-			<cfset sField = sTables[table][fieldname]>
-			<cfset StructClear(xField.XmlAttributes)>
-			<cfloop collection="#sField#" item="att">
-				<cfif StructKeyExists(sField,att) AND isSimpleValue(sField[att])>
-					<cfset xField.XmlAttributes[att] = sField[att]>
-				</cfif>
-			</cfloop>
-			<cfset xField.XmlAttributes["ColumnName"] = sField["name"]>
-			<cfset StructDelete(xField.XmlAttributes,"name")>
-			<cfset StructDelete(xField.XmlAttributes,"type")>
-		</cfif>
-	</cfloop>
-
-	<cfset variables.DataMgr.loadXml(xDef,true,true)>
-
-</cffunction>
-
-<cffunction name="loadXmlStruct" access="public" returntype="void" output="false" hint="">
-	<cfargument name="xml" type="any" required="yes">
-
-	<cfset var xDef = 0>
-	<cfset var aTables = 0>
-	<cfset var table = "">
-	<cfset var aFields = 0>
-	<cfset var tt = 0>
-	<cfset var ff = 0>
-	<cfset var ll = 0>
-	<cfset var sField = "">
-	<cfset var key = "">
-
-	<cfif isSimpleValue(arguments.xml)>
-		<cfset xDef = XmlParse(arguments.xml)>
-	<cfelseif isXMLDoc(arguments.xml)>
-		<cfset xDef = arguments.xml>
-	<cfelse>
-		<cfthrow message="XML argument of loadXmlStruct must be XML." type="Manager">
-	</cfif>
-	<cfset aTables = XmlSearch(xDef,"//table[string-length(@name)>0]")>
-
-	<!--- Actually add the tables and fields --->
-	<cfloop index="tt" from="1" to="#ArrayLen(aTables)#">
-		<cfset table = aTables[tt].XmlAttributes["name"]>
-		<cfset variables.sMetaData[table]["sFields"] = StructNew()>
-		<cfset aFields = XmlSearch(xDef,"//table[@name='#table#']//field[string-length(@name)>0]")>
-		<cfloop index="ff" from="1" to="#ArrayLen(aFields)#">
-			<cfset sField = Duplicate(aFields[ff].XmlAttributes)>
-			<cfset sField["tablename"] = table>
-			<cfset sField["fieldname"] = aFields[ff].XmlAttributes.name>
-			<!--- If a relation element is included, make a key for the element --->
-			<cfif StructKeyExists(aFields[ff],"relation")>
-				<cfset sField["relation"] = StructNew()>
-				<cfset sField["relation"] = Duplicate(aFields[ff].relation.XmlAttributes)>
-				<cfif StructKeyExists(aFields[ff].relation,"filter")>
-					<cfset sField["relation"]["filters"] = ArrayNew(1)>
-					<cfloop index="ll" from="1" to="#ArrayLen(aFields[ff].relation.filter)#" step="1">
-						<cfset ArrayAppend(sField["relation"]["filters"],aFields[ff].relation.filter[ll].XmlAttributes)>
-					</cfloop>
-				</cfif>
-			</cfif>
-
-			<!--- Default folder for file types --->
-			<cfif
+			// Default folder for file types
+			if (
 					StructKeyExists(sField,"type")
-				AND	ListFindNoCase(variables.FileTypes,sField.type)
+				AND	ListFindNoCase(Variables.FileTypes,sField.type)
 				AND	NOT StructKeyExists(sField,"folder")
-			>
-				<cfset sField["folder"] = variables.FileMgr.PathNameFromString(sField["fieldname"])>
-			</cfif>
+			) {
+				sField["folder"] = Variables.FileMgr.PathNameFromString(sField["fieldname"]);
+			}
 
-			<cfset sField["isInTableCreation"] = true>
-			<cfset setField(argumentCollection=sField)>
-		</cfloop>
-	</cfloop>
+			sField["isInTableCreation"] = true;
+			setField(ArgumentCollection=sField);
+		}
+	}
 
-</cffunction>
+}
 
-<cffunction name="fixFileName" access="private" returntype="string" output="false">
-	<cfargument name="name" type="string" required="yes">
-	<cfargument name="dir" type="string" required="yes">
-	<cfargument name="maxlength" type="numeric" default="0">
+private string function fixFileName(
+	required string name,
+	required string dir,
+	numeric maxlength
+) {
+	var dirdelim = Variables.FileMgr.getDirDelim();
+	var result = ReReplaceNoCase(Arguments.name,"[^a-zA-Z0-9_\-\.]","_","ALL");// Remove special characters from file name
+	var path = "";
 
-	<cfset var dirdelim = variables.FileMgr.getDirDelim()>
-	<cfset var result = ReReplaceNoCase(arguments.name,"[^a-zA-Z0-9_\-\.]","_","ALL")><!--- Remove special characters from file name --->
-	<cfset var path = "">
+	result = Variables.FileMgr.LimitFileNameLength(Arguments.maxlength,result);
 
-	<cfset result = variables.FileMgr.LimitFileNameLength(arguments.maxlength,result)>
+	path = "#dir##dirdelim##result#";
 
-	<cfset path = "#dir##dirdelim##result#">
+	// If corrected file name doesn't match original, rename it
+	if ( Arguments.name NEQ result AND FileExists("#Arguments.dir##dirdelim##Arguments.name#") ) {
+		path = Variables.FileMgr.createUniqueFileName(path,Arguments.maxlength);
+		result = ListLast(path,dirdelim);
+		cffile(action="rename",source="#Arguments.dir##dirdelim##Arguments.name#",destination="#result#");
+	}
 
-	<!--- If corrected file name doesn't match original, rename it --->
-	<cfif arguments.name NEQ result AND FileExists("#arguments.dir##dirdelim##arguments.name#")>
-		<cfset path = variables.FileMgr.createUniqueFileName(path,arguments.maxlength)>
-		<cfset result = ListLast(path,dirdelim)>
-		<cffile action="rename" source="#arguments.dir##dirdelim##arguments.name#" destination="#result#">
-	</cfif>
-
-	<cfreturn result>
-</cffunction>
+	return result;
+}
+</cfscript>
 
 <cffunction name="types" access="public" returntype="string" output="no">
 
@@ -2687,6 +2806,11 @@
 			<transform name="sebField" type="numeric" PrimaryKey="true" />
 			<transform name="sebColumn" type="numeric" PrimaryKey="true" />
 			<transform name="DataMgr" CF_DataType="CF_SQL_INTEGER" PrimaryKey="true" Increment="true" />
+		</type>
+		<type name="pk:bigint" datatype="number">
+			<transform name="sebField" type="numeric" PrimaryKey="true" />
+			<transform name="sebColumn" type="numeric" PrimaryKey="true" />
+			<transform name="DataMgr" CF_DataType="CF_SQL_BIGINT" PrimaryKey="true" Increment="true" />
 		</type>
 		<type name="pk:uuid" datatype="text">
 			<transform name="sebField" type="text" PrimaryKey="true" />
@@ -2743,6 +2867,11 @@
 			<transform name="sebColumn" type="text" />
 			<transform name="DataMgr" CF_DataType="CF_SQL_INTEGER" />
 		</type>
+		<type name="bigint" datatype="number">
+			<transform name="sebField" type="integer" size="12" />
+			<transform name="sebColumn" type="text" />
+			<transform name="DataMgr" CF_DataType="CF_SQL_BIGINT" />
+		</type>
 		<type name="decimal" datatype="decimal">
 			<transform name="sebField" type="decimal" size="4" />
 			<transform name="sebColumn" type="numeric" />
@@ -2797,7 +2926,12 @@
 			<transform name="DataMgr" CF_DataType="CF_SQL_LONGVARCHAR" />
 		</type>
 		<type name="html" datatype="text">
-			<transform name="sebField" type="#variables.wysiwyg#" />
+			<transform name="sebField" type="#Variables.wysiwyg#" />
+			<transform name="sebColumn" type="html" />
+			<transform name="DataMgr" CF_DataType="CF_SQL_LONGVARCHAR" />
+		</type>
+		<type name="tinymce" datatype="text">
+			<transform name="sebField" type="tinymce" />
 			<transform name="sebColumn" type="html" />
 			<transform name="DataMgr" CF_DataType="CF_SQL_LONGVARCHAR" />
 		</type>
@@ -2841,306 +2975,253 @@
 	<cfreturn result>
 </cffunction>
 
-<cffunction name="XmlAsString" access="public" returntype="any" output="false" hint="">
-	<cfargument name="XmlElem" type="any" required="yes">
+<cfscript>
+public function XmlAsString(required XmlElem) {
+	var result = ToString(Arguments.XmlElem);
 
-	<cfset var result = ToString(arguments.XmlElem)>
+	// Remove XML encoding (so that this can be embedded in another document)
+	result = ReReplaceNoCase(result,"<\?xml[^>]*>","","ALL");
 
-	<!--- Remove XML encoding (so that this can be embedded in another document) --->
-	<cfset result = ReReplaceNoCase(result,"<\?xml[^>]*>","","ALL")>
+	return result;
+}
 
-	<cfreturn result>
-</cffunction>
+public struct function getFieldsStruct(
+	required string tablename,
+	string transformer
+) {
 
-<cffunction name="getFieldsStruct" access="public" returntype="struct" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="transformer" type="string" required="no">
+	if ( StructCount(Arguments) EQ 1 ) {
+		if (
+			NOT (
+					StructKeyExists(Variables,"cachedata")
+				AND	StructKeyExists(Variables.cachedata,Arguments.tablename)
+				AND	StructKeyExists(Variables.cachedata[Arguments.tablename],"FieldsStruct")
+				AND	isStruct(Variables.cachedata[Arguments.tablename]["FieldsStruct"])
+			)
+		) {
+			Variables.cachedata[Arguments.tablename]["FieldsStruct"] = getFieldsStructInternal(ArgumentCollection=Arguments);
+		}
+		return Variables.cachedata[Arguments.tablename]["FieldsStruct"];
+	} else {
+		return getFieldsStructInternal(ArgumentCollection=Arguments);
+	}
+}
 
-	<cfif StructCount(arguments) EQ 1>
-		<cfif NOT (
-				StructKeyExists(variables,"cachedata")
-			AND	StructKeyExists(variables.cachedata,arguments.tablename)
-			AND	StructKeyExists(variables.cachedata[arguments.tablename],"FieldsStruct")
-			AND	isStruct(variables.cachedata[arguments.tablename]["FieldsStruct"])
-		)>
-			<cfset variables.cachedata[arguments.tablename]["FieldsStruct"] = getFieldsStructInternal(argumentCollection=arguments)>
-		</cfif>
-		<cfreturn variables.cachedata[arguments.tablename]["FieldsStruct"]>
-	<cfelse>
-		<cfreturn getFieldsStructInternal(argumentCollection=arguments)>
-	</cfif>
-</cffunction>
+public function getVariables() {
+	return Variables;
+}
 
-<cffunction name="getVariables" access="public" returntype="any" output="false" hint="">
-	<cfreturn variables>
-</cffunction>
+private struct function getFieldsStructInternal(
+	required string tablename,
+	string transformer
+) {
+	var sFields = {};
+	var aFields = 0;
+	var ii = 0;
 
-<cffunction name="getArgumentsList" access="private" returntype="string" output="false">
-	<cfargument name="func" type="any">
+	aFields = getFieldsArrayInternal(ArgumentCollection=Arguments);
 
-	<cfset var result = "">
-	<cfset var sMethod = getMetaData(arguments.func)>
-	<cfset var aa = 0>
+	for ( ii=1; ii LTE ArrayLen(aFields); ii++ ) {
+		if ( StructKeyExists(aFields[ii],"name") ) {
+			sFields[aFields[ii]["name"]] = aFields[ii];
+		}
+	}
 
-	<cfif ArrayLen(sMethod.Parameters)>
-		<cfloop index="aa" from="1" to="#ArrayLen(sMethod.Parameters)#">
-			<cfset result = ListAppend(result,sMethod.Parameters[aa].name)>
-		</cfloop>
-	</cfif>
+	return sFields;
+}
 
-	<cfreturn result>
-</cffunction>
+private string function makeTypeDataKey(
+	required string type,
+	string transformer
+) {
+	var result = Arguments.type;
 
-<cffunction name="getFieldsStructInternal" access="private" returntype="struct" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="transformer" type="string" required="no">
+	if ( StructKeyExists(Arguments,"transformer") AND Len(Trim(Arguments.transformer)) ) {
+		result = ListAppend(result,Arguments.transformer,":");
+	}
 
-	<cfset var sFields = StructNew()>
-	<cfset var aFields = 0>
-	<cfset var ii = 0>
+	return result;
+}
 
-	<cfset aFields = getFieldsArrayInternal(argumentCollection=arguments)>
+private function manageTableFieldSorts(required string tablename) {
 
-	<cfloop index="ii" from="1" to="#ArrayLen(aFields)#" step="1">
-		<cfif StructKeyExists(aFields[ii],"name")>
-			<cfset sFields[aFields[ii]["name"]] = aFields[ii]>
-		</cfif>
-	</cfloop>
+}
 
-	<cfreturn sFields>
-</cffunction>
+private void function notifyEvent(
+	required string EventName,
+	struct Args,
+	result
+) {
+	
+	if ( StructKeyExists(Variables,"Observer") ) {
+		Arguments.EventName = "Manager:#Arguments.eventName#";
+		Variables.Observer.notifyEvent(ArgumentCollection=Arguments);
+	}
 
-<cffunction name="makeTypeDataKey" access="private" returntype="string" output="no">
-	<cfargument name="type" type="string" required="true">
-	<cfargument name="transformer" type="string" required="false">
+}
 
-	<cfset var result = Arguments.type>
+public struct function StructFromArgs() {
+	var sTemp = 0;
+	var sResult = {};
+	var key = "";
 
-	<cfif StructKeyExists(Arguments,"transformer") AND Len(Trim(Arguments.transformer))>
-		<cfset result = ListAppend(result,Arguments.transformer,":")>
-	</cfif>
+	if ( ArrayLen(Arguments) EQ 1 AND isStruct(Arguments[1]) ) {
+		sTemp = Arguments[1];
+	} else {
+		sTemp = Arguments;
+	}
 
-	<cfreturn result>
-</cffunction>
+	// set all Arguments into the return struct
+	for ( key in sTemp ) {
+		if ( StructKeyExists(sTemp, key) ) {
+			sResult[key] = sTemp[key];
+		}
+	}
 
-<cffunction name="manageTableFieldSorts" access="private" returntype="any" output="false" hint="">
-	<cfargument name="tablename" type="string" required="yes">
+	return sResult;
+}
 
-</cffunction>
+/**
+* Returns an array of of either attribute values or node text values.
+* @XML The ColdFusion XML document we are searching.
+* @XPath The XPath that will return the XML nodes from which we will be getting the values for our array.
+* @NumericOnly Flags whether only numeric values will be selected.
+*/
+public array function GetValueArray(
+	required XML,
+	required string XPath,
+	boolean NumericOnly="false"
+) {
+	// Define the local scope.
+	var LOCAL = {};
 
-<cffunction name="notifyEvent" access="private" returntype="void" output="false" hint="">
-	<cfargument name="EventName" type="string" required="true">
-	<cfargument name="Args" type="struct" required="false">
-	<cfargument name="result" type="any" required="false">
-
-	<cfif StructKeyExists(Variables,"Observer")>
-		<cfset Arguments.EventName = "Manager:#Arguments.eventName#">
-		<cfset Variables.Observer.notifyEvent(ArgumentCollection=Arguments)>
-	</cfif>
-
-</cffunction>
-
-<cffunction name="StructFromArgs" access="public" returntype="struct" output="false" hint="">
-
-	<cfset var sTemp = 0>
-	<cfset var sResult = StructNew()>
-	<cfset var key = "">
-
-	<cfif ArrayLen(arguments) EQ 1 AND isStruct(arguments[1])>
-		<cfset sTemp = arguments[1]>
-	<cfelse>
-		<cfset sTemp = arguments>
-	</cfif>
-
-	<!--- set all arguments into the return struct --->
-	<cfloop collection="#sTemp#" item="key">
-		<cfif StructKeyExists(sTemp, key)>
-			<cfset sResult[key] = sTemp[key]>
-		</cfif>
-	</cfloop>
-
-	<cfreturn sResult>
-</cffunction>
-
-<cffunction
-	name="GetValueArray"
-	access="public"
-	returntype="array"
-	output="false"
-	hint="Returns an array of of either attribute values or node text values.">
-
-	<!--- Define arguments. --->
-	<cfargument
-		name="XML"
-		type="any"
-		required="true"
-		hint="The ColdFusion XML document we are searching."
-		/>
-
-	<cfargument
-		name="XPath"
-		type="string"
-		required="true"
-		hint="The XPAth that will return the XML nodes from which we will be getting the values for our array."
-		/>
-
-	<cfargument
-		name="NumericOnly"
-		type="boolean"
-		required="false"
-		default="false"
-		hint="Flags whether only numeric values will be selected."
-		/>
-
-	<!--- Define the local scope. --->
-	<cfset var LOCAL = StructNew() />
-
-	<!---
+	/*
 		Get the matching XML nodes based on the
 		given XPath.
-	--->
-	<cfset LOCAL.Nodes = XmlSearch(
+	*/
+	LOCAL.Nodes = XmlSearch(
 		ARGUMENTS.XML,
 		ARGUMENTS.XPath
-		) />
+	);
 
 
-	<!--- Set up an array to hold the returned values. --->
-	<cfset LOCAL.Return = ArrayNew( 1 ) />
+	// Set up an array to hold the returned values.
+	LOCAL.Return = [];
 
-	<!--- Loop over the matched nodes. --->
-	<cfloop
-		index="LOCAL.NodeIndex"
-		from="1"
-		to="#ArrayLen( LOCAL.Nodes )#"
-		step="1">
+	// Loop over the matched nodes.
+	for ( LOCAL.Node in LOCAL.Nodes ) {
 
-		<!--- Get a short hand to the current node. --->
-		<cfset LOCAL.Node = LOCAL.Nodes[ LOCAL.NodeIndex ] />
-
-		<!---
+		/*
 			Check to see what kind of value we are getting -
 			different nodes will have different values. When
 			getting the value, we must also check to see if
 			only numeric values are being returned.
-		--->
-		<cfif (
-			StructKeyExists( LOCAL.Node, "XmlText" ) AND
+		*/
+		if (
+			StructKeyExists( LOCAL.Node, "XmlText" )
+			AND
 			(
 				(NOT ARGUMENTS.NumericOnly) OR
 				IsNumeric( LOCAL.Node.XmlText )
-			))>
+			)
+		) {
 
-			<!--- Add the element node text. --->
-			<cfset ArrayAppend(
+			// Add the element node text.
+			ArrayAppend(
 				LOCAL.Return,
 				LOCAL.Node.XmlText
-				) />
+			);
 
-		<cfelseif (
-			StructKeyExists( LOCAL.Node, "XmlValue" ) AND
+		} else if (
+			StructKeyExists( LOCAL.Node, "XmlValue" )
+			AND
 			(
-				(NOT ARGUMENTS.NumericOnly) OR
+				(NOT ARGUMENTS.NumericOnly)
+				OR
 				IsNumeric( LOCAL.Node.XmlValue )
-			))>
+			)
+		) {
 
-			<!--- Add the attribute node value. --->
-			<cfset ArrayAppend(
+			// Add the attribute node value.
+			ArrayAppend(
 				LOCAL.Return,
 				LOCAL.Node.XmlValue
-				) />
+			);
 
-		</cfif>
+		}
 
-	</cfloop>
-
-
-	<!--- Return value array. --->
-	<cfreturn LOCAL.Return />
-</cffunction>
-<cffunction
-	name="XmlAppend"
-	access="public"
-	returntype="any"
-	output="false"
-	hint="Copies the children of one node to the node of another document.">
-
-	<!--- Define arguments. --->
-	<cfargument
-		name="NodeA"
-		type="any"
-		required="true"
-		hint="The node whose children will be added to."
-		/>
-
-	<cfargument
-		name="NodeB"
-		type="any"
-		required="true"
-		hint="The node whose children will be copied to another document."
-		/>
+	}
 
 
-	<!--- Set up local scope. --->
-	<cfset var LOCAL = StructNew() />
+	// Return value array.
+	return LOCAL.Return;
+}
 
-	<!---
+/**
+* Copies the children of one node to the node of another document.
+* @NodeA The node whose children will be added to.
+* @NodeB The node whose children will be copied to another document.
+*/
+public function XmlAppend(
+	required NodeA,
+	required NodeB
+) {
+	// Set up local scope.
+	var LOCAL = {};
+
+	/*
 		Get the child nodes of the originating XML node.
 		This will return both tag nodes and text nodes.
 		We only want the tag nodes.
-	--->
-	<cfset LOCAL.ChildNodes = ARGUMENTS.NodeB.GetChildNodes() />
+	*/
+	LOCAL.ChildNodes = ARGUMENTS.NodeB.GetChildNodes();
 
 
-	<!--- Loop over child nodes. --->
-	<cfloop
-		index="LOCAL.ChildIndex"
-		from="1"
-		to="#LOCAL.ChildNodes.GetLength()#"
-		step="1">
+	// Loop over child nodes.
+	for ( LOCAL.ChildIndex=1; LOCAL.ChildIndex LTE LOCAL.ChildNodes.GetLength(); LOCAL.ChildIndex++ ) {
 
 
-		<!---
+		/*
 			Get a short hand to the current node. Remember
 			that the child nodes NodeList starts with
 			index zero. Therefore, we must subtract one
 			from out child node index.
-		--->
-		<cfset LOCAL.ChildNode = LOCAL.ChildNodes.Item(
+		*/
+		LOCAL.ChildNode = LOCAL.ChildNodes.Item(
 			JavaCast(
 				"int",
 				(LOCAL.ChildIndex - 1)
-				)
-			) />
+			)
+		);
 
-		<!---
+		/*
 			Import this noded into the target XML doc. If we
 			do not do this first, then COldFusion will throw
 			an error about us using nodes that are owned by
 			another document. Importing will return a reference
 			to the newly created xml node. The TRUE argument
 			defines this import as DEEP copy.
-		--->
-		<cfset LOCAL.ChildNode = ARGUMENTS.NodeA.GetOwnerDocument().ImportNode(
+		*/
+		LOCAL.ChildNode = ARGUMENTS.NodeA.GetOwnerDocument().ImportNode(
 			LOCAL.ChildNode,
 			JavaCast( "boolean", true )
-			) />
+		);
 
-		<!---
+		/*
 			Append the imported xml node to the child nodes
 			of the target node.
-		--->
-		<cfset ARGUMENTS.NodeA.AppendChild(
-				LOCAL.ChildNode
-			) />
+		*/
+		 ARGUMENTS.NodeA.AppendChild(
+			LOCAL.ChildNode
+		);
 
-	</cfloop>
+	}
 
 
-	<!--- Return the target node. --->
-	<cfreturn ARGUMENTS.NodeA />
-</cffunction>
-<cfscript>
+	// Return the target node.
+	return ARGUMENTS.NodeA;
+}
+
 function makeCompName(str) {
 	var result = "";
 	var find = FindNoCase(" ",result);
@@ -3193,16 +3274,16 @@ function QueryRowToStruct(query){
 	var row = 1;//by default, do this to the first row of the query
 	var ii = 1;//a var for looping
 	var cols = listToArray(query.columnList);//the cols to loop over
-	var stReturn = structnew();//the struct to return
+	var sReturn = {};//the struct to return
 
-	if(arrayLen(arguments) GT 1) row = arguments[2];//if there is a second argument, use that for the row number
+	if(arrayLen(Arguments) GT 1) row = Arguments[2];//if there is a second argument, use that for the row number
 
 	//loop over the cols and build the struct from the query row
 	for(ii = 1; ii lte arraylen(cols); ii = ii + 1){
-		stReturn[cols[ii]] = query[cols[ii]][row];
+		sReturn[cols[ii]] = query[cols[ii]][row];
 	}
 
-	return stReturn;//return the struct
+	return sReturn;//return the struct
 }
 </cfscript>
 

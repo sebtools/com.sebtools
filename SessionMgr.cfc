@@ -1,248 +1,304 @@
 <cfcomponent displayname="SessionMgr" hint="I handle setting and retreiving session-related variables. Enabling storage mechanism for the variables to be changed.">
 <!--- %%Must add time-out. --->
-<cffunction name="init" access="public" returntype="SessionMgr" output="no" hint="I instantiate and return this object.">
-	<cfargument name="scope" type="string" default="Session">
-	<cfargument name="requestvar" type="string" default="SessionInfo">
-
-	<cfset var scopes = "Client,Session">
-
-	<cfif Not ListFindNoCase(scopes, arguments.scope)>
-		<cfthrow message="The scope argument for SessionMgr must be a valid scope (#scopes#)." type="MethodErr">
-	</cfif>
-
-	<cfset variables.scope = arguments.scope>
-	<cfset variables.requestvar = arguments.requestvar>
-	<cfset updateRequestVar()>
-
-	<cfset This.AddRowToQuery = AddToQuery>
-
-	<cfreturn this>
-</cffunction>
-
-<cffunction name="AddToArray" access="public" returntype="any" output="no" hint="I add a value to an array.">
-	<cfargument name="variablename" type="string" required="yes">
-	<cfargument name="value" type="any" required="yes">
-
-	<cfset var result = []>
-
-	<cfif exists(Arguments.variablename)>
-		<cfset result = getValue(Arguments.variablename)>
-	</cfif>
-
-	<cfset ArrayAppend(result,Arguments.value)>
-	<cfset setValue(Arguments.variablename,result)>
-
-</cffunction>
-
-<cffunction name="AddToList" access="public" returntype="any" output="no" hint="I add a value to a string.">
-	<cfargument name="variablename" type="string" required="yes">
-	<cfargument name="value" type="string" required="yes">
-	<cfargument name="delimiter" type="string" default=",">
-
-	<cfset var result = "">
-
-	<cfif exists(Arguments.variablename)>
-		<cfset result = getValue(Arguments.variablename)>
-	</cfif>
-
-	<cfset result = ListAppend(result,Arguments.value,Arguments.delimiter)>
-	<cfset setValue(Arguments.variablename,result)>
-
-</cffunction>
-
-<cffunction name="AddToQuery" access="public" returntype="any" output="no" hint="I add a structure as a row to a query.">
-	<cfargument name="variablename" type="string" required="yes">
-	<cfargument name="rowstruct" type="struct" required="yes">
-
-	<cfset var result = 0>
-	<cfset var col = 0>
-
-	<cfif exists(Arguments.variablename)>
-		<cfset result = getValue(Arguments.variablename)>
-	<cfelse>
-		<cfset var result = QueryNew(StructKeyList(Arguments.rowstruct))>
-	</cfif>
-
-	<!--- Add row --->
-	<cfscript>
-	QueryAddRow(result);
-	for ( col in rowstruct ) {
-		QuerySetCell(result,col,rowstruct[col]);
-	}
-	</cfscript>
-
-	<cfset setValue(Arguments.variablename,result)>
-
-</cffunction>
-
-<cffunction name="AddToString" access="public" returntype="any" output="no" hint="I add a value to a string.">
-	<cfargument name="variablename" type="string" required="yes">
-	<cfargument name="value" type="string" required="yes">
-
-	<cfset var result = "">
-
-	<cfif exists(Arguments.variablename)>
-		<cfset result = getValue(Arguments.variablename)>
-	</cfif>
-
-	<cfset result = result & Arguments.value>
-	<cfset setValue(Arguments.variablename,result)>
-
-</cffunction>
-
-<cffunction name="AddToStruct" access="public" returntype="any" output="no" hint="I add a value to a structure.">
-	<cfargument name="variablename" type="string" required="yes">
-	<cfargument name="key" type="string" required="yes">
-	<cfargument name="value" type="any" required="yes">
-	<cfargument name="overwrite" type="boolean" default="true">
-
-	<cfset var result = {}>
-
-	<cfif exists(Arguments.variablename)>
-		<cfset result = getValue(Arguments.variablename)>
-	</cfif>
-
-	<!--- Make sure we don't overwrite properties if we are told not to do so. --->
-	<cfif Arguments.overwrite OR NOT StructKeyExists(result,key)>
-		<cfset result[Arguments.key] = Arguments.value>
-		<cfset setValue(Arguments.variablename,result)>
-	</cfif>
-
-</cffunction>
-
-<cffunction name="paramVar" access="public" returntype="any" output="no" hint="I set a default value for the given variable.">
-	<cfargument name="variablename" type="string" required="yes">
-	<cfargument name="value" type="any" required="yes">
-
-	<cfparam name="#variables.scope#.#arguments.variablename#" default="#arguments.value#">
-	<cfset updateRequestVar()>
-
-</cffunction>
-
-<cffunction name="deleteVar" access="public" returntype="void" output="no" hint="I delete the given variable.">
-	<cfargument name="variablename" type="string" required="yes">
-
-	<cfif hasSessionManagement()>
-		<cflock timeout="20" throwontimeout="Yes" name="SessionMgr" type="READONLY">
-			<cfset StructDelete(Evaluate(variables.scope), arguments.variablename)>
-		</cflock>
-	</cfif>
-	<cfset updateRequestVar()>
-
-</cffunction>
-
-<cffunction name="hasSessionManagement" access="public" returntype="boolean" output="no" hint="I indicate if session scope is enabled.">
-
-	<cfset var foo = "">
-
-	<cfif NOT StructKeyExists(request,"SessionMgr_hasSessionManagement")>
-		<cftry>
-			<cfset foo = Evaluate(variables.scope)>
-			<cfset request["SessionMgr_hasSessionManagement"] = true>
-		<cfcatch>
-			<cfset request["SessionMgr_hasSessionManagement"] = false>
-		</cfcatch>
-		</cftry>
-	</cfif>
-
-	<cfreturn request["SessionMgr_hasSessionManagement"]>
-</cffunction>
-
-<cffunction name="killSession" access="public" returntype="void" output="no" hint="I delete all of the variables from this session.">
-
-	<cfset var itms = dump()>
-	<cfset var itm = "">
-
-	<!--- Delete selected keys from struct to prevent problems when calling deleteVar on each key --->
-	<cfset StructDelete(itms,"timecreated")>
-	<cfset StructDelete(itms,"urltoken")>
-	<cfset StructDelete(itms,"cftoken ")>
-	<cfset StructDelete(itms,"cfid")>
-	<cfset StructDelete(itms,"hitcount")>
-	<cfset StructDelete(itms,"lastvisit")>
-
-	<!--- Ditch all variables (except as already removed above) --->
-	<cfloop collection="#itms#" item="itm">
-		<cfset variables.deleteVar(itm)>
-	</cfloop>
-
-</cffunction>
-
-<cffunction name="dump" access="public" returntype="struct" output="no" hint="I dump the scope holding SessionMgr data.">
-	<cfif hasSessionManagement()>
-		<cftry>
-			<cfreturn StructCopy(Evaluate(variables.scope))>
-		<cfcatch>
-			<cfreturn Evaluate(variables.scope)>
-		</cfcatch>
-		</cftry>
-	<cfelse>
-		<cfreturn StructNew()>
-	</cfif>
-</cffunction>
-
-<cffunction name="getSessionData" access="public" returntype="struct" output="no" hint="I return session data ( deprecated in favor of dump() ).">
-	<cfreturn dump()>
-</cffunction>
-
-<cffunction name="getValue" access="public" returntype="any" output="no" hint="I get the value of the given user-specific variable.">
-	<cfargument name="variablename" type="string" required="yes">
-
-	<cfset var result = 0>
-
-	<cfif hasSessionManagement()>
-		<cflock timeout="20" throwontimeout="Yes" name="SessionMgr" type="READONLY">
-			<cfset result = Evaluate(variables.scope & "." & arguments.variablename)>
-		</cflock>
-	</cfif>
-
-	<cfif IsWDDX(result)>
-		<cfwddx action="WDDX2CFML" input="#result#" output="result">
-	</cfif>
-
-	<!--- <cfif variables.scope eq "Client">
-		<cfwddx action="WDDX2CFML" input="#result#" output="result">
-	</cfif> --->
-
-	<cfreturn result>
-</cffunction>
-
-<cffunction name="exists" access="public" returntype="boolean" output="no" hint="I check if the given variable exists in the SessionMgr scope.">
-	<cfargument name="variablename" type="string" required="yes">
-	<cfif hasSessionManagement()>
-		<cftry>
-			<cfreturn StructKeyExists(Evaluate(variables.scope),arguments.variablename)>
-		<cfcatch>
-			<cfset request["SessionMgr_hasSessionManagement"] = false>
-			<cfreturn false>
-		</cfcatch>
-		</cftry>
-	<cfelse>
-		<cfreturn false>
-	</cfif>
-</cffunction>
-
-<cffunction name="setValue" access="public" returntype="void" output="no" hint="I set the value of the given user-specific variable.">
-	<cfargument name="variablename" type="string" required="yes">
-	<cfargument name="value" type="any" required="yes">
-
-	<cfset var val = arguments.value>
-
-	<cfif variables.scope eq "Client" AND NOT isSimpleValue(arguments.value)>
-		<cfwddx action="CFML2WDDX" input="#arguments.value#" output="val">
-	</cfif>
-
-	<cflock timeout="20" throwontimeout="Yes" name="SessionMgr" type="EXCLUSIVE">
-		<cfset SetVariable("#variables.scope#.#arguments.variablename#", val)>
-	</cflock>
-	<cfset updateRequestVar()>
-
-</cffunction>
-
-<cffunction name="updateRequestVar" access="public" returntype="void" output="no" hint="I update the request variable to match the contents of the scope.">
-	<cfset request[variables.requestvar] = dump()>
-</cffunction>
 <cfscript>
+public function init(
+	string scope="Session",
+	string requestvar="SessionInfo"
+) {
+	var scopes = "Client,Session";
+
+	if ( NOT ListFindNoCase(scopes, Arguments.scope) ) {
+		throw(
+			message="The scope argument for SessionMgr must be a valid scope (#scopes#).",
+			type="MethodErr"
+		);
+	}
+
+	Variables.scope = Arguments.scope;
+	Variables.requestvar = Arguments.requestvar;
+	updateRequestVar();
+
+	This.AddRowToQuery = AddToQuery;
+
+	Variables.DateInitialized = now();
+
+	return This;
+}
+
+/**
+* I add a value to an array.
+*/
+public function AddToArray(
+	required string variablename,
+	required value
+) {
+	
+	var result = [];
+
+	if ( exists(Arguments.variablename) ) {
+		result = getValue(Arguments.variablename);
+	}
+
+	ArrayAppend(result,Arguments.value);
+	setValue(Arguments.variablename,result);
+
+}
+
+/**
+* I add a value to a string.
+*/
+public function AddToList(
+	required string variablename,
+	string value,
+	string delimiter=","
+) {
+	
+	var result = "";
+
+	if ( exists(Arguments.variablename) ) {
+		result = getValue(Arguments.variablename);
+	}
+
+	result = ListAppend(result,Arguments.value,Arguments.delimiter);
+	setValue(Arguments.variablename,result);
+
+}
+
+/**
+* I add a structure as a row to a query.
+*/
+public function AddToQuery(
+	required string variablename,
+	required struct rowstruct
+) {
+	var result = 0;
+	var col = 0;
+	var sRows = StructCopy(Arguments.rowstruct);
+
+	if ( exists(Arguments.variablename) ) {
+		result = getValue(Arguments.variablename);
+	} else {
+		result = QueryNew(StructKeyList(sRows));
+	}
+
+	// Add row
+	QueryAddRow(result);
+	for ( col in sRows ) {
+		QuerySetCell(result,col,sRows[col]);
+	}
+
+	setValue(Arguments.variablename,result);
+
+}
+
+/**
+* I add a value to a string.
+*/
+public function AddToString(
+	required string variablename,
+	requried value
+) {
+	var result = "";
+
+	if ( exists(Arguments.variablename) ) {
+		result = getValue(Arguments.variablename);
+	}
+
+	result = result & Arguments.value;
+	setValue(Arguments.variablename,result);
+
+}
+
+/**
+* I add a value to a structure.
+*/
+public function AddToStruct(
+	required string variablename,
+	required string key,
+	required value,
+	boolean overwrite="true"
+) {
+	var result = {};
+
+	if ( exists(Arguments.variablename) ) {
+		result = getValue(Arguments.variablename);
+	}
+
+	// Make sure we don't overwrite properties if we are told not to do so.
+	if ( Arguments.overwrite OR NOT StructKeyExists(result,key) ) {
+		result[Arguments.key] = Arguments.value;
+		setValue(Arguments.variablename,result);
+	}
+}
+
+/**
+*
+*/
+public function paramVar(
+	required string variablename,
+	required value
+) {
+
+	cfparam(name="#variables.scope#.#Arguments.variablename#", default="#Arguments.value#");
+	updateRequestVar();
+
+}
+
+public void function deleteVar( required string variablename ) {
+	if ( hasSessionManagement() ) {
+		lock timeout="20" throwontimeout="Yes" name="SessionMgr" type="EXCLUSIVE" {
+			StructDelete( Evaluate( variables.scope ), Arguments.variablename );
+		}
+	}
+	setDateLastChanged();
+	updateRequestVar();
+}
+
+/**
+* I indicate if session scope is enabled.
+*/
+public boolean function hasSessionManagement() {
+	var foo = "";
+
+	if ( NOT StructKeyExists(request,"SessionMgr_hasSessionManagement") ) {
+		try {
+			foo = Evaluate(variables.scope);
+			request["SessionMgr_hasSessionManagement"] = true;
+		} catch ( any e ) {
+			request["SessionMgr_hasSessionManagement"] = false;
+		}
+	}
+
+	return request["SessionMgr_hasSessionManagement"];
+}
+
+/**
+* I delete all of the variables from this session.
+*/
+public void function killSession() {
+	var itms = dump();
+	var itm = "";
+
+	// Delete selected keys from struct to prevent problems when calling deleteVar on each key
+	StructDelete(itms,"timecreated");
+	StructDelete(itms,"urltoken");
+	StructDelete(itms,"cftoken ");
+	StructDelete(itms,"cfid");
+	StructDelete(itms,"hitcount");
+	StructDelete(itms,"lastvisit");
+
+	// Ditch all variables (except as already removed above)
+	for ( itm in itms ) {
+		variables.deleteVar(itm);
+	}
+
+	setDateLastChanged();
+
+}
+
+/**
+ * I dump the scope holding SessionMgr data.
+ */
+public struct function dump() {
+
+	if ( hasSessionManagement() ) {
+		try {
+			return StructCopy(Evaluate(Variables.scope));
+		} catch ( any e ) {
+			return Evaluate(Variables.scope);
+		}
+	} else {
+		return {};
+	}
+}
+
+/**
+* I check if the given variable exists in the SessionMgr scope.
+*/
+public boolean function exists(required string variablename) {
+	
+	if ( hasSessionManagement() ) {
+		try {
+			return StructKeyExists(Evaluate(Variables.scope),Arguments.variablename);
+		} catch (any e) {
+			request["SessionMgr_hasSessionManagement"] = false;
+			return false;
+		}
+	} else {
+		return false;
+	}
+}
+
+public date function getLastChanged() {
+
+	if ( exists("DateSessionMgrLastChanged") ) {
+		return getValue("DateSessionMgrLastChanged");
+	} else {
+		return Variables.DateInitialized;
+	}
+}
+
+/**
+* I return session data ( deprecated in favor of dump() ).
+*/
+public struct function getSessionData() {
+
+	return dump();
+}
+
+/**
+* I get the value of the given user-specific variable.
+*/
+public function getValue(required string variablename) {
+	var result = 0;
+
+	if ( hasSessionManagement() ) {
+		lock timeout="20" throwontimeout="Yes" name="SessionMgr" type="READONLY" {
+			result = Evaluate(Variables.scope & "." & Arguments.variablename);
+		}
+	}
+
+	if ( isWDDX(result) ) {
+		wddx(action="WDDX2CFML",input="#result#",output="result");
+	}
+
+	return result;
+}
+
+
+/**
+* I set the value of the given user-specific variable.
+*/
+public void function setValue(
+	required string variablename,
+	required value
+) {
+	var val = arguments.value;
+
+	if ( variables.scope eq "Client" AND NOT isSimpleValue(arguments.value) ) {
+		wddx(action="CFML2WDDX",input="#arguments.value#",output="val");
+	}
+
+	lock timeout="20" throwontimeout="Yes" name="SessionMgr" type="EXCLUSIVE" {
+		SetVariable("#variables.scope#.#arguments.variablename#", val);
+		setDateLastChanged();
+	}
+	updateRequestVar();
+}
+
+/*
+ * I update the request variable to match the contents of the scope.
+ */
+public void function updateRequestVar() {
+
+	request[variables.requestvar] = dump();
+
+}
+
+package void function setDateLastChanged() {
+	SetVariable("#variables.scope#.DateSessionMgrLastChanged", now());
+}
+
 /**
  * Gets all the session keys and session ids for an application.
  *

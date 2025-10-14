@@ -1,34 +1,33 @@
-<!--- 1.0 Beta 3 (Build 35) --->
-<!--- Last Updated: 2011-11-23 --->
-<!--- Information: sebtools.com --->
 <cfcomponent extends="component">
+<cfscript>
+public function init(
+	required Manager,
+	NoticeMgr,
+	Scheduler,
+	string ErrorEmail,
+	Observer
+) {
+	
+	initInternal(ArgumentCollection=Arguments);
 
-<cffunction name="init" access="public" returntype="any" output="no">
-	<cfargument name="Manager" type="any" required="yes">
-	<cfargument name="NoticeMgr" type="any" required="no">
-	<cfargument name="Scheduler" type="any" required="no">
-	<cfargument name="ErrorEmail" type="string" required="no">
-	<cfargument name="Observer" type="any" required="no">
+	return This;
+}
 
-	<cfset initInternal(argumentCollection=arguments)>
-
-	<cfreturn this>
-</cffunction>
-
-<cffunction name="initInternal" access="public" returntype="any" output="no" hint="I initialize and return this object.">
-	<cfargument name="Manager" type="any" required="yes">
-	<cfargument name="NoticeMgr" type="any" required="no">
-	<cfargument name="Scheduler" type="any" required="no">
-	<cfargument name="ErrorEmail" type="string" required="no">
-	<cfargument name="Observer" type="any" required="no">
-
-	<!--- Copy initialization arguments to variables so that they will be persistent with component but not available outside component --->
-	<cfscript>
+public function initInternal(
+	required Manager,
+	NoticeMgr,
+	Scheduler,
+	string ErrorEmail,
+	Observer
+) {
+	//Copy initialization arguments to variables so that they will be persistent with component but not available outside component
 	var key = "";
 	var xmlcustom = getMethodOutputValue(variables,"customxml");
 
 	variables.sMe = getMetaData(This);
 	variables.CurrentFolder = getDirectoryFromPath(variables.sMe.Path);
+
+	Variables.sComponents = {};
 
 	loadComponentData();
 
@@ -64,6 +63,7 @@
 		This.Scheduler = variables.Scheduler;
 		loadScheduledTask();
 	}
+
 	loadComponents();
 
 	variables.SendEmailOnError = true;
@@ -71,94 +71,104 @@
 	if ( StructKeyExists(This,"Observer") AND StructKeyExists(This.Observer,"setSubject") ) {
 		This.Observer.setSubject(This);
 	}
-	</cfscript>
 
-	<cfreturn This>
-</cffunction>
+	return This;
+}
 
-<cffunction name="getCustomExtension" access="public" returntype="string" output="false" hint="">
+public string function getCustomExtension() {
+	var result = "";
 
-	<cfset var result = "">
+	if (
+		StructKeyExists(variables,"CustomSuffix")
+		AND
+		isSimpleValue(variables.CustomSuffix)
+		AND
+		Len(Trim(variables.CustomSuffix))
+	) {
+		result = variables.CustomSuffix;
+	} else if ( ListLen(ListLast(variables.me.fullname,"."),"_") EQ 2 ) {
+		result = ListLast(variables.me.fullname,"_");
+	}
 
-	<cfif StructKeyExists(variables,"CustomSuffix") AND isSimpleValue(variables.CustomSuffix) AND Len(Trim(variables.CustomSuffix))>
-		<cfset result = variables.CustomSuffix>
-	<cfelseif ListLen(ListLast(variables.me.fullname,"."),"_") EQ 2>
-		<cfset result = ListLast(variables.me.fullname,"_")>
-	</cfif>
+	return result;
+}
 
-	<cfreturn result>
-</cffunction>
+public struct function getMeData() {
+	var sThis = 0;
+	var filename = "";
 
-<cffunction name="getMeData" access="public" returntype="struct" output="false" hint="">
+	if ( NOT StructKeyExists(Variables,"me") ) {
+		sThis = getMetaData(This);
+		filename = ListLast(sThis.name,".");
 
-	<cfset var sThis = 0>
-	<cfset var filename = "">
+		variables.me = {};
+		variables.me["fullname"] = filename;
+		variables.me["name"] = ListFirst(variables.me["fullname"],"_");
+		variables.me["path"] = reverse(ListRest(reverse(sThis.name),"."));
+		if ( StructKeyExists(sThis,"DisplayName") ) {
+			variables.me["label"] = sThis.DisplayName;
+		} else {
+			variables.me["label"] = variables.me["name"];
+		}
+		variables.me["dir"] = getDirectoryFromPath(sThis.path);
+	}
 
-	<cfif NOT StructKeyExists(Variables,"me")>
-		<cfset sThis = getMetaData(This)>
-		<cfset filename = ListLast(sThis.name,".")>
+	return Variables.me;
+}
 
-		<cfset variables.me = StructNew()>
-		<cfset variables.me["fullname"] = filename>
-		<cfset variables.me["name"] = ListFirst(variables.me["fullname"],"_")>
-		<cfset variables.me["path"] = reverse(ListRest(reverse(sThis.name),"."))>
-		<cfif StructKeyExists(sThis,"DisplayName")>
-			<cfset variables.me["label"] = sThis.DisplayName>
-		<cfelse>
-			<cfset variables.me["label"] = variables.me["name"]>
-		</cfif>
-		<cfset variables.me["dir"] = getDirectoryFromPath(sThis.path)>
-	</cfif>
+public void function loadComponentData() {
+	
+	getMeData();
 
-	<cfreturn Variables.me>
-</cffunction>
+}
 
-<cffunction name="loadComponentData" access="public" returntype="void" output="false" hint="">
+public string function getPrefix() {
+	return Variables.prefix;
+}
 
-	<cfset getMeData()>
+public function getServiceComponent(required string name) {
+	var result = Arguments.name;
 
-</cffunction>
+	if ( StructKeyExists(This,Arguments.name) ) {
+		result = This[Arguments.name];
+	}
 
-<cffunction name="getPrefix" access="public" returntype="string" output="no">
+	return result;
+}
 
-	<cfreturn Variables.prefix>
-</cffunction>
+public string function getComponentsList() {
+	var qComponentFiles = DirectoryList(path="#variables.me.dir#",listInfo="query",filter="*.cfc");
+	var sComponentFile = 0;
+	var comp = "";
+	var result = "";
 
-<cffunction name="getServiceComponent" access="public" returntype="any" output="no">
-	<cfargument name="name" type="string" required="true">
+	for ( sComponentFile in qComponentFiles ) {
+		comp = ListFirst(sComponentFile.name,".");
+		if (
+			ListLen(comp,"_") EQ 1
+			AND
+			comp NEQ variables.me.name
+			AND
+			comp NEQ variables.me.fullname
+			AND
+			NOT ListFindNoCase(result,comp)
+			AND
+			comp NEQ "Records"
+		) {
+			result = ListAppend(result,comp);
+		}
+	}
 
-	<cfset var result = arguments.name>
+	return result;
+}
 
-	<cfif StructKeyExists(This,arguments.name)>
-		<cfset result = This[arguments.name]>
-	</cfif>
-
-	<cfreturn result>
-</cffunction>
-
-<cffunction name="getComponentsList" access="public" returntype="string" output="false" hint="">
-
-	<cfset var qComponentFiles = 0>
-	<cfset var comp = "">
-	<cfset var result = "">
-
-	<cfdirectory directory="#variables.me.dir#" name="qComponentFiles" filter="*.cfc">
-
-	<cfloop query="qComponentFiles">
-		<cfset comp = ListFirst(name,".")>
-		<cfif
-				ListLen(comp,"_") EQ 1
-			AND	comp NEQ variables.me.name
-			AND	comp NEQ variables.me.fullname
-			AND	NOT ListFindNoCase(result,comp)
-			AND	comp NEQ "Records"
-		>
-			<cfset result = ListAppend(result,comp)>
-		</cfif>
-	</cfloop>
-
-	<cfreturn result>
-</cffunction>
+public struct function getComponentsObjects() {
+	if ( NOT StructKeyExists(Variables,"sComponents") ) {
+		Variables.sComponents = {};
+	}
+	return Variables.sComponents;
+}
+</cfscript>
 
 <cffunction name="getComponentTableName" access="public" returntype="string" output="false" hint="">
 	<cfargument name="Comp" type="any" required="true">
@@ -440,6 +450,7 @@
 	<cfinvoke component="#Arguments.path#" method="init" returnvariable="this.#Arguments.name#" ArgumentCollection="#Arguments#"></cfinvoke>
 
 	<cfset variables[Arguments.name] = This[Arguments.name]>
+	<cfset Variables.sComponents[Arguments.name] = This[Arguments.name]>
 
 </cffunction>
 

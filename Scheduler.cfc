@@ -1,173 +1,180 @@
-<!--- 1.5 Build 11 --->
-<!--- Last Updated: 2014-12-04 --->
 <!--- Created by Steve Bryant 2007-01-31 --->
-<cfcomponent displayname="Scheduler">
+<cfcomponent displayname="Scheduler" extends="com.sebtools.component">
+<cfscript>
+public function init(
+	required DataMgr,
+	ServiceFactory
+) {
 
-<cffunction name="init" access="public" returntype="any" output="no">
-	<cfargument name="DataMgr" type="any" required="yes">
-	<cfargument name="ServiceFactory" type="any" required="no">
+	initInternal(ArgumentCollection=Arguments);
 
-	<cfset variables.DataMgr = arguments.DataMgr>
-	<cfif StructKeyExists(arguments,"ServiceFactory")>
-		<cfset variables.ServiceFactory = arguments.ServiceFactory>
-	</cfif>
+	Variables.DataMgr.loadXml(getDbXml(),true,true);
 
-	<cfset variables.datasource = variables.DataMgr.getDatasource()>
-	<cfset variables.DataMgr.loadXml(getDbXml(),true,true)>
+	Variables.tasks = {};
+	Variables.sComponents = {};
+	Variables.sRunningTasks = {};
 
-	<cfset variables.tasks = StructNew()>
-	<cfset variables.sComponents = StructNew()>
-	<cfset variables.sRunningTasks = StructNew()>
+	// Initialize Date of run from last action if there is one.
+	Variables.DateLastRunTasks = getDateOfLastAction();
+	if ( NOT isDate(Variables.DateLastRunTasks) ) {
+		StructDelete(Variables,"DateLastRunTasks");
+	}
 
-	<!--- Initialize Date of run from last action if there is one. --->
-	<cfset Variables.DateLastRunTasks = getDateOfLastAction()>
-	<cfif NOT isDate(Variables.DateLastRunTasks)>
-		<cfset StructDelete(Variables,"DateLastRunTasks")>
-	</cfif>
+	return This;
+}
 
-	<cfreturn This>
-</cffunction>
+/**
+* I remove all tasks from the internal track of running tasks. **Use with Care** - only if you are sure none are running.
+*/
+public void function clearRunningTasks() {
+	Variables.sRunningTasks = {};
+}
+</cfscript>
 
 <cffunction name="createCFTask" access="public" returntype="void" output="no">
 	<cfargument name="URL" type="string" required="yes">
 	<cfargument name="Name" type="string" required="yes">
 	<cfargument name="interval" type="string" default="1800">
+	<cfargument name="runtime" type="date" default="#now()#">
 
-	<cfschedule action="UPDATE" task="#condenseTaskName(arguments.Name)#"  operation="HTTPRequest" url="#arguments.URL#" startdate="#now()#" starttime="12:00 AM" interval="#arguments.interval#">
+	<cfschedule action="UPDATE" task="#condenseTaskName(arguments.Name)#"  operation="HTTPRequest" url="#arguments.URL#" startdate="#Arguments.runtime#" starttime="12:00 AM" interval="#arguments.interval#">
 
 </cffunction>
 
-<cffunction name="DateAddInterval" access="public" returntype="string" output="no">
-	<cfargument name="interval" type="string" required="true">
-	<cfargument name="date" type="string" default="#now()#">
+<cfscript>
+public string function DateAddInterval(
+	required string interval,
+	string date="#now()#"
+) {
+	var result = arguments.date;
+	var timespans = "millisecond,second,minute,hour,day,week,month,quarter,year";
+	var dateparts = "l,s,n,h,d,ww,m,q,yyyy";
+	var num = 1;
+	var timespan = "";
+	var datepart = "";
+	var DayOf = "";
+	var OrdinationString = "";
+	var ordinals = "first,second,third,fourth,fifth,sixth,seventh,eighth,ninth,tenth,eleventh,twelfth";
+	var ordinal = "";
+	var numbers = "one,two,three,four,five,six,seven,eight,nine,ten,eleven,twelve";
+	var number = "";
+	var weekdays = "Sunday,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday";
+	var weekday = "";
+	var thisint = "";
+	var sNums = 0;
+	var isSubtraction = Left(Trim(arguments.interval),1) EQ "-";
+	var sub = "";
 
-	<cfset var result = arguments.date>
-	<cfset var timespans = "millisecond,second,minute,hour,day,week,month,quarter,year">
-	<cfset var dateparts = "l,s,n,h,d,ww,m,q,yyyy">
-	<cfset var num = 1>
-	<cfset var timespan = "">
-	<cfset var datepart = "">
-	<cfset var DayOf = "">
-	<cfset var OrdinationString = "">
-	<cfset var ordinals = "first,second,third,fourth,fifth,sixth,seventh,eighth,ninth,tenth,eleventh,twelfth">
-	<cfset var ordinal = "">
-	<cfset var numbers = "one,two,three,four,five,six,seven,eight,nine,ten,eleven,twelve">
-	<cfset var number = "">
-	<cfset var weekdays = "Sunday,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday">
-	<cfset var weekday = "">
-	<cfset var thisint = "">
-	<cfset var sNums = 0>
-	<cfset var isSubtraction = Left(Trim(arguments.interval),1) EQ "-">
-	<cfset var sub = "">
+	if ( NOT isDate(Arguments.date) ) {
+		return "";
+	}
 
-	<cfif NOT isDate(Arguments.date)>
-		<cfreturn "">
-	</cfif>
+	if ( isSubtraction ) {
+		arguments.interval = Trim(ReplaceNoCase(arguments.interval,"-","","ALL"));
+		sub = "-";
+	}
 
-	<cfif isSubtraction>
-		<cfset arguments.interval = Trim(ReplaceNoCase(arguments.interval,"-","","ALL"))>
-		<cfset sub = "-">
-	</cfif>
+	arguments.interval = REReplaceNoCase(arguments.interval,"\s+(and|plus)\b",",","ALL");
 
-	<cfset arguments.interval = REReplaceNoCase(arguments.interval,"\s+(and|plus)\b",",","ALL")>
+	if ( ListLen(arguments.interval) GT 1 ) {
+		for ( thisint in ListToArray(arguments.interval) ) {
+			result = DateAddInterval("#sub##thisint#",result);
+		}
+	} else {
+		arguments.interval = ReplaceNoCase(arguments.interval,"annually","yearly","ALL");
+		arguments.interval = ReReplaceNoCase(arguments.interval,"\b(\d+)(nd|rd|th)\b","\1","ALL");
+		sNums = ReFindNoCase("\b\d+\b",arguments.interval,1,true);
+		// Figure out number
+		if ( ArrayLen(sNums.pos) AND sNums.pos[1] GT 0 ) {
+			num = Mid(arguments.interval,sNums.pos[1],sNums.len[1]);
+		}
+		if ( ListFindNoCase(arguments.interval,"every"," ") ) {
+			arguments.interval = ListDeleteAt(arguments.interval,ListFindNoCase(arguments.interval,"every"," ")," ");
+		}
 
-	<cfif ListLen(arguments.interval) GT 1>
-		<cfloop list="#arguments.interval#" index="thisint">
-			<cfset result = DateAddInterval("#sub##thisint#",result)>
-		</cfloop>
-	<cfelse>
-		<cfset arguments.interval = ReplaceNoCase(arguments.interval,"annually","yearly","ALL")>
-		<cfset arguments.interval = ReReplaceNoCase(arguments.interval,"\b(\d+)(nd|rd|th)\b","\1","ALL")>
-		<cfset sNums = ReFindNoCase("\b\d+\b",arguments.interval,1,true)>
-		<!--- Figure out number --->
-		<cfif ArrayLen(sNums.pos) AND sNums.pos[1] GT 0>
-			<cfset num = Mid(arguments.interval,sNums.pos[1],sNums.len[1])>
-		</cfif>
-		<cfif ListFindNoCase(arguments.interval,"every"," ")>
-			<cfset arguments.interval = ListDeleteAt(arguments.interval,ListFindNoCase(arguments.interval,"every"," ")," ")>
-		</cfif>
+		// Day of the month/year
+		OrdinationString = REReplaceNoCase(arguments.interval,"\bsecond$","");// Making sure "every [other,ordinal] second" isn't considered as an ordinal interval
+		for ( ordinal in ListToArray(ordinals) ) {
+			if ( ReFindNoCase("#ordinal#\s+of\s+",OrdinationString) ) {
+				DayOf = ListFindNoCase(ordinals,ordinal);
+				OrdinationString = ReReplaceNoCase(OrdinationString,"#ordinal#\s+of\s+","");
+			}
+		}
 
-		<!--- Day of the month/year --->
-		<cfset OrdinationString = REReplaceNoCase(arguments.interval,"\bsecond$","")><!--- Making sure "every [other,ordinal] second" isn't considered as an ordinal interval --->
-		<cfloop list="#ordinals#" index="ordinal">
-			<cfif ReFindNoCase("#ordinal#\s+of\s+",OrdinationString)>
-				<cfset DayOf = ListFindNoCase(ordinals,ordinal)>
-				<cfset OrdinationString = ReReplaceNoCase(OrdinationString,"#ordinal#\s+of\s+","")>
-			</cfif>
-		</cfloop>
+		// Regular ordination
+		for ( ordinal in ListToArray(ordinals) ) {
+			if ( ListFindNoCase(OrdinationString,ordinal," ") ) {
+				num = num * ListFindNoCase(ordinals,ordinal);
+			}
+		}
+		for ( number in ListToArray(numbers) ) {
+			if ( ListFindNoCase(arguments.interval,number," ") ) {
+				num = num * ListFindNoCase(numbers,number);
+			}
+		}
+		if ( ListFindNoCase(arguments.interval,"other"," ") ) {
+			arguments.interval = ListDeleteAt(arguments.interval,ListFindNoCase(arguments.interval,"other"," ")," ");
+			num = num * 2;
+		}
+		// Check if day of week is specified
+		for ( weekday in ListToArray(weekdays) ) {
+			// Make sure user could pluralize the weekday and this would still work.
+			arguments.interval = ReplaceNoCase(arguments.interval,"#weekday#s",weekday,"ALL");
+			if ( ListFindNoCase(arguments.interval,weekday," ") ) {
+				// Make sure the date given is on the day of week specified (subtract days as needed)
+				arguments.date = DateAdd("d",- Abs( 7 - ListFindNoCase(weekdays,weekday) + DayOfWeek(arguments.date) ) MOD 7,arguments.date);
+				arguments.interval = ListDeleteAt(arguments.interval,ListFindNoCase(arguments.interval,weekday," ")," ");
+				// Make sure we are adding weeks
+				arguments.interval = ListAppend(arguments.interval,"week"," ");
+			}
+		}
 
-		<!--- Regular ordination --->
-		<cfloop list="#ordinals#" index="ordinal">
-			<cfif ListFindNoCase(OrdinationString,ordinal," ")>
-				<cfset num = num * ListFindNoCase(ordinals,ordinal)>
-			</cfif>
-		</cfloop>
-		<cfloop list="#numbers#" index="number">
-			<cfif ListFindNoCase(arguments.interval,number," ")>
-				<cfset num = num * ListFindNoCase(numbers,number)>
-			</cfif>
-		</cfloop>
-		<cfif ListFindNoCase(arguments.interval,"other"," ")>
-			<cfset arguments.interval = ListDeleteAt(arguments.interval,ListFindNoCase(arguments.interval,"other"," ")," ")>
-			<cfset num = num * 2>
-		</cfif>
-		<!--- Check if day of week is specified --->
-		<cfloop list="#weekdays#" index="weekday">
-			<!--- Make sure user could pluralize the weekday and this would still work. --->
-			<cfset arguments.interval = ReplaceNoCase(arguments.interval,"#weekday#s",weekday,"ALL")>
-			<cfif ListFindNoCase(arguments.interval,weekday," ")>
-				<!--- Make sure the date given is on the day of week specified (subtract days as needed) --->
-				<cfset arguments.date = DateAdd("d",- Abs( 7 - ListFindNoCase(weekdays,weekday) + DayOfWeek(arguments.date) ) MOD 7,arguments.date)>
-				<cfset arguments.interval = ListDeleteAt(arguments.interval,ListFindNoCase(arguments.interval,weekday," ")," ")>
-				<!--- Make sure we are adding weeks --->
-				<cfset arguments.interval = ListAppend(arguments.interval,"week"," ")>
-			</cfif>
-		</cfloop>
+		// Figure out timespan
+		if ( IsNumeric(arguments.interval) ) {
+            timespan = "second";
+        } else {
+            timespan = ListLast(arguments.interval," ");
+        }
 
-		<!--- Figure out timespan --->
-		<cfif IsNumeric(arguments.interval)>
-            <cfset timespan = "second">
-        <cfelse>
-            <cfset timespan = ListLast(arguments.interval," ")>
-        </cfif>
+		// Ditch ending "s" or "ly"
+		if ( Right(timespan,1) EQ "s" ) {
+			timespan = Left(timespan,Len(timespan)-1);
+		}
+		if ( Right(timespan,2) EQ "ly" ) {
+			timespan = Left(timespan,Len(timespan)-2);
+		}
+		if ( timespan EQ "dai" ) {
+			timespan = "day";
+		}
 
-		<!--- Ditch ending "s" or "ly" --->
-		<cfif Right(timespan,1) EQ "s">
-			<cfset timespan = Left(timespan,Len(timespan)-1)>
-		</cfif>
-		<cfif Right(timespan,2) EQ "ly">
-			<cfset timespan = Left(timespan,Len(timespan)-2)>
-		</cfif>
-		<cfif timespan EQ "dai">
-			<cfset timespan = "day">
-		</cfif>
+		if ( ListFindNoCase(timespans,timespan) ) {
+			datepart = ListGetAt(dateparts,ListFindNoCase(timespans,timespan));
+		} else {
+			throw(message="#timespan# is not a valid interval measurement.");
+		}
 
-		<cfif ListFindNoCase(timespans,timespan)>
-			<cfset datepart = ListGetAt(dateparts,ListFindNoCase(timespans,timespan))>
-		<cfelse>
-			<cfthrow message="#timespan# is not a valid interval measurement.">
-		</cfif>
+		result = DateAdd(datepart,"#sub##num#",arguments.date);
 
-		<cfset result = DateAdd(datepart,"#sub##num#",arguments.date)>
+		if ( Val(DayOf) ) {
+			result = CreateDateTime(Year(result),Month(result),DayOf,Hour(result),Minute(result),Second(result));
+		}
+	}
 
-		<cfif Val(DayOf)>
-			<cfset result = CreateDateTime(Year(result),Month(result),DayOf,Hour(result),Minute(result),Second(result))>
-		</cfif>
-	</cfif>
-
-	<cfreturn result>
-</cffunction>
+	return result;
+}
+</cfscript>
 
 <cffunction name="failsafe" access="public" returntype="void" output="no">
+	<cfargument name="runtime" type="date" default="#now()#">
 
 	<!--- So long as runTasks is called every three hours, then all is well. --->
-	<cfif NOT ( StructKeyExists(Variables,"DateLastRunTasks") AND DateDiff("h",Variables.DateLastRunTasks,now()) LTE 3 )>
+	<cfif NOT ( StructKeyExists(Variables,"DateLastRunTasks") AND DateDiff("h",Variables.DateLastRunTasks,Arguments.runtime) LTE 3 )>
 		<!--- Otherwise, raise the alerm and call the method to keep things running. --->
 		<cf_scaledAlert><cfoutput>
 		Scheduler (#CGI.SERVER_NAME#) runTasks hasn't run since <cfif isDate(Variables.DateLastRunTasks)>#DateFormat(Variables.DateLastRunTasks,'mmm d yyy')# at #TimeFormat(Variables.DateLastRunTasks,'hh:mm:ss tt')#<cfelse>it was loaded</cfif>.
 		Running now...
 		</cfoutput></cf_scaledAlert>
-		<cfset runTasks()>
+		<cfset runTasks(runtime=Arguments.runtime)>
 	</cfif>
 
 </cffunction>
@@ -191,366 +198,427 @@
 	</cfquery>
 
 	<cfreturn qLastAction.DateLastRun>
-
 </cffunction>
 
-<cffunction name="getTaskRecords" access="public" returntype="query" output="no">
+<cfscript>
+public query function getTaskRecords() {
 
-	<cfif StructKeyExists(Arguments,"TaskName")>
-		<cfset Arguments.TaskName = condenseTaskName(arguments.TaskName)>
-	</cfif>
+	if ( StructKeyExists(Arguments,"TaskName") ) {
+		Arguments.TaskName = condenseTaskName(arguments.TaskName);
+	}
 
-	<cfreturn variables.DataMgr.getRecords("schTasks",arguments)>
-</cffunction>
+	return variables.DataMgr.getRecords("schTasks",arguments);
+}
 
-<cffunction name="getTasks" access="public" returntype="struct" output="no">
+public struct function getTasks() {
 
-	<cfset loadAbandonedTasks()>
+	loadAbandonedTasks();
 
-	<cfreturn variables.tasks>
-</cffunction>
+	return variables.tasks;
+}
 
-<cffunction name="getTasksTruncated" access="public" returntype="struct" output="no">
+public struct function getTasksTruncated() {
+	var sResult = {};
+	var key = "";
+	var key2 = "";
 
-	<cfset var sResult = StructNew()>
-	<cfset var key = "">
-	<cfset var key2 = "">
+	loadAbandonedTasks();
 
-	<cfset loadAbandonedTasks()>
+	for ( key in variables.tasks ) {
+		sResult[key] = {};
+		for ( key2 in variables.tasks[key] ) {
+			if ( isSimpleValue(variables.tasks[key][key2]) ) {
+				sResult[key][key2] = variables.tasks[key][key2];
+			}
+		}
+	}
 
-	<cfloop collection="#variables.tasks#" item="key">
-		<cfset sResult[key] = StructNew()>
-		<cfloop collection="#variables.tasks[key]#" item="key2">
-			<cfif isSimpleValue(variables.tasks[key][key2])>
-				<cfset sResult[key][key2] = variables.tasks[key][key2]>
-			</cfif>
-		</cfloop>
-	</cfloop>
+	return sResult;
+}
 
-	<cfreturn sResult>
-</cffunction>
+public void function loadAbandonedTasks(date runtime="#now()#") {
+	// var qTasks = getTaskRecords(interval="once");
+	var qTasks = getTaskRecords();
+	var sSavedArgs = 0;
+	var aErrorMessages = [];
+	var ExpandedTaskName = "";
+	var sTask = 0;
 
-<cffunction name="loadAbandonedTasks" access="public" returntype="void" output="false">
-
-	<!--- <cfset var qTasks = getTaskRecords(interval="once")> --->
-	<cfset var qTasks = getTaskRecords()>
-	<cfset var sSavedArgs = 0>
-	<cfset var aErrorMessages = ArrayNew(1)>
-	<cfset var ExpandedTaskName = "">
-
-	<cfloop query="qTasks">
-		<cfset ExpandedTaskName = expandTaskName(Name=Name,jsonArgs=jsonArgs,TaskID=TaskID)>
-		<cfif
+	for ( sTask in qTasks ) {
+		ExpandedTaskName = expandTaskName(Name=sTask.Name,jsonArgs=sTask.jsonArgs,TaskID=sTask.TaskID);
+		if (
 				NOT StructKeyExists(variables.tasks,ExpandedTaskName)
-			AND	dateCreated GTE DateAdd("d",-1,now())
-		>
-			<cfif StructKeyExists(Variables,"ServiceFactory") AND NOT StructKeyExists(variables.sComponents,ComponentPath)>
-				<cftry>
-					<cfset setComponent(ComponentPath,Variables.ServiceFactory.getServiceByPath(ComponentPath))>
-				<cfcatch>
-				</cfcatch>
-				</cftry>
-			</cfif>
-			<cfif NOT StructKeyExists(variables.sComponents,ComponentPath)>
-				<cfset removeTask(Name)>
-				<cfset ArrayAppend(aErrorMessages,"The task #Name# has been deleted because the component specified by this task's component path (#ComponentPath#) is not available to Scheduler.")>
-			<cfelse>
-				<cfset variables.tasks[ExpandedTaskName] = StructNew()>
-				<cfset variables.tasks[ExpandedTaskName]["ComponentPath"] = ComponentPath>
-				<cfset variables.tasks[ExpandedTaskName]["Component"] = variables.sComponents[ComponentPath]>
-				<cfset variables.tasks[ExpandedTaskName]["MethodName"] = MethodName>
-				<cfset variables.tasks[ExpandedTaskName]["interval"] = "once">
-				<cfset variables.tasks[ExpandedTaskName]["Hours"] = Hours>
-				<cfset variables.tasks[ExpandedTaskName]["jsonArgs"] = jsonArgs>
-				<cfset variables.tasks[ExpandedTaskName]["name"] = ExpandedTaskName>
+			AND	sTask.dateCreated GTE DateAdd("d",-1,Arguments.runtime)
+		) {
+			if ( StructKeyExists(Variables,"ServiceFactory") AND NOT StructKeyExists(variables.sComponents,sTask.ComponentPath) ) {
+				try {
+					setComponent(sTask.ComponentPath,Variables.ServiceFactory.getServiceByPath(sTask.ComponentPath));
+				} catch ( any e ) {
 
-				<cfif jsonArgs CONTAINS "[[Complex Value Removed by Scheduler]]">
-					<cfset removeTask(Name)>
-					<cfset ArrayAppend(aErrorMessages,"Unable to retrieve complex arguments for #MethodName# method in the #Name# task. The task has been deleted.")>
-				<cfelse>
-					<!--- Load arguments from the json string in db and if not empty --->
-					<cfset sSavedArgs = DeserializeJSON( jsonArgs )>
-					<cfif StructCount( sSavedArgs ) GT 0>
-						<cfset variables.tasks[ExpandedTaskName]["Args"] = sSavedArgs>
-					</cfif>
-				</cfif>
-			</cfif>
-		</cfif>
-	</cfloop>
+				}
+			}
+			if ( NOT StructKeyExists(variables.sComponents,sTask.ComponentPath) ) {
+				removeTask(sTask.Name);
+				ArrayAppend(aErrorMessages,"The task #sTask.Name# has been deleted because the component specified by this task's component path (#sTask.ComponentPath#) is not available to Scheduler.");
+			} else {
+				variables.tasks[ExpandedTaskName] = {};
+				variables.tasks[ExpandedTaskName]["ComponentPath"] = sTask.ComponentPath;
+				variables.tasks[ExpandedTaskName]["Component"] = variables.sComponents[sTask.ComponentPath];
+				variables.tasks[ExpandedTaskName]["MethodName"] = sTask.MethodName;
+				variables.tasks[ExpandedTaskName]["interval"] = "once";
+				variables.tasks[ExpandedTaskName]["Hours"] = sTask.Hours;
+				variables.tasks[ExpandedTaskName]["jsonArgs"] = sTask.jsonArgs;
+				variables.tasks[ExpandedTaskName]["Priority"] = sTask.Priority;
+				variables.tasks[ExpandedTaskName]["name"] = ExpandedTaskName;
 
-	<!--- Now we can throw any errors since successful tasks have now been reloaded into variables scope --->
-	<cfif ArrayLen(aErrorMessages)>
-		<cfif ArrayLen(aErrorMessages) EQ 1>
-			<cfthrow message="#aErrorMessages[1]#" type="Scheduler">
-		<cfelse>
-			<cfthrow message="The following errors occurred when trying to load abandoned tasks." detail="#ArrayToList(aErrorMessages,';')#" type="Scheduler">
-		</cfif>
-	</cfif>
+				if ( sTask.jsonArgs CONTAINS "[[Complex Value Removed by Scheduler]]" ) {
+					removeTask(sTask.Name);
+					ArrayAppend(aErrorMessages,"Unable to retrieve complex arguments for #sTask.MethodName# method in the #sTask.Name# task. The task has been deleted.");
+				} else {
+					// Load arguments from the json string in db and if not empty
+					sSavedArgs = DeserializeJSON( sTask.jsonArgs );
+					if ( StructCount( sSavedArgs ) GT 0 ) {
+						variables.tasks[ExpandedTaskName]["Args"] = sSavedArgs;
+					}
+				}
+			}
+		}
+	}
 
-</cffunction>
+	// Now we can throw any errors since successful tasks have now been reloaded into variables scope
+	if ( ArrayLen(aErrorMessages) ) {
+		if ( ArrayLen(aErrorMessages) EQ 1 ) {
+			throw(message="#aErrorMessages[1]#",type="Scheduler");
+		} else {
+			throw(message="The following errors occurred when trying to load abandoned tasks.",detail="#ArrayToList(aErrorMessages,';')#",type="Scheduler");
+		}
+	}
 
-<cffunction name="removeTask" access="public" returntype="void" output="no">
-	<cfargument name="Name" type="string" required="yes">
+}
 
-	<cfset var qTask = getTaskNameRecord(Name=Arguments.Name,fieldlist="TaskID")>
-	<cfset var data = StructNew()>
+public void function removeTask(required string Name) {
+	var qTask = getTaskNameRecord(Name=Arguments.Name,fieldlist="TaskID");
+	var data = {};
 
-	<cfset data["TaskID"] = qTask.TaskID>
+	data["TaskID"] = qTask.TaskID;
 
-	<cfset StructDelete(variables.tasks, expandTaskName(arguments.Name,qTask.jsonargs,qTask.TaskID))>
-	<cfset variables.DataMgr.deleteRecord("schTasks",data)>
+	StructDelete(variables.tasks, expandTaskName(arguments.Name,qTask.jsonargs,qTask.TaskID));
+	variables.DataMgr.deleteRecord("schTasks",data);
 
-</cffunction>
+}
 
-<cffunction name="serializeArgsJSON" access="private" returntype="string" output="no">
-	<cfargument name="args" type="any" required="yes">
+private string function serializeArgsJSON(required args) {
+	var serializedJSON = "";
+	var argCount = 1;
+	var quotedKey = "";
+	var quotedValue = "";
+	var keyValuePair = "";
+	var key = "";
 
-	<cfset var serializedJSON = "">
-	<cfset var argCount = 1>
-	<cfset var quotedKey = "">
-	<cfset var quotedValue = "">
-	<cfset var keyValuePair = "">
-	<cfset var key = "">
+	for ( key in arguments.args ) {
+		quotedKey = ListQualify( key ,'"',",","CHAR");
+		if ( IsSimpleValue( args[ key ] ) ) {
+			quotedValue = ListQualify( args[ key ] ,'"',",","CHAR");
+		} else {
+			quotedValue = '"[[Complex Value Removed by Scheduler]]"';
+		}
+		keyValuePair = quotedKey & ":" & quotedValue;
+		if ( argCount NEQ 1 ) {
+			serializedJSON &= "," & keyValuePair;
+		} else {
+			serializedJSON &= keyValuePair;
+		}
+		argCount = argCount + 1;
+	}
 
-	<cfloop collection="#arguments.args#" item="key">
-		<cfset quotedKey = ListQualify( key ,'"',",","CHAR")>
-		<cfif IsSimpleValue( args[ key ] )>
-			<cfset quotedValue = ListQualify( args[ key ] ,'"',",","CHAR")>
-		<cfelse>
-			<cfset quotedValue = '"[[Complex Value Removed by Scheduler]]"'>
-		</cfif>
-		<cfset keyValuePair = quotedKey & ":" & quotedValue>
-		<cfif ( argCount NEQ 1 )>
-			<cfset serializedJSON &= "," & keyValuePair>
-		<cfelse>
-			<cfset serializedJSON &= keyValuePair>
-		</cfif>
-		<cfset argCount = argCount + 1>
-	</cfloop>
+	return "{" & serializedJSON & "}";
+}
 
-	<cfreturn "{" & serializedJSON & "}">
-</cffunction>
+/**
+* @ComponentPath The path to your component (example com.sebtools.NoticeMgr).
+*/
+public void function setComponent(
+	required string ComponentPath,
+	required Component
+) {
 
-<cffunction name="setComponent" access="public" returntype="void" output="no">
-	<cfargument name="ComponentPath" type="string" required="yes" hint="The path to your component (example com.sebtools.NoticeMgr).">
-	<cfargument name="Component" type="any" required="yes">
+	Variables.sComponents[arguments.ComponentPath] = Arguments.Component;
 
-	<cfset variables.sComponents[arguments.ComponentPath] = arguments.Component>
+}
 
-</cffunction>
+/**
+* @ComponentPath The path to your component (example com.sebtools.NoticeMgr).
+* @hours The hours in which the task can be run.
+* @weekdays The week days on which the task can be run.
+*/
+public numeric function setTask(
+	required string Name,
+	required string ComponentPath,
+	required Component,
+	required string MethodName,
+	required string interval,
+	struct args,
+	string hours,
+	string weekdays,
+	numeric Priority
+) {
+	var qTask = 0;
+	var ExpandedTaskName = "";
 
-<cffunction name="setTask" access="public" returntype="numeric" output="no">
-	<cfargument name="Name" type="string" required="yes">
-	<cfargument name="ComponentPath" type="string" required="yes" hint="The path to your component (example com.sebtools.NoticeMgr).">
-	<cfargument name="Component" type="any" required="yes">
-	<cfargument name="MethodName" type="string" required="yes">
-	<cfargument name="interval" type="string" required="yes">
-	<cfargument name="args" type="struct" required="no">
-	<cfargument name="hours" type="string" required="no" hint="The hours in which the task can be run.">
-	<cfargument name="weekdays" type="string" required="no" hint="The week days on which the task can be run.">
+	if ( Len(Arguments.ComponentPath) GT 50 ) {
+		Arguments.ComponentPath = Right(Arguments.ComponentPath,50);
+	}
 
-	<cfset var qTask = 0>
-	<cfset var ExpandedTaskName = "">
+	if ( StructKeyExists(arguments,"hours") ) {
+		arguments.hours = expandHoursList(arguments.hours);
+	}
 
-	<cfif Len(Arguments.ComponentPath) GT 50>
-		<cfset Arguments.ComponentPath = Right(Arguments.ComponentPath,50)>
-	</cfif>
+	if ( StructKeyExists( arguments, "args" ) ) {
+		arguments.jsonArgs = serializeArgsJSON( arguments.args );
+	} else {
+		arguments.jsonArgs = "{}"; // compliant empty json string
+	}
 
-	<cfif StructKeyExists(arguments,"hours")>
-		<cfset arguments.hours = expandHoursList(arguments.hours)>
-	</cfif>
+	qTask = getTaskNameRecord(ArgumentCollection=arguments);
+	if ( qTask.RecordCount ) {
+		arguments.TaskID = qTask.TaskID;
+	} else {
+		arguments.TaskID = variables.DataMgr.saveRecord("schTasks",arguments);
+	}
 
-	<cfif StructKeyExists( arguments, "args" )>
-		<cfset arguments.jsonArgs = serializeArgsJSON( arguments.args ) />
-	<cfelse>
-		<cfset arguments.jsonArgs = "{}"/> <!--- compliant empty json string --->
-	</cfif>
+	ExpandedTaskName = expandTaskName(arguments.Name,arguments.jsonArgs,arguments.TaskID);
 
-	<cfset qTask = getTaskNameRecord(ArgumentCollection=arguments)>
-	<cfif qTask.RecordCount>
-		<cfset arguments.TaskID = qTask.TaskID>
-	<cfelse>
-		<cfset arguments.TaskID = variables.DataMgr.saveRecord("schTasks",arguments)>
-	</cfif>
-
-	<cfset ExpandedTaskName = expandTaskName(arguments.Name,arguments.jsonArgs,arguments.TaskID)>
-
-	<!--- Make sure task of this name doesn't exist for another component. --->
-	<cfif StructKeyExists(variables.tasks,ExpandedTaskName)>
-		<cfif
+	// Make sure task of this name doesn't exist for another component.
+	if ( StructKeyExists(variables.tasks,ExpandedTaskName) ) {
+		if (
 				( variables.tasks[ExpandedTaskName].ComponentPath NEQ arguments.ComponentPath )
 			OR	( variables.tasks[ExpandedTaskName].MethodName NEQ arguments.MethodName )
-		>
-			<cfthrow message="A task using this name already exists for another component method." type="Scheduler" errorcode="NameExists">
-		</cfif>
-	</cfif>
+		) {
+			throw(message="A task using this name already exists for another component method.",type="Scheduler",errorcode="NameExists");
+		}
+	}
 
-	<!---
+	/*
 	Set the component even if we have it to ensure that we are always using the newest version of a component.
 	The component could have gotten loaded while loading missing tasks, using an old copy.
-	--->
-	<cfif isObject(arguments.Component)>
-		<cfset setComponent(arguments.ComponentPath,arguments.Component)>
-	</cfif>
+	*/
+	if ( isObject(arguments.Component) ) {
+		setComponent(arguments.ComponentPath,arguments.Component);
+	}
 
-	<cfset variables.tasks[ExpandedTaskName] = arguments>
+	variables.tasks[ExpandedTaskName] = arguments;
 
-	<cfreturn arguments.TaskID>
-</cffunction>
+	return arguments.TaskID;
+}
 
-<cffunction name="rerun" access="public" returntype="any" output="no">
-	<cfargument name="Name" type="string" required="yes">
+public function rerun(required string Name) {
+	var qTask = getTaskNameRecord(arguments.Name);
+	var sTaskUpdate = {};
 
-	<cfset var qTask = getTaskNameRecord(arguments.Name)>
-	<cfset var sTaskUpdate = StructNew()>
+	sTaskUpdate["TaskID"] = qTask.TaskID;
+	sTaskUpdate["rerun"] = 1;
+	variables.DataMgr.updateRecord("schTasks",sTaskUpdate);
 
-	<cfset sTaskUpdate["TaskID"] = qTask.TaskID>
-	<cfset sTaskUpdate["rerun"] = 1>
-	<cfset variables.DataMgr.updateRecord("schTasks",sTaskUpdate)>
+}
 
-</cffunction>
+public function runTask(
+	required string Name,
+	boolean remove="false",
+	date runtime="#now()#"
+) {
+	var sTask = {};
+	var qTask = getTaskNameRecord(arguments.Name);
+	var ExpandedTaskName = expandTaskName(arguments.Name);
+	var sTaskUpdate = {};
+	var sAction = {};
+	var key = "";
 
-<cffunction name="runTask" access="public" returntype="any" output="no">
-	<cfargument name="Name" type="string" required="yes">
-	<cfargument name="remove" type="boolean" default="false">
+	var TimeMarkBegin = 0;
+	var TimeMarkEnd = 0;
 
-	<cfset var sTask = StructNew()>
-	<cfset var qTask = getTaskNameRecord(arguments.Name)>
-	<cfset var ExpandedTaskName = expandTaskName(arguments.Name)>
-	<cfset var sTaskUpdate = StructNew()>
-	<cfset var sAction = StructNew()>
-	<cfset var key = "">
+	if ( qTask.RecordCount ) {
+		if ( StructKeyExists(variables.sRunningTasks,ExpandedTaskName) ) {
+			return false;
+		}
 
-	<cfset var TimeMarkBegin = 0>
-	<cfset var TimeMarkEnd = 0>
+		variables.sRunningTasks[ExpandedTaskName] = Arguments.runtime;
 
-	<cfif qTask.RecordCount>
-		<cfif StructKeyExists(variables.sRunningTasks,ExpandedTaskName)>
-			<cfreturn false>
-		</cfif>
+		sTaskUpdate["TaskID"] = qTask.TaskID;
+		sTaskUpdate["rerun"] = 0;
+		variables.DataMgr.updateRecord("schTasks",sTaskUpdate);
 
-		<cfset variables.sRunningTasks[ExpandedTaskName] = now()>
+		sAction["TaskID"] = qTask.TaskID;
+		sAction["ActionID"] = variables.DataMgr.insertRecord("schActions",sAction,"insert");
 
-		<cfset sTaskUpdate["TaskID"] = qTask.TaskID>
-		<cfset sTaskUpdate["rerun"] = 0>
-		<cfset variables.DataMgr.updateRecord("schTasks",sTaskUpdate)>
+		for ( key in variables.tasks[ExpandedTaskName] ) {
+			sTask[key] = variables.tasks[ExpandedTaskName][key];
+		}
 
-		<cfset sAction["TaskID"] = qTask.TaskID>
-		<cfset sAction["ActionID"] = variables.DataMgr.insertRecord("schActions",sAction,"insert")>
+		if ( arguments.remove ) {
+			removeTask(arguments.Name);
+		}
 
-		<cfloop collection="#variables.tasks[ExpandedTaskName]#" item="key">
-			<cfset sTask[key] = variables.tasks[ExpandedTaskName][key]>
-		</cfloop>
+		TimeMarkBegin = getTickCount();
+		sAction.DateRun = Arguments.runtime;
+		sAction.DateRunStart = Arguments.runtime;
+		try {
+			if ( StructKeyExists(sTask,"args") ) {
+				sAction.ReturnVar = invoke(sTask.Component,sTask.MethodName,sTask.args);
+			} else {
+				sAction.ReturnVar = invoke(sTask.Component,sTask.MethodName);
+			}
+			TimeMarkEnd = getTickCount();
+			sAction.Success = true;
+		} catch ( any e ) {
+			StructDelete(variables.sRunningTasks,ExpandedTaskName);
+			sAction.Success = false;
+			TimeMarkEnd = getTickCount();
+			sAction.Seconds = GetSecondsDiff(TimeMarkBegin,TimeMarkEnd);
+			if ( StructKeyExists(e,"Message") ) {
+				sAction.ErrorMessage = e.Message;
+			} else {
+				sAction.ErrorMessage = "";
+			}
+			if ( StructKeyExists(e,"Detail") ) {
+				sAction.ErrorDetail = e.Detail;
+			} else {
+				sAction.ErrorDetail = "";
+			}
+			sAction.DateRunEnd = Arguments.runtime;
+			sAction = variables.DataMgr.truncate("schActions",sAction);
+			variables.DataMgr.updateRecord("schActions",sAction);
+			rethrow;
+		}
 
-		<cfif arguments.remove>
-			<cfset removeTask(arguments.Name)>
-		</cfif>
+		sAction.Seconds = GetSecondsDiff(TimeMarkBegin,TimeMarkEnd);
 
-		<cfset TimeMarkBegin = getTickCount()>
-		<cftry>
-			<cfinvoke returnvariable="sAction.ReturnVar" component="#sTask.Component#" method="#sTask.MethodName#">
-				<cfif StructKeyExists(sTask,"args")>
-					<cfinvokeargument name="argumentcollection" value="#sTask.args#">
-				</cfif>
-			</cfinvoke>
-			<cfset TimeMarkEnd = getTickCount()>
-			<cfset sAction.Success = true>
-		<cfcatch>
-			<cfset StructDelete(variables.sRunningTasks,ExpandedTaskName)>
-			<cfset sAction.Success = false>
-			<cfset TimeMarkEnd = getTickCount()>
-			<cfset sAction.Seconds = GetSecondsDiff(TimeMarkBegin,TimeMarkEnd)>
-			<cfset sAction.ErrorMessage = CFCATCH.Message>
-			<cfset sAction.ErrorDetail = CFCATCH.Detail>
-			<cfset sAction.DateRunEnd = now()>
-			<cfset sAction = variables.DataMgr.truncate("schActions",sAction)>
-			<cfset variables.DataMgr.updateRecord("schActions",sAction)>
-			<cfrethrow>
-		</cfcatch>
-		</cftry>
+		sAction.DateRunEnd = Arguments.runtime;
+		sAction = variables.DataMgr.truncate("schActions",sAction);
+		variables.DataMgr.updateRecord("schActions",sAction);
 
-		<cfset sAction.Seconds = GetSecondsDiff(TimeMarkBegin,TimeMarkEnd)>
+		StructDelete(variables.sRunningTasks,ExpandedTaskName);
+	}
 
-		<cfset sAction.DateRunEnd = now()>
-		<cfset sAction = variables.DataMgr.truncate("schActions",sAction)>
-		<cfset variables.DataMgr.updateRecord("schActions",sAction)>
+}
 
-		<cfset StructDelete(variables.sRunningTasks,ExpandedTaskName)>
-	</cfif>
+public void function runTasks(boolean force="false",date runtime="#now()#") {
+	var aTasks = 0;
+	var aPriorities = 0;
+	var ii = 0;
+	var pp = 0;
+	var priority = 0;
+	var sRunTask = 0;
 
-</cffunction>
+	// Don't do this more than once every 3 minutes
+	if (
+		Arguments.force
+		OR
+		NOT (
+			StructKeyExists(Variables,"DateLastRunTasks")
+			AND
+			DateDiff("n",Variables.DateLastRunTasks,Arguments.runtime) LTE 3
+		)
+	) {
 
-<cffunction name="runTasks" access="public" returntype="void" output="no">
-	<cfargument name="force" type="boolean" default="false">
+		Variables.DateLastRunTasks = Arguments.runtime;
 
-	<cfset var aTasks = 0>
-	<cfset var ii = 0>
+		aTasks = getCurrentTasks(Arguments.runtime);
+		aPriorities = getPriorities();
 
-	<!--- Don't do this more than once every 3 minutes --->
-	<cfif Arguments.force OR NOT ( StructKeyExists(Variables,"DateLastRunTasks") AND DateDiff("n",Variables.DateLastRunTasks,now()) LTE 3 )>
+		for ( pp=1; pp LTE ArrayLen(aPriorities); pp++ ) {
+			priority = aPriorities[pp];	
+			for ( ii=1; ii LTE ArrayLen(aTasks); ii++ ) {
+				if (
+					StructKeyExists(aTasks[ii],"name")
+					AND
+					NOT StructKeyExists(variables.sRunningTasks,aTasks[ii].name)
+					AND
+					( Val(aTasks[ii].Priority) EQ Val(priority) )
+				) {
+					sRunTask = {
+						Name=ExpandTaskName(aTasks[ii].name,aTasks[ii].jsonArgs),
+						runtime=Arguments.runtime
+					};
+					if ( aTasks[ii].interval EQ "once" ) {
+						sRunTask["remove"] = true;
+					}
+					runTask(ArgumentCollection=sRunTask);
+				}
+			}
+		}
 
-		<cfset Variables.DateLastRunTasks = now()>
 
-		<cfset aTasks = getCurrentTasks(now())>
+	}
 
-		<cfloop index="ii" from="1" to="#ArrayLen(aTasks)#" step="1">
-			<cfif StructKeyExists(aTasks[ii],"name") AND NOT StructKeyExists(variables.sRunningTasks,aTasks[ii].name)>
-				<cfif aTasks[ii].interval EQ "once">
-					<cfset runTask(ExpandTaskName(aTasks[ii].name,aTasks[ii].jsonArgs),true)>
-				<cfelse>
-					<cfset runTask(ExpandTaskName(aTasks[ii].name,aTasks[ii].jsonArgs))>
-				</cfif>
-			</cfif>
-		</cfloop>
+}
 
-	</cfif>
+public struct function getComponentDefs() {
 
-</cffunction>
+	return variables.sComponents;
+}
 
-<cffunction name="getComponentDefs" access="public" returntype="struct" output="false">
+public array function getCurrentTasks(date runtime="#now()#") {
+	var aResults = [];
+	var task = "";
 
-	<cfreturn variables.sComponents>
-</cffunction>
+	loadAbandonedTasks();
 
-<cffunction name="getCurrentTasks" access="public" returntype="array" output="false">
-	<cfargument name="runtime" type="date" default="#now()#">
+	// Look at each task
+	for ( task in Variables.tasks ) {
+		if ( isRunnableTask(ExpandTaskName(task,variables.tasks[task].jsonargs),arguments.runtime) ) {
+			ArrayAppend(aResults,variables.tasks[task]);
+		}
+	}
 
-	<cfset var aResults = ArrayNew(1)>
-	<cfset var task = "">
+	return aResults;
+}
 
-	<cfset loadAbandonedTasks()>
+public struct function getIncompleteTasks() {
+	var sResult = {};
 
-	<!--- Look at each task --->
-	<cfloop collection="#variables.tasks#" item="task">
-		<cfif isRunnableTask(ExpandTaskName(task,variables.tasks[task].jsonargs),arguments.runtime)>
-			<cfset ArrayAppend(aResults,variables.tasks[task])>
-		</cfif>
-	</cfloop>
+	StructAppend(sResult,Variables.Tasks);
 
-	<cfreturn aResults>
-</cffunction>
+	StructAppend(sResult,Variables.sRunningTasks);
 
-<cffunction name="getIncompleteTasks" access="public" returntype="struct" output="false">
+	return sResult;
+}
 
-	<cfset var sResult = {}>
+public array function getPriorities() {
+	var task = "";
+	var sPriorities = {};
 
-	<cfset StructAppend(sResult,Variables.Tasks)>
+	for ( task in Variables.tasks ) {
+		if ( StructKeyExists(Variables.tasks[task],"Priority") ) {
+			sPriorities[Val(Variables.tasks[task].Priority)] = Variables.tasks[task].Priority;
+		}
+	}
 
-	<cfset StructAppend(sResult,Variables.sRunningTasks)>
+	return ListToArray(ListSort(StructKeyList(sPriorities),"numeric","desc"));;
+}
 
-	<cfreturn sResult>
-</cffunction>
+public struct function getRunningTasks() {
+	return StructCopy(Variables.sRunningTasks);
+}
 
-<cffunction name="getIntervalFromDate" access="public" returntype="date" output="false" hint="I return the date since which a task would have been run to be within the current interval defined for it.">
-	<cfargument name="Name" type="string" required="yes">
-	<cfargument name="runtime" type="date" default="#now()#">
+/**
+* I tell whether there are tasks currently running.
+*/
+public boolean function hasRunningTasks() {
+	return BooleanFormat(StructCount(Variables.sRunningTasks) GT 0);
+}
 
-	<cfset var sIntervals = getIntervals()>
-	<cfset var adjustedtime = DateAdd("n",10,arguments.runtime)><!--- Tasks run every 15 minutes at most and we need a margin of error for date checks. --->
-	<cfset var result = now()>
-	<cfset var task = expandTaskName(Arguments.Name)>
+/**
+* I return the date since which a task would have been run to be within the current interval defined for it.
+*/
+public void function getIntervalFromDate(
+	required string Name,
+	date runtime="#now()#"
+) {
+	var sIntervals = getIntervals();
+	var adjustedtime = DateAdd("n",10,arguments.runtime);// Tasks run every 15 minutes at most and we need a margin of error for date checks.
+	var result = Arguments.runtime;
+	var task = expandTaskName(Arguments.Name);
 
-	<cfscript>
 	// If the interval is numeric, check by the number of seconds
 	if ( isNumeric(variables.tasks[task].interval) AND variables.tasks[task].interval GT 0 ) {
 		adjustedtime = DateAdd("s",Int(variables.tasks[task].interval/10),arguments.runtime);
@@ -577,215 +645,609 @@
 	} else {
 		result = DateAdd("s", -3600, adjustedtime);
 	}
-	</cfscript>
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="hasRunWithinInterval" access="public" returntype="boolean" output="false" hint="I check to see if the given task has already run within the period of the interval defined for it.">
-	<cfargument name="interval" type="string" required="yes">
-	<cfargument name="lastrun" type="date" required="yes">
-	<cfargument name="runtime" type="date" default="#now()#">
+public query function getLastRunAction(
+	required numeric TaskID,
+	string fields="DateRun"
+) {
 
-	<cfreturn ( DateAddInterval(Arguments.interval,Arguments.lastrun) GT Arguments.runtime )>
-</cffunction>
+	return Variables.DataMgr.getRecords(tablename="schActions",data={TaskID=Arguments.TaskID},fieldlist=Arguments.fields,orderby='ActionID DESC',maxrows=1);
+}
 
-<cffunction name="hasTaskRunWithinInterval" access="public" returntype="boolean" output="false" hint="I check to see if the given task has already run within the period of the interval defined for it.">
-	<cfargument name="Name" type="string" required="yes">
-	<cfargument name="runtime" type="date" default="#now()#">
-	<cfargument name="lastrun" type="date" required="false">
+public any function getLastRunDate(
+	required numeric TaskID
+) {
+	var qLastRun = getLastRunAction(Arguments.TaskID);
 
-	<cfset var qLastRun = 0>
-	<cfset var qTask = getTaskNameRecord(Arguments.Name)>
+	if ( isDate(qLastRun.DateRun) ) {
+		return qLastRun.DateRun;
+	}
+}
 
-	<cfif Len(variables.datasource) AND NOT StructKeyExists(Arguments,"lastrun")>
-		<!--- See if the task has already been run within its interval --->
-		<cfquery name="qLastRun" datasource="#variables.datasource#">
-		SELECT	#variables.DataMgr.getMaxRowsPrefix(1)# DateRun
-		FROM	schActions
-		WHERE	TaskID = <cfqueryparam value="#Val(qTask.TaskID)#" cfsqltype="CF_SQL_INTEGER">
-		ORDER BY ActionID DESC
-		#variables.DataMgr.getMaxRowsSuffix(1)#
-		</cfquery>
-		<cfif isDate(qLastRun.DateRun)>
-			<cfset Arguments.lastrun = qLastRun.DateRun>
-		</cfif>
-	</cfif>
+/**
+* I check to see if the given task has already run within the period of the interval defined for it. 
+*/
+public boolean function hasRunWithinInterval(
+	required string interval,
+	required date lastrun,
+	date runtime,
+	string weekdays="",
+	string hours=""
+) {
+	var NextRunDate = DateAddInterval(Arguments.interval,Arguments.lastrun);
+	var EffectiveIntervalHours = DateDiff("h",Arguments.lastrun,NextRunDate);
+	var BlockLength = 0;
+	var result = false;
 
-	<cfif StructKeyExists(Arguments,"lastrun")>
-		<cfreturn hasRunWithinInterval(qTask.interval,Arguments.lastrun,Arguments.runtime)>
-	</cfif>
+	//Atttempt to bump back to original weekday
+	//Only needed if now is in the timeslot, but it last ran outside of it
+	if (
+		Len(Arguments.weekdays)
+		AND
+		ListFindNoCase(Arguments.weekdays,DayOfWeek(Arguments.runtime))
+		AND
+		NOT ListFindNoCase(Arguments.weekdays,DayOfWeek(Arguments.lastrun))
+	) {
+		BlockLength = BlockLengthDays(Arguments.weekdays,Arguments.runtime);
+		//If effective interval is greater than the amount of time in the last bloack, then back up the NextRunDate a bit
+		if (
+			BlockLength GT 0
+			AND
+			( EffectiveIntervalHours GT ( BlockLength * 24 ) )
+		) {
+			NextRunDate = DateAdd("d", -BlockLength, NextRunDate);
+		}
+	}
 
-	<cfreturn false>
-</cffunction>
+	//Atttempt to bump back to original hour
+	//Only needed if now is in the timeslot, but it last ran outside of it
+	if (
+		Len(Arguments.hours)
+		AND
+		ListFindNoCase(Arguments.hours,Hour(Arguments.runtime))
+		AND
+		NOT ListFindNoCase(Arguments.hours,Hour(Arguments.lastrun))
+	) {
+		BlockLength = BlockLengthHours(Arguments.hours,Arguments.runtime);
+		//If effective interval is greater than the amount of time in the last bloack, then back up the NextRunDate a bit
+		if (
+			BlockLength GT 0
+			AND
+			( EffectiveIntervalHours GT BlockLength )
+		) {
+			NextRunDate = DateAdd("h", -BlockLength, NextRunDate);
+		}
+	}
 
-<cffunction name="isRunnableTask" access="public" returntype="boolean" output="false">
-	<cfargument name="Name" type="string" required="yes">
-	<cfargument name="runtime" type="date" default="#now()#">
+	return ( NextRunDate GT Arguments.runtime );
+}
 
-	<cfset var result = false>
-	<cfset var qTask = getTaskNameRecord(Name=Arguments.Name,fieldlist="rerun")>
-	<cfset var task = expandTaskName(Arguments.Name)>
+/**
+* I check to see if the given task has already run within the period of the interval defined for it.
+*/
+public boolean function hasTaskRunWithinInterval(
+	required string Name,
+	date runtime="#now()#"
+	date lastrun
+) {
+	var qTask = getTaskNameRecord(Arguments.Name);
 
-	<!--- If hours are specified, make sure current time is in that list of hours --->
-	<cfif qTask.rerun IS true>
-		<cfset result = true>
-	<cfelseif NOT hasTaskRunWithinInterval(Arguments.Name,Arguments.runtime)>
-		<cfset result = true>
-	</cfif>
+	if ( Len(variables.datasource) AND NOT StructKeyExists(Arguments,"lastrun") ) {
+		// See if the task has already been run within its interval
+		Arguments.lastrun = getLastRunDate(qTask.TaskID);
+	}
 
-	<cfreturn result>
-</cffunction>
+	if ( StructKeyExists(Arguments,"lastrun") ) {
+		return hasRunWithinInterval(
+			interval=qTask.interval,
+			lastrun=Arguments.lastrun,
+			runtime=Arguments.runtime,
+			weekdays=qTask.weekdays,
+			hours=qTask.hours
+		);
+	}
 
-<cffunction name="notifyComponent" access="public" returntype="void" output="false">
-	<cfargument name="ComponentPath" type="string" required="yes" hint="The path to your component (example com.sebtools.NoticeMgr).">
-	<cfargument name="Component" type="any" required="yes">
+	return false;
+}
 
-	<cfset variables.sComponents[arguments.ComponentPath] = arguments.Component>
+public boolean function isRunnableTask(
+	required string Name,
+	date runtime="#now()#"
+) {
+	var result = false;
+	var loc = {};
 
-</cffunction>
+	loc.qTask = getTaskNameRecord(Name=Arguments.Name,fieldlist="rerun,interval,weekdays,hours");
+	loc.task = expandTaskName(Arguments.Name);
+	loc.lastrun = getLastRunDate(loc.qTask.TaskID);
+	
+	if ( loc.qTask.rerun IS true ) {
+		result = true;
+	} else if ( NOT hasTaskRunWithinInterval(Arguments.Name,Arguments.runtime) ) {
+		
+		result = isInTimeSlot(
+			weekdays=loc.qTask.weekdays,
+			hours=loc.qTask.hours,
+			runtime=Arguments.runtime
+		);
 
-<cffunction name="condenseTaskName" access="private" returntype="string" output="no" hint="I return the TaskName in its condensed form, that is just the task name itself.">
-	<cfargument name="Name" type="string" required="true">
+		if ( StructKeyExists(loc,"lastrun") AND NOT result ) {
+			result = isInTimeSlotAdjusted(
+				interval=loc.qTask.interval,
+				lastrun=loc.lastrun,
+				weekdays=loc.qTask.weekdays,
+				hours=loc.qTask.hours,
+				runtime=Arguments.runtime
+			);
+		}
 
-	<!--- SEB: This is the same as ListFirst(Arguments.Name,":") except that it allows for TaskNames that contain ":". --->
-	<cfreturn ReReplaceNoCase(Arguments.Name,":\d+$","")>
-</cffunction>
+	}
 
-<cffunction name="expandTaskName" access="private" returntype="string" output="no" hint="I return the TaskName in its expanded form - including the TaskID.">
-	<cfargument name="Name" type="string" required="true">
-	<cfargument name="jsonArgs" type="string" required="false">
-	<cfargument name="TaskID" type="string" required="false">
+	return result;
+}
 
-	<cfset var result = Arguments.Name>
-	<cfset var qTask = 0>
-	<cfset var sRecord = 0>
+public boolean function isInTimeSlot(
+	string weekdays="",
+	string hours="",
+	date runtime="#now()#"
+) {
+	var result = true;
 
-	<!--- Only take action if the name doesn't already match the expanded form --->
-	<cfif NOT isExpandedForm(Arguments.Name)>
-		<cfif NOT StructKeyExists(Arguments,"TaskID")>
-			<cfset sRecord = StructNew()>
-			<cfset sRecord["Name"] = Arguments.Name>
-			<cfset sRecord["fieldlist"] = "TaskID">
-			<cfif StructKeyExists(Arguments,"jsonArgs")>
-				<cfset sRecord["jsonArgs"] = Arguments.jsonArgs>
-			</cfif>
-			<cfset qTask = getTaskNameRecord(ArgumentCollection=sRecord)>
-			<cfif qTask.RecordCount EQ 1>
-				<cfset Arguments.TaskID = qTask.TaskID>
-				<!--- <cfif NOT StructKeyExists(variables.tasks,"#Arguments.Name#:#qTask.TaskID#")>
-					<cfset result = "#Arguments.Name#:#qTask.TaskID#">
-				<cfelse>
-					<cfthrow message="Unable to uniquely identify the task #Arguments.Name#." type="Scheduler" errorcode="NoUniqueTaskFound">
-				</cfif> --->
-			<cfelse>
-				<cfthrow message="The task record for #Arguments.Name# was not found." type="Scheduler" errorcode="NoTaskFound">
-			</cfif>
-		</cfif>
-		<cfset result = "#Arguments.Name#:#Arguments.TaskID#">
-	</cfif>
+	// If weekdays are specified, make sure current day is in that list of weekdays
+	if (
+		Len(Arguments.weekdays)
+		AND
+		NOT ListFindNoCase(Arguments.weekdays,DayofWeekAsString(DayOfWeek(Arguments.runtime)))
+	) {
+		result = false;
+	}
 
-	<cfreturn result>
-</cffunction>
+	// If hours are specified, make sure current time is in that list of hours
+	if (
+		Len(Arguments.hours)
+		AND
+		NOT ListFindNoCase(Arguments.hours,Hour(arguments.runtime))
+	) {
+		result = false;
+	}
 
-<cffunction name="splitTaskName" access="private" returntype="struct" output="no" hint="I return a structure of values from a TaskName.">
-	<cfargument name="Name" type="string" required="true">
+	return result;
+}
 
-	<cfset var sResult = StructNew()>
+private boolean function isInTimeSlotAdjusted(
+	required string interval,
+	required date lastrun,
+	string weekdays="",
+	string hours=""
+) {
+	var NextRunDate = DateAddInterval(Arguments.interval,Arguments.lastrun);
+	var EffectiveIntervalHours = DateDiff("h",Arguments.lastrun,NextRunDate);
+	var BlockLength = 0;
+	var result = false;
+	
+	//If Interval has a weekdays in it,but runtime isn't in hours, then see if we need to back up the next run time a little.
+	if (
+		Len(Arguments.weekdays)
+		AND
+		NOT ListFindNoCase(Arguments.weekdays,DayOfWeek(Arguments.runtime))
+	) {
+		BlockLength = BlockLengthDays(Arguments.weekdays,Arguments.lastrun);
+		//If effective interval is greater than the amount of time in the last bloack, then back up the runtim a bit
+		if (
+			BlockLength GT 0
+			AND
+			( EffectiveIntervalHours GT ( BlockLength * 24 ) )
+		) {
+			Arguments.runtime = DateAdd("d", -BlockLength, Arguments.runtime);
+		}
+	}
 
-	<cfif isExpandedForm(Arguments.Name)>
-		<cfset sResult["Name"] = condenseTaskName(Arguments.Name)>
-		<cfset sResult["TaskID"] = ListLast(Arguments.Name,":")>
-	<cfelse>
-		<cfset sResult["Name"] = Arguments.Name>
-	</cfif>
+	//If Interval has a hours in it,but runtime isn't in hours, then see if we need to back up the next run time a little.
+	if (
+		Len(Arguments.hours)
+		AND
+		NOT ListFindNoCase(Arguments.hours,Hour(Arguments.runtime))
+	) {
+		BlockLength = BlockLengthHours(Arguments.hours,Arguments.lastrun);
+		//If effective interval is greater than the amount of time in the last bloack, then back up the runtim a bit
+		if (
+			BlockLength GT 0
+			AND
+			( EffectiveIntervalHours GT BlockLength )
+		) {
+			Arguments.runtime = DateAdd("h", -BlockLength, Arguments.runtime);
+		}
+	}
 
-	<cfreturn sResult>
-</cffunction>
+	return isInTimeSlot(Arguments.weekdays,Arguments.hours,Arguments.runtime);
+}
 
-<cffunction name="isExpandedForm" access="private" returntype="boolean" output="no" hint="I determine if the given TaskName is in expanded form.">
-	<cfargument name="Name" type="string" required="true">
+/**
+* @ComponentPath The path to your component (example com.sebtools.NoticeMgr).
+*/
+public void function notifyComponent(
+	required string ComponentPath,
+	required Component
+) {
 
-	<cfset var result = false>
+	Variables.sComponents[arguments.ComponentPath] = Arguments.Component;
 
-	<cfif ReFindNoCase(":\d+$",Arguments.Name)>
-		<cfset result = true>
-	</cfif>
+}
 
-	<cfreturn result>
-</cffunction>
+private numeric function ArrayGetAtMod(
+	required array array,
+	required numeric position
+) {
+	Arguments.position = Arguments.position MOD ArrayLen(array);
 
-<cffunction name="getIntervals" access="private" returntype="struct" output="no">
+	if ( Arguments.position EQ 0 ) {
+		Arguments.position = ArrayLen(array)
+	}
 
-	<cfset var sResult = StructNew()>
+	return array[Arguments.position];
+}
 
-	<cfscript>
+/**
+* I get the number of days - in a row - that are part of the set that include the runtime day.
+*/
+private numeric function BlockLengthDays(
+	required string weekdays,
+	required date runtime
+) {
+
+	return countContiguousIntegers(
+		list=DayOfWeekNumericList(Arguments.weekdays),
+		target=DayOfWeek(Arguments.runtime),
+		modulus=7,
+		min=1
+	);
+}
+
+/**
+* I get the number of hours - in a row - that are part of the set that include the runtime hour.
+*/
+private numeric function BlockLengthHours(
+	required string hours,
+	required date runtime
+) {
+	return countContiguousIntegers(
+		list=Arguments.hours,
+		target=Hour(Arguments.runtime),
+		modulus=23,
+		min=0
+	);
+}
+
+/**
+* I return the TaskName in its condensed form, that is just the task name itself.
+*/
+private string function condenseTaskName(required string Name) {
+
+	// SEB: This is the same as ListFirst(Arguments.Name,":") except that it allows for TaskNames that contain ":".
+	return ReReplaceNoCase(Arguments.Name,":\d+$","");
+}
+
+/**
+* I count the contiguous integers including and surrounding the target number in the given list
+*/
+private numeric function countContiguousIntegers(
+	required string list,
+	required string target,
+	numeric modulus="0",
+	numeric min="1"
+) {
+	var contiguousCount = 0;
+	// Convert the comma-separated list to an array
+	var aIntegers = ListToArray(ListRemoveDuplicates(Arguments.list));
+	var targetIndex = 0;
+	var currentIndex = 0;
+	var aDirections = ["left","right"];
+	var direction = "";
+	var sFilterArgs = {array=aIntegers,minvalue=Arguments.min};
+
+	if ( StructKeyHasVal(Arguments,"modulus") ) {
+		sFilterArgs["maxvalue"] = Arguments.modulus;
+	}
+	//writeDump(aIntegers);
+	aIntegers = ArrayFilterNumbersRange(ArgumentCollection=sFilterArgs);
+
+	if ( NOT ArrayLen(aIntegers) ) {
+		return 0;
+	}
+
+	if (
+		( Arguments.target LT Arguments.min )
+		OR
+		(
+			Arguments.modulus GT 0
+			AND
+			Arguments.target GT Arguments.modulus
+		)
+	) {
+		return 0;
+	}
+
+	// Sort the array for easier comparison
+	ArraySort(aIntegers,"numeric");
+
+	// Find the index of the target number in the sorted array
+	targetIndex = ArrayFind(aIntegers, target);
+
+	//Only do work if the target is found
+	if ( targetIndex GT 0 ) {
+
+		//Remove numbers outside of designated range.
+		if ( Arguments.modulus GT 0 ) {
+
+		}
+
+		// Initialize counters
+		contiguousCount = -1;//Below will find target number twice, so we offset by one to make up for the duplication.
+
+		for ( direction in aDirections ) {
+			
+			nextIndex = targetIndex;
+
+			do {
+				currentIndex = nextIndex;
+				nextIndex = ((direction EQ "left") ? (currentIndex-1) : (currentIndex+1))
+				contiguousCount++;
+				if ( nextIndex EQ 0 ) {
+					nextIndex = ArrayLen(aIntegers);
+				}
+				if ( nextIndex GT ArrayLen(aIntegers) ) {
+					nextIndex = 1;
+				}
+			/*
+				Loop if...
+				-Count can't exceed number of items
+				-Loop when modulues is used and loop runs from one to modulus and we are at the ends
+			*/
+			} while (
+				contiguousCount LTE ArrayLen(aIntegers)
+				AND
+				(
+					ArrayGetAtMod(aIntegers,Max(currentIndex,nextIndex)) - ArrayGetAtMod(aIntegers,Min(currentIndex,nextIndex)) EQ 1
+					OR
+					(
+						Arguments.modulus GT 0
+						AND
+						aIntegers[1] EQ Arguments.min
+						AND
+						aIntegers[ArrayLen(aIntegers)] EQ Arguments.modulus
+						AND
+						ArrayGetAtMod(aIntegers,Min(currentIndex,nextIndex)) EQ Arguments.min
+						AND
+						ArrayGetAtMod(aIntegers,Max(currentIndex,nextIndex)) EQ Arguments.modulus
+					)
+				)
+			)
+		}
+
+		contiguousCount = Min(contiguousCount,ArrayLen(aIntegers));
+
+	}
+
+    return contiguousCount;
+}
+
+/**
+* The reverse of DayOfWeekAsString
+*/
+private numeric function DayofWeekFromString(required string weekday) {
+	var aNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+	
+	return ArrayFindNoCase(aNames, weekday);
+}
+
+private string function DayOfWeekNumericList(required string weekdays) {
+	var result = "";
+	var weekday = "";
+	var dayval = 0;
+
+	for ( weekday in ListToArray(Arguments.weekdays) ) {
+		dayval = DayofWeekFromString(Trim(weekday));
+		if ( dayval ) {
+			result = ListAppend(result,dayval);
+		}
+	}
+
+	result = ListSort(result,"numeric");
+
+	return result;
+}
+
+/**
+* I return the TaskName in its expanded form - including the TaskID.
+*/
+private string function expandTaskName(
+	required string Name,
+	string jsonArgs,
+	string TaskID
+) {
+	var result = Arguments.Name;
+	var qTask = 0;
+	var sRecord = 0;
+
+	// Only take action if the name doesn't already match the expanded form
+	if ( NOT isExpandedForm(Arguments.Name) ) {
+		if ( NOT StructKeyExists(Arguments,"TaskID") ) {
+			sRecord = {};
+			sRecord["Name"] = Arguments.Name;
+			sRecord["fieldlist"] = "TaskID";
+			if ( StructKeyExists(Arguments,"jsonArgs") ) {
+				sRecord["jsonArgs"] = Arguments.jsonArgs;
+			}
+			qTask = getTaskNameRecord(ArgumentCollection=sRecord);
+			if ( qTask.RecordCount EQ 1 ) {
+				Arguments.TaskID = qTask.TaskID;
+				/*
+				if ( NOT StructKeyExists(variables.tasks,"#Arguments.Name#:#qTask.TaskID#") ) {
+					result = "#Arguments.Name#:#qTask.TaskID#";
+				} else {
+					throw(message="Unable to uniquely identify the task #Arguments.Name#.",type="Scheduler",errorcode="NoUniqueTaskFound");
+				}
+				*/
+			} else {
+				throw(message="The task record for #Arguments.Name# was not found.",type="Scheduler",errorcode="NoTaskFound");
+			}
+		}
+		result = "#Arguments.Name#:#Arguments.TaskID#";
+	}
+
+	return result;
+}
+
+/**
+* I return a structure of values from a TaskName.
+*/
+private struct function splitTaskName(required string Name) {
+	var sResult = {};
+
+	if ( isExpandedForm(Arguments.Name) ) {
+		sResult["Name"] = condenseTaskName(Arguments.Name);
+		sResult["TaskID"] = ListLast(Arguments.Name,":");
+	} else {
+		sResult["Name"] = Arguments.Name;
+	}
+
+	return sResult;
+}
+
+/**
+* I determine if the given TaskName is in expanded form.
+*/
+private boolean function isExpandedForm(required string Name) {
+	var result = false;
+
+	if ( ReFindNoCase(":\d+$",Arguments.Name) ) {
+		result = true;
+	}
+
+	return result;
+}
+
+private struct function getIntervals() {
+	var sResult = {};
+
 	sResult["once"] = 0;
 	sResult["hourly"] = 3600;
 	sResult["daily"] = 86400;
 	sResult["daily"] = 0;
 	sResult["weekly"] = 604800;
 	sResult["monthly"] = 0;
-	</cfscript>
 
-	<cfreturn sResult>
-</cffunction>
+	return sResult;
+}
 
-<cffunction name="GetSecondsDiff" access="private" returntype="numeric" output="no">
-	<cfargument name="begin" type="numeric" required="yes">
-	<cfargument name="end" type="numeric" required="yes">
+private numeric function GetSecondsDiff(
+	required numeric begin,
+	required numeric end
+) {
+	var result = 0;
 
-	<cfset var result = 0>
+	if ( arguments.end GTE arguments.begin ) {
+		result = Int( ( arguments.end - arguments.begin ) / 1000 );
+	}
 
-	<cfif arguments.end GTE arguments.begin>
-		<cfset result = Int( ( arguments.end - arguments.begin ) / 1000 )>
-	</cfif>
+	return result;
+}
 
-	<cfreturn result>
-</cffunction>
+private query function getTaskNameRecord(required string Name) {
 
-<cffunction name="getTaskNameRecord" access="private" returntype="query" output="no">
-	<cfargument name="Name" type="string" required="yes">
+	return variables.DataMgr.getRecords("schTasks",splitTaskName(Arguments.Name));
+}
 
-	<cfreturn variables.DataMgr.getRecords("schTasks",splitTaskName(Arguments.Name))>
-</cffunction>
+public string function expandHoursList(required string Hours) {
+	var hourset = 0;
+	var hour = 0;
+	var result = "";
+	var hour_from = 0;
+	var hour_to = 0;
 
-<cffunction name="expandHoursList" access="public" returntype="string" output="false" hint="">
-	<cfargument name="hours" type="string" required="yes">
+	if ( ListLen(arguments.hours,"-") GT 1 ) {
+		for ( hourset in ListToArray(arguments.hours) ) {
+			if ( ListLen(hourset,"-") GT 1 ) {
+				hour_from  = Val(ListFirst(hourset,"-")) MOD 24;
+				hour_to  = Val(ListLast(hourset,"-")) MOD 24;
+				if ( hour_from GT hour_to ) {
+					for ( hour=hour_from; hour LTE 23; hour++ ) {
+						result = ListAppend(result,hour);
+					}
+					for ( hour=0; hour LTE hour_to; hour++ ) {
+						result = ListAppend(result,hour);
+					}
+				} else {
+					for ( hour=hour_from; hour LTE hour_to; hour++ ) {
+						result = ListAppend(result,hour);
+					}
+				}
+			} else {
+				result = ListAppend(result,Val(hourset));
+			}
+		}
+	} else {
+		result = arguments.hours;
+	}
 
-	<cfset var hourset = 0>
-	<cfset var hour = 0>
-	<cfset var result = "">
-	<cfset var hour_from = 0>
-	<cfset var hour_to = 0>
+	return result;
+}
 
-	<cfif ListLen(arguments.hours,"-") GT 1>
-		<cfloop list="#arguments.hours#" index="hourset">
-			<cfif ListLen(hourset,"-") GT 1>
-				<cfset hour_from  = Val(ListFirst(hourset,"-")) MOD 24>
-				<cfset hour_to  = Val(ListLast(hourset,"-")) MOD 24>
-				<cfif hour_from GT hour_to>
-					<cfloop index="hour" from="#hour_from#" to="23" step="1">
-						<cfset result = ListAppend(result,hour)>
-					</cfloop>
-					<cfloop index="hour" from="0" to="#hour_to#" step="1">
-						<cfset result = ListAppend(result,hour)>
-					</cfloop>
-				<cfelse>
-					<cfloop index="hour" from="#hour_from#" to="#hour_to#" step="1">
-						<cfset result = ListAppend(result,hour)>
-					</cfloop>
-				</cfif>
-			<cfelse>
-				<cfset result = ListAppend(result,Val(hourset))>
-			</cfif>
-		</cfloop>
-	<cfelse>
-		<cfset result = arguments.hours>
-	</cfif>
+/**
+ * Function to remove numbers from a list that are outside of a given range.
+ * @param listString - The list of numbers as a string.
+ * @param minValue - The minimum value of the range.
+ * @param maxValue - The maximum value of the range.
+ * @return A filtered list of numbers within the specified range.
+ */
+private string function ListFilterNumbersRange(
+	required string list,
+	numeric minValue,
+	numeric maxValue
+) {
+	// Convert the list to an array
+	Arguments.array = ListToArray(list);
 
-	<cfreturn result>
-</cffunction>
+	return ArrayToList(ArrayFilterNumbersRange(ArgumentCollection=Arguments));
+}
+
+private array function ArrayFilterNumbersRange(
+	required array array,
+	numeric minValue,
+	numeric maxValue
+) {
+    // Convert the list to an array
+    // Initialize an empty array to hold the filtered numbers
+    var aResults = [];
+	var currentNumber = 0;
+    
+    // Loop through the array to filter out numbers outside of the range
+    for ( currentNumber in Arguments.array ) {
+        
+        // Check if the current number is within the range
+        if (
+			NOT (
+				StructKeyExists(Arguments,"minValue")
+				AND
+				Arguments.minValue GT currentNumber
+			)
+			AND
+			NOT (
+				StructKeyExists(Arguments,"maxValue")
+				AND
+				Arguments.maxValue LT currentNumber
+			)
+		) {
+			ArrayAppend(aResults, currentNumber);
+		}
+    }
+    
+    return aResults;
+}
+</cfscript>
 
 <cffunction name="getDbXml" access="private" returntype="string" output="no" hint="I return the XML for the tables needed for Searcher to work.">
 
@@ -813,6 +1275,7 @@
 				/>
 			</field>
 			<field ColumnName="jsonArgs" CF_DataType="CF_SQL_VARCHAR" Length="320" />
+			<field ColumnName="Priority" CF_DataType="CF_SQL_INTEGER" Default="2" />
 		</table>
 		<table name="schActions">
 			<field ColumnName="ActionID" CF_DataType="CF_SQL_BIGINT" PrimaryKey="true" Increment="true" />

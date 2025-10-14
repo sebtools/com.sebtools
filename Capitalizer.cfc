@@ -1,132 +1,118 @@
 <cfcomponent displayname="Capitalizer">
+<cfscript>
+public function init(required DataMgr) {
 
-<cffunction name="init" access="public" returntype="any" output="no">
-	<cfargument name="DataMgr" type="any" required="yes">
+	Variables.DataMgr = Arguments.DataMgr;
+	Variables.datasource = Variables.Datamgr.getDatasource();
 
-	<cfset variables.DataMgr = arguments.DataMgr>
-	<cfset variables.datasource = variables.Datamgr.getDatasource()>
+	return This;
+}
 
-	<cfreturn this>
-</cffunction>
+public string function fixCase(
+	required string string,
+	boolean forcefix="false"
+) {
+	var lcasewords = "for,of,the,a,an,of,or,and";
+	var directions = "N,E,S,W,NE,SE,SW,NW,NNE,ENE,ESE,SSE,SSW,WSW,WNW,NNW";
+	var word = "";
+	var titlewords = TitleCaseList(string,"., ('");
+	var result = "";
 
-<cffunction name="fixCase" access="public" returntype="string" output="no">
-	<cfargument name="string" type="string" required="yes">
-	<cfargument name="forcefix" type="boolean" default="false">
+	// No work to do unless string is at least two characters.
+	Arguments.string = Trim(Arguments.string);
+	if ( Len(Arguments.string) LTE 1 ) {
+		return UCase(Arguments.string);
+	}
 
-	<cfset var lcasewords = "for,of,the,a,an,of,or,and">
-	<cfset var directions = "N,E,S,W,NE,SE,SW,NW,NNE,ENE,ESE,SSE,SSW,WSW,WNW,NNW">
-	<cfset var word = "">
-	<cfset var titlewords = TitleCaseList(string,"., ('")>
-	<cfset var result = "">
+	// Only change if string is all one case, unless "forcefix" is true
+	if ( Arguments.forcefix OR Compare(arguments.string,LCase(arguments.string)) EQ 0 OR Compare(arguments.string,UCase(arguments.string)) EQ 0 ) {
+		for ( word in ListToArray(titlewords," ") ) {
+			if ( ListFindNoCase(lcasewords,word) ) {
+				// lower-case words that are always lower-case
+				result = ListAppend(result,LCase(word)," ");
+			} else if ( ListFindNoCase(directions,word) ) {
+				// upper-case directions
+				result = ListAppend(result,UCase(word)," ");
+			} else if ( Len(word) gt 3 AND Left(word,2) eq "mc" ) {
+				// Special capitalization for words starting with "mc"
+				word = "Mc" & UCase(Mid(word,3,1)) & LCase(Mid(word,4,Len(word)-3));
+				result = ListAppend(result,word," ");
+			} else {
+				// Keep the corrected case for everything else
+				result = ListAppend(result,word," ");
+			}
+		}
+		// Always capitalize the first letter
+		if ( Len(result) GTE 2 ) {
+			result = UCase(Mid(result,1,1)) & Mid(result,2,Len(result)-1);
+		}
+		result = ReReplace(result,"'S\b","'s","ALL");
+	} else {
+		result = Arguments.string;
+	}
 
-	<!--- No work to do unless string is at least two characters. --->
-	<cfset Arguments.string = Trim(Arguments.string)>
-	<cfif Len(Arguments.string) LTE 1>
-		<cfreturn UCase(Arguments.string)>
-	</cfif>
+	return Trim(result);
+}
 
-	<!--- Only change if string is all one case, unless "forcefix" is true --->
-	<cfif arguments.forcefix OR Compare(arguments.string,LCase(arguments.string)) EQ 0 OR Compare(arguments.string,UCase(arguments.string)) EQ 0>
-		<cfloop index="word" list="#titlewords#" delimiters=" ">
-			<cfif ListFindNoCase(lcasewords,word)>
-				<!--- lower-case words that are always lower-case --->
-				<cfset result = ListAppend(result,LCase(word)," ")>
-			<cfelseif ListFindNoCase(directions,word)>
-				<!--- upper-case directions --->
-				<cfset result = ListAppend(result,UCase(word)," ")>
-			<cfelseif Len(word) gt 3 AND Left(word,2) eq "mc">
-				<!--- Special capitalization for words starting with "mc" --->
-				<cfset word = "Mc" & UCase(Mid(word,3,1)) & LCase(Mid(word,4,Len(word)-3))>
-				<cfset result = ListAppend(result,word," ")>
-			<cfelse>
-				<!--- Keep the corrected case for everything else --->
-				<cfset result = ListAppend(result,word," ")>
-			</cfif>
-		</cfloop>
-		<!--- Always capitalize the first letter --->
-		<cfif Len(result) GTE 2>
-			<cfset result = UCase(Mid(result,1,1)) & Mid(result,2,Len(result)-1)>
-		</cfif>
-		<cfset result = ReReplace(result,"'S\b","'s","ALL")>
-	<cfelse>
-		<cfset result = arguments.string>
-	</cfif>
+public void function fixFieldCase(
+	required string table,
+	required string field,
+	required string pkfields,
+	boolean forcefix="false"
+) {
+	var qRecords = getSuspectRecords(ArgumentCollection=Arguments);
+	var pkfield = "";
+	var data = 0;
+	var sRecord = 0;
 
-	<cfreturn trim(result)>
-</cffunction>
+	for ( sRecord in qRecords ) {
+		data = {};
+		for ( pkfield in ListToArray(Arguments.pkfields) ) {
+			data[pkfield] = sRecord[pkfield];
+		}
+		data[Arguments.field] = fixCase(sRecord[Arguments.field],Arguments.forcefix);
+		Variables.DataMgr.updateRecord(tablename=Arguments.table,data=data);
+	}
 
-<cffunction name="fixFieldCase" access="public" returntype="void" output="no">
-	<cfargument name="table" type="string" required="yes">
-	<cfargument name="field" type="string" required="yes">
-	<cfargument name="pkfields" type="string" required="yes">
-	<cfargument name="forcefix" type="boolean" default="false">
+}
 
-	<cfset var qRecords = getSuspectRecords(argumentCollection=arguments)>
-	<cfset var pkfield = "">
-	<cfset var data = 0>
+public query function getSuspectRecords(
+	required string table,
+	required string field,
+	required string pkfields
+) {
+	var qSuspectRecords = 0;
+	var sArgs = Duplicate(Arguments);
+	var FieldSQL = Variables.DataMgr.escape(Arguments.field);
 
-	<cfloop query="qRecords">
-		<cfset data = StructNew()>
-		<cfloop index="pkfield" list="#arguments.pkfields#">
-			<cfset data[pkfield] = qRecords[pkfield][CurrentRow]>
-		</cfloop>
-		<cfset data[arguments.field] = fixCase(qRecords[arguments.field][CurrentRow],arguments.forcefix)>
-		<cfset variables.DataMgr.updateRecord(tablename=arguments.table,data=data)>
-	</cfloop>
+	StructDelete(sArgs,"table");
+	StructDelete(sArgs,"field");
+	StructDelete(sArgs,"pkfields");
+	sArgs["fieldlist"] = "#Arguments.field#,#Arguments.pkfields#";
+	sArgs["tablename"] = Arguments.table;
+	if ( NOT StructKeyExists(sArgs,"AdvSQL") ) {
+		sArgs["AdvSQL"] = {};
+	}
+	if ( NOT StructKeyExists(sArgs.AdvSQL,"WHERE") ) {
+		sArgs["AdvSQL"]["WHERE"] = "";
+	}
 
-</cffunction>
-
-<cffunction name="getSuspectRecords" access="public" returntype="query" output="no">
-	<cfargument name="table" type="string" required="yes">
-	<cfargument name="field" type="string" required="yes">
-	<cfargument name="pkfields" type="string" required="yes">
-
-	<cfset var qSuspectRecords = 0>
-	<cfset var sArgs = Duplicate(arguments)>
-	<cfset var FieldSQL = Variables.DataMgr.escape(arguments.field)>
-
-	<cfset StructDelete(sArgs,"table")>
-	<cfset StructDelete(sArgs,"field")>
-	<cfset StructDelete(sArgs,"pkfields")>
-	<cfset sArgs["fieldlist"] = "#arguments.field#,#arguments.pkfields#">
-	<cfset sArgs["tablename"] = arguments.table>
-	<cfif NOT StructKeyExists(sArgs,"AdvSQL")>
-		<cfset sArgs["AdvSQL"] = StructNew()>
-	</cfif>
-	<cfif NOT StructKeyExists(sArgs.AdvSQL,"WHERE")>
-		<cfset sArgs["AdvSQL"]["WHERE"] = "">
-	</cfif>
-
-	<cfset sArgs["AdvSQL"]["WHERE"] = "
+	sArgs["AdvSQL"]["WHERE"] = "
 		#sArgs.AdvSQL.WHERE#
 	AND	(
 				1 = 0
-			OR	#arguments.field# = UPPER(#FieldSQL#) COLLATE Latin1_General_BIN
-			OR	#arguments.field# = LOWER(#FieldSQL#) COLLATE Latin1_General_BIN
-			OR	#arguments.field# LIKE '% %'
-			OR	#arguments.field# = ( SUBSTRING(LOWER(#FieldSQL#), 1, 1) + SUBSTRING(UPPER(#FieldSQL#), 2, LEN(#FieldSQL#)-1) ) COLLATE Latin1_General_BIN
+			OR	#Arguments.field# = UPPER(#FieldSQL#) COLLATE Latin1_General_BIN
+			OR	#Arguments.field# = LOWER(#FieldSQL#) COLLATE Latin1_General_BIN
+			OR	#Arguments.field# LIKE '% %'
+			OR	#Arguments.field# = ( SUBSTRING(LOWER(#FieldSQL#), 1, 1) + SUBSTRING(UPPER(#FieldSQL#), 2, LEN(#FieldSQL#)-1) ) COLLATE Latin1_General_BIN
 		)
-	">
+	";
 
-	<cfset qSuspectRecords = Variables.DataMgr.getRecords(argumentCollection=sArgs)>
+	qSuspectRecords = Variables.DataMgr.getRecords(ArgumentCollection=sArgs);
 
-	<!---<cfquery name="qSuspectRecords" datasource="#variables.datasource#">
-	SELECT	#arguments.field#,#arguments.pkfields#
-	FROM	#arguments.table#
-	WHERE	1 = 1
-	AND	(
-			1 = 0
-		OR	#arguments.field# = UPPER(#arguments.field#) COLLATE Latin1_General_BIN
-		OR	#arguments.field# = LOWER(#arguments.field#) COLLATE Latin1_General_BIN
-		OR	#arguments.field# LIKE '% %'
-		OR	#arguments.field# = ( SUBSTRING(LOWER(#arguments.field#), 1, 1) + SUBSTRING(UPPER(#arguments.field#), 2, LEN(#arguments.field#)-1) ) COLLATE Latin1_General_BIN
-		)
-	</cfquery>--->
+	return qSuspectRecords;
+}
 
-	<cfreturn qSuspectRecords>
-</cffunction>
-
-<cfscript>
 /**
  * Title cases all elements in a list.
  *
@@ -173,5 +159,4 @@ function TitleCaseList( list, delimiters ) {
 	return returnString;
 }
 </cfscript>
-
 </cfcomponent>

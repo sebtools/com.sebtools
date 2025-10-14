@@ -1,131 +1,180 @@
 <cfcomponent extends="com.sebtools.component" displayname="Data Trashcan" hint="I handle putting deleted records into Trashcan tables." output="no">
+<cfscript>
+public function init(
+	required DataLogger,
+	string DatabaseName,
+	string Owner="dbo"
+) {
 
-<cffunction name="init" access="public" returntype="any" output="no">
-	<cfargument name="DataLogger" type="any" required="yes">
-	<cfargument name="DatabaseName" type="string" required="no">
-	<cfargument name="Owner" type="string" default="dbo">
+	Arguments.DataMgr = Arguments.DataLogger.getDataMgr();
+	Arguments.Observer = Arguments.DataLogger.getObserver();
 
-	<cfset Arguments.DataMgr = Arguments.DataLogger.getDataMgr()>
-	<cfset Arguments.Observer = Arguments.DataLogger.getObserver()>
+	initInternal(ArgumentCollection=Arguments);
 
-	<cfset initInternal(ArgumentCollection=Arguments)>
+	loadDataMgr();
 
-	<cfset loadDataMgr()>
+	Variables.MrECache = CreateObject("component","com.sebtools.MrECache").init(
+		id="deletes",
+		timeSpan=CreateTimeSpan(0,0,0,5)
+	);
 
-	<cfset registerListener()>
+	registerListener();
 
-	<cfset Variables.sLoadedTables = {}>
+	Variables.sLoadedTables = {};
 
-	<cfset Variables.DataLogger.setDataTrashcan(This)>
+	Variables.DataLogger.setDataTrashcan(This);
 
-	<cfreturn This>
-</cffunction>
+	Variables.logged_tables = "";
 
-<cffunction name="getDeletedRecord" access="public" returntype="any" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" required="no">
-	<cfargument name="fieldlist" type="string" required="no">
+	return This;
+}
 
-	<cfset var qRecords = 0>
-	<cfset var sData = StructCopy(Arguments)>
+public function createTrashcanTable(required string tablename) {
 
-	<cfset createTrashcanTable(Arguments.tablename)>
+	if ( NOT isTrackedTable(Arguments.tablename) ) {
+		return false;
+	}
 
-	<cfset sData["Tablename"] = getTrackingTableName(Arguments.tablename)>
-	<cfset sData["maxrows"] = 1>
-	<cfset sData["orderBy"] = "DataTrashcan_ID DESC">
+	// Only load the table once per instantiation (should make sure it is current to recent changes without continuing to update it).
+	if ( NOT StructKeyExists(Variables.sLoadedTables,Arguments.tablename) ) {
+		makeTable(Arguments.tablename);
+		growColumns(Arguments.tablename);
+		Variables.sLoadedTables[Arguments.tablename] = now();
+	}
 
-	<!--- Make sure DataTrashcan fields are returned. --->
-	<cfif StructKeyHasLen(Arguments,"fieldlist")>
-		<cfset Arguments.fieldlist = ListAppend(Arguments.fieldlist,"DataTrashcan_ID,DataTrashcan_DateDeleted")>
-	</cfif>
+}
 
-	<cfset qRecords = Variables.DataMgrTrashcan.getRecords(ArgumentCollection=sData)>
+public function getDatabaseName() {
+	return Variables.DatabaseName;
+}
 
-	<cfreturn qRecords>
-</cffunction>
+public function getDatabaseOwner() {
+	return Variables.Owner;
+}
 
-<cffunction name="loadDataMgr" access="private" returntype="any" output="no">
+public function getDeletedRecord(
+	required string tablename,
+	struct data,
+	string fieldlist
+) {
+	var qRecords = 0;
+	var sData = StructCopy(Arguments);
 
-	<cfset var sArgs = {}><!--- Don't pass all arguments in. We specifically don't want Observer in there. --->
+	createTrashcanTable(Arguments.tablename);
 
-	<cfset sArgs["datasource"] = Variables.DataMgr.getDatasource()>
-	<cfif StructKeyHasLen(Variables,"DatabaseName")>
-		<cfset sArgs["databasename"] = Variables.DatabaseName>
-	</cfif>
+	sData["Tablename"] = getTrackingTableName(Arguments.tablename);
+	sData["maxrows"] = 1;
+	sData["orderBy"] = "DataTrashcan_ID DESC";
 
-	<cfset Variables.DataMgrTrashcan = CreateObject("component","com.sebtools.DataMgr").init(ArgumentCollection=sArgs)>
+	// Make sure DataTrashcan fields are returned.
+	if ( StructKeyHasLen(Arguments,"fieldlist") ) {
+		Arguments.fieldlist = ListAppend(Arguments.fieldlist,"DataTrashcan_ID,DataTrashcan_DateDeleted");
+	}
 
-</cffunction>
+	qRecords = Variables.DataMgrTrashcan.getRecords(ArgumentCollection=sData);
 
-<cffunction name="logAction" access="public" returntype="any" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="action" type="string" required="yes">
-	<cfargument name="data" type="struct" required="no">
-	<cfargument name="ChangeUUID" type="string" required="no">
-	<cfargument name="sql" type="any" required="no">
+	return qRecords;
+}
 
-	<cfset var qRecords = 0>
-	<cfset var sData = 0>
+public function getTrackingTableName(
+	required string tablename,
+	boolean qualified=false
+) {
+	if ( Arguments.qualified ) {
+		return "#Variables.DatabaseName#.#Variables.Owner#.#getTrackingTableName(Arguments.tablename)#";
+	}
 
-	<cfif NOT ListFindNoCase(Variables.DataLogger.getLoggedTables(),Arguments.tablename)>
-		<cfreturn false>
-	</cfif>
+	return "aud_" & Arguments.tablename & "_Trashcan";
+}
 
-	<cfset qRecords = Variables.DataMgr.getRecords(tablename=Arguments.tablename,data=Arguments.data)>
+private function loadDataMgr() {
+	var sArgs = {};// Don't pass all arguments in. We specifically don't want Observer in there.
 
-	<cfset createTrashcanTable(Arguments.tablename)>
+	sArgs["datasource"] = Variables.DataMgr.getDatasource();
+	if ( StructKeyHasLen(Variables,"DatabaseName") ) {
+		sArgs["databasename"] = Variables.DatabaseName;
+	}
 
-	<cfoutput query="qRecords">
-		<cfset sData = Variables.DataMgr.QueryRowToStruct(qRecords,CurrentRow)>
-		<cfset Variables.DataMgrTrashcan.runSQLArray(Variables.DataMgrTrashcan.insertRecordSQL(tablename=getTrackingTableName(Arguments.tablename),data=sData))>
-	</cfoutput>
+	Variables.DataMgrTrashcan = CreateObject("component","com.sebtools.DataMgr").init(ArgumentCollection=sArgs);
 
-	<cfreturn true>
-</cffunction>
+}
 
-<cffunction name="createTrashcanTable" access="private" returntype="any" output="no">
-	<cfargument name="tablename" type="string" required="yes">
+public function logAction(
+	required string tablename,
+	required string action,
+	struct data,
+	string ChangeUUID,
+	sql
+) {
+	var qRecords = 0;
+	var sData = 0;
+	var cache_id = Variables.MrECache.id("deletion",{tablename=Arguments.tablename,data=Arguments.data});
 
-	<!--- Only load the table once per instantiation (should make sure it is current to recent changes without continuing to update it). --->
-	<cfif NOT StructKeyExists(Variables.sLoadedTables,Arguments.tablename)>
-		<cfset makeTable(Arguments.tablename)>
-		<cfset growColumns(Arguments.tablename)>
-		<cfset Variables.sLoadedTables[Arguments.tablename] = now()>
-	</cfif>
+	if ( NOT isTrackedTable(Arguments.tablename) ) {
+		return false;
+	}
 
-</cffunction>
+	qRecords = Variables.DataMgr.getRecords(tablename=Arguments.tablename,data=Arguments.data);
 
-<cffunction name="ensureTrashcanTableExists" access="private" returntype="any" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-</cffunction>
 
-<cffunction name="getPKValue" access="private" returntype="string" output="no" hint="I get the primary key value for the given data.">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" required="yes">
+	//Try to see if this has been deleted by pk very recently
+	if ( Variables.MrECache.exists(cache_id) ) {
+		return false;
+	}
 
-	<cfset var result = "">
-	<cfset var pkfields = Variables.DataMgr.getPrimaryKeyFieldNames(arguments.tablename)>
-	<cfset var pkfield = "">
+	//Briefly cache deletion by pk, if possible.
+	Variables.MrECache.put(cache_id,now());
 
-	<cfloop list="#pkfields#" index="pkfield">
-		<cfset result = ListAppend(result,Arguments.data[pkfield])>
-	</cfloop>
+	createTrashcanTable(Arguments.tablename);
 
-	<cfreturn result>
-</cffunction>
+	for ( sData in qRecords ) {
+		Variables.DataMgrTrashcan.runSQLArray(Variables.DataMgrTrashcan.insertRecordSQL(tablename=getTrackingTableName(Arguments.tablename),data=sData));
+	}
 
-<cffunction name="getTrackingTableName" access="private" returntype="any" output="no">
-	<cfargument name="tablename" type="string" required="yes">
+	return true;
+}
 
-	<cfreturn "aud_" & Arguments.tablename & "_Trashcan">
-</cffunction>
+public function logTable(required string tablename) {
+	
+	Arguments.tablename = Trim(Arguments.tablename);
+
+	if ( Len(Arguments.tablename) AND NOT ListFindNoCase(Variables.logged_tables,Arguments.tablename) ) {
+		Variables.logged_tables = ListAppend(Variables.logged_tables,Arguments.tablename);
+
+		createTrashcanTable(Arguments.tablename);
+	}
+
+}
+
+private function ensureTrashcanTableExists(required string tablename) {
+
+}
+
+/**
+* I get the primary key value for the given data.
+*/
+private string function getPKValue(
+	required string tablename,
+	required struct data
+) {
+	var result = "";
+	var pkfields = Variables.DataMgr.getPrimaryKeyFieldNames(arguments.tablename);
+	var pkfield = "";
+
+	for ( pkfield in ListToArray(pkfields) ) {
+		result = ListAppend(result,Arguments.data[pkfield]);
+	}
+
+	return result;
+}
+</cfscript>
 
 <cffunction name="growColumns" access="private" returntype="any" output="no" hint="I make sure that the columns in the trashcan are as big as their counterparts in the original table.">
 	<cfargument name="tablename" type="string" required="yes">
 
 	<cfset var qColumns = 0>
 	<cfset var trashtable = getTrackingTableName(Arguments.tablename)>
+	<cfset var DataTypeStr = "">
 
 	<cf_DMQuery name="qColumns">
 		SELECT		main.COLUMN_NAME,
@@ -144,79 +193,115 @@
 	</cf_DMQuery>
 
 	<cfoutput query="qColumns">
+		<cfscript>
+		if ( DataTypeStr CONTAINS "char" ) {
+			if ( Val(TargetMax) LTE 8000 ) {
+				DataTypeStr = "#DATA_TYPE#(#TargetMax#)";
+			} else {
+				DataTypeStr = "#DATA_TYPE#(MAX)";
+			}
+		} else {
+			DataTypeStr = "#DATA_TYPE#";
+		}
+		</cfscript>
 		<cf_DMQuery>
-		ALTER TABLE		<cf_DMObject name="#Variables.DatabaseName#.dbo.#trashtable#">
-		ALTER COLUMN	<cf_DMObject name="#COLUMN_NAME#"> #DATA_TYPE#(#TargetMax#)<cfif IS_NULLABLE IS NOT true> NOT</cfif> NULL
+		ALTER TABLE		<cf_DMObject name="#Variables.DatabaseName#.#Variables.Owner#.#trashtable#">
+		ALTER COLUMN	<cf_DMObject name="#COLUMN_NAME#"> #DataTypeStr#<cfif IS_NULLABLE IS NOT true> NOT</cfif> NULL
 		</cf_DMQuery>
 	</cfoutput>
 
 </cffunction>
 
-<cffunction name="makeTable" access="private" returntype="any" output="no">
-	<cfargument name="tablename" type="string" required="yes">
+<cfscript>
+private boolean function isTrackedTable(required string tablename) {
+	var tables = ListAppend(Variables.logged_tables,Variables.DataLogger.getLoggedTables());
 
-	<cfset var sTypes = Variables.DataMgrTrashcan.getRelationTypes()>
-	<cfset var TableXml = Variables.DataMgr.getXml(Arguments.tablename)>
-	<cfset var xTable = XmlParse(TableXml)>
-	<cfset var aPKs = 0>
-	<cfset var aRelations = 0>
-	<cfset var DataType = "">
-	<cfset var reltype = "">
-	<cfset var sRelType = 0>
+	return booleanFormat(ListFindNoCase(tables,Arguments.tablename));
+}
 
-	<!--- Rename table to tracking --->
-	<cfset xTable.tables.table.XmlAttributes["name"] = getTrackingTableName(Arguments.tablename)>
+private function makeTable(required string tablename) {
+	var sTypes = Variables.DataMgrTrashcan.getRelationTypes();
+	var TableXml = Variables.DataMgr.getXml(Arguments.tablename);
+	var xTable = XmlParse(TableXml);
+	var aPKs = 0;
+	var aRelations = 0;
+	var DataType = "";
+	var reltype = "";
+	var sRelType = 0;
 
-	<!--- Need to preserve the value of the incoming field, not increment it. --->
-	<cfset aPKs = XmlSearch(xTable,"//field[@Increment]")>
-	<cfloop array="#aPKs#" index="xfield">
-		<cfset StructDelete(xfield.XmlAttributes,"Increment")>
-	</cfloop>
+	// Rename table to tracking
+	xTable.tables.table.XmlAttributes["name"] = getTrackingTableName(Arguments.tablename);
 
-	<!--- External pk should not be a primary key. We may need to store more than one deletion for a given record (rare, probably). --->
-	<cfset aPKs = XmlSearch(xTable,"//field[@PrimaryKey]")>
-	<cfloop array="#aPKs#" index="xfield">
-		<cfset StructDelete(xfield.XmlAttributes,"PrimaryKey")>
-	</cfloop>
+	// Need to preserve the value of the incoming field, not increment it.
+	aPKs = XmlSearch(xTable,"//field[@Increment]");
+	for ( xfield in aPKs ) {
+		StructDelete(xfield.XmlAttributes,"Increment");
+	}
 
-	<!--- Will store relation values directly in the trashcan table with appropriate data types, --->
-	<cfset aRelations = XmlSearch(xTable,"//field[relation]")>
-	<cfloop array="#aRelations#" index="xfield">
-		<cfset DataType = "CF_SQL_LONGVARCHAR">
-		<cfif StructKeyExists(xfield.XmlChildren[1].XmlAttributes,"type")>
-			<cfset reltype = xfield.XmlChildren[1].XmlAttributes["type"]>
-			<cfif StructKeyExists(xfield.XmlChildren[1].XmlAttributes,"cf_datatype")>
-				<cfset DataType = xfield.XmlChildren[1].XmlAttributes["cf_datatype"]>
-			<cfelseif StructKeyExists(sTypes,reltype)>
-				<cfset sRelType = sTypes[reltype]>
-				<cfif StructKeyExists(sRelType,"cfsqltype") AND Len(sRelType["cfsqltype"])>
-					<cfset DataType = sRelType["cfsqltype"]>
-				</cfif>
-			</cfif>
-		</cfif>
-		<cfset xfield.XmlAttributes["CF_DataType"] = DataType>
-		<cfset StructDelete(xfield,"XmlChildren")>
-	</cfloop>
+	// External pk should not be a primary key. We may need to store more than one deletion for a given record (rare, probably).
+	aPKs = XmlSearch(xTable,"//field[@PrimaryKey]");
+	for ( xfield in aPKs ) {
+		StructDelete(xfield.XmlAttributes,"PrimaryKey");
+	}
 
-	<cfset TableXml = ToString(xTable)>
-	<!--- Prepend Data Trashcan fields --->
-	<cfset TableXml = ReplaceNoCase(TableXml, '<field', '<field ColumnName="DataTrashcan_DateDeleted" CF_DataType="CF_SQL_DATE" Special="CreationDate" /><field', 'ONE')>
-	<cfset TableXml = ReplaceNoCase(TableXml, '<field', '<field ColumnName="DataTrashcan_ID" CF_DataType="CF_SQL_INTEGER" PrimaryKey="true" Increment="true" /><field', 'ONE')>
+	// Will store relation values directly in the trashcan table with appropriate data types,
+	aRelations = XmlSearch(xTable,"//field[relation]");
+	for ( xfield in aRelations ) {
+		DataType = "CF_SQL_LONGVARCHAR";
+		if ( StructKeyExists(xfield.XmlChildren[1].XmlAttributes,"type") ) {
+			reltype = xfield.XmlChildren[1].XmlAttributes["type"];
+			if ( StructKeyExists(xfield.XmlChildren[1].XmlAttributes,"cf_datatype") ) {
+				DataType = xfield.XmlChildren[1].XmlAttributes["cf_datatype"];
+			} else if ( StructKeyExists(sTypes,reltype) ) {
+				sRelType = sTypes[reltype];
+				if ( StructKeyExists(sRelType,"cfsqltype") AND Len(sRelType["cfsqltype"]) ) {
+					DataType = sRelType["cfsqltype"];
+				}
+			}
+		}
+		xfield.XmlAttributes["CF_DataType"] = DataType;
+		StructDelete(xfield,"XmlChildren");
+	}
 
-	<cfset Variables.DataMgrTrashcan.loadXml(TableXml,true,true)>
+	TableXml = ToString(xTable);
+	// Prepend Data Trashcan fields
+	TableXml = ReplaceNoCase(TableXml, '<field', '<field ColumnName="DataTrashcan_DateDeleted" CF_DataType="CF_SQL_DATE" Special="CreationDate" /><field', 'ONE');
+	TableXml = ReplaceNoCase(TableXml, '<field', '<field ColumnName="DataTrashcan_ID" CF_DataType="CF_SQL_INTEGER" PrimaryKey="true" Increment="true" /><field', 'ONE');
 
-</cffunction>
+	Variables.DataMgrTrashcan.loadXml(TableXml,true,true);
 
-<cffunction name="registerListener" access="private" returntype="void" output="no" hint="I register a listener with Observer to listen for services being loaded.">
+}
 
-	<!--- Need to listen to delete events before they happen so we can capture the data just prior to the deletion. --->
-	<cfset Variables.Observer.registerListener(
+/**
+* I register a listener with Observer to listen for services being loaded.
+*/
+private void function registerListener() {
+
+	// Need to listen to delete events before they happen so we can capture the data just prior to the deletion.
+	Variables.Observer.registerListener(
 		Listener = This,
 		ListenerName = "DataTrashcan",
 		ListenerMethod = "logAction",
 		EventName = "DataMgr:beforeDelete"
-	)>
+	);
 
-</cffunction>
+	// Make sure all of our trashcan tables exist for any tables covered by
+	Variables.Observer.registerListener(
+		Listener = This,
+		ListenerName = "DataTrashcan",
+		ListenerMethod = "createTrashcanTable",
+		EventName = "DataMgr:addTable"
+	);
+	
+	// Need to listen to delete events on Manager as well, because if it runs from there then that will ditch some data..
+	Variables.Observer.registerListener(
+		Listener = This,
+		ListenerName = "DataTrashcan",
+		ListenerMethod = "logAction",
+		EventName = "Manager:beforeRemove"
+	);
+	
+}
+</cfscript>
 
 </cfcomponent>

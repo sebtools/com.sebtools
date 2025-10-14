@@ -1,81 +1,85 @@
 ﻿<cfcomponent displayname="Observer" output="no">
+<cfscript>
+/*
+@Subject A component with a 'setObserver' method into which Observer will be passed.
+*/
+public function init(Subject) {
+	// Here is where event listeners will be stored.
+	Variables.sEvents = {};
 
-<cffunction name="init" access="public" returntype="any" output="no">
-	<cfargument name="Subject" type="any" required="false" hint="A component with a 'setObserver' method into which Observer will be passed.">
+	// Default the number of times a particular event can be announced in the same request.
+	Variables.RecursionLimit = 15;
 
-	<!--- Here is where event listeners will be stored.  --->
-	<cfset Variables.sEvents = StructNew()>
+	// This just provides some friendly method names that CF won't allow natively.
+	This["notifyEvent"] = announceEvent;
+	This["register"] = registerListener;
+	This["unregister"] = unregisterListener;
 
-	<!--- Default the number of times a particular event can be announced in the same request. --->
-	<cfset Variables.RecursionLimit = 15>
+	This["announce"] = announceEvent;
 
-	<!--- This just provides some friendly method names that CF won't allow natively. --->
-	<cfset This["notifyEvent"] = announceEvent>
-	<cfset This["register"] = registerListener>
-	<cfset This["unregister"] = unregisterListener>
+	// Pass Observer to the Subject.
+	if ( StructKeyExists(Arguments,"Subject") ) {
+		setSubject(Arguments.Subject);
+	}
 
-	<cfset This["announce"] = announceEvent>
+	Variables.Me = This;
 
-	<!--- Pass Observer to the Subject. --->
-	<cfif StructKeyExists(Arguments,"Subject")>
-		<cfset setSubject(Arguments.Subject)>
-	</cfif>
+	return This;
+}
 
-	<cfset Variables.Me = This>
+/*
+* I am called any time an event is run for which a listener may be attached.
+*/
+public void function announceEvent(
+	string EventName="update",
+	struct Args,
+	result,
+	This,
+	numeric RecursionLimit
+) {
+	var key = "";
+	var ii = 0;
+	var begin = 0;
+	var end = 0;
+	var sRecursiveEvent = 0;
+	var ArrLen = 0;
 
-	<cfreturn This>
-</cffunction>
+	// In case this is called before init().
+	if ( NOT StructKeyExists(Variables,"sEvents") ) {
+		exit;
+	}
 
-<cffunction name="announceEvent" access="public" returntype="void" output="no" hint="I am called any time an event is run for which a listener may be attached.">
-	<cfargument name="EventName" type="string" default="update">
-	<cfargument name="Args" type="struct" required="false">
-	<cfargument name="result" type="any" required="false">
-	<cfargument name="This" type="any" required="false">
-	<cfargument name="RecursionLimit" type="numeric" required="false">
+	// Set default for RecursionLimit. Must be after above line in case this is called before init().
+	if ( NOT StructKeyExists(Arguments,"RecursionLimit") ) {
+		Arguments.RecursionLimit = Variables.RecursionLimit;
+	}
+	// Ensure arguments exist.
+	if ( NOT StructKeyExists(Arguments,"Args") ) {
+		Arguments["Args"] = {};
+	}
+	// Pass on result and This.
+	if ( StructKeyExists(Arguments,"result") AND NOT StructKeyExists(Arguments.Args,"result") ) {
+		Arguments.Args.result = Arguments.result;
+	}
+	if ( StructKeyExists(Arguments,"This") AND NOT StructKeyExists(Arguments.Args,"This") ) {
+		Arguments.Args.This = Arguments.This;
+	}
 
-	<cfset var key = "">
-	<cfset var ii = 0>
-	<cfset var begin = 0>
-	<cfset var end = 0>
-	<cfset var sRecursiveEvent = 0>
-	<cfset var ArrLen = 0>
+	// Make sure that the event hasn't been called more times that Observer allows per request.
+	checkEventRecursion(Arguments.EventName,Arguments.RecursionLimit);
 
-	<!--- In case this is called before init(). --->
-	<cfif NOT StructKeyExists(Variables,"sEvents")>
-		<cfexit>
-	</cfif>
-
-	<!--- Set default for RecursionLimit. Must be after above line in case this is called before init(). --->
-	<cfif NOT StructKeyExists(Arguments,"RecursionLimit")>
-		<cfset Arguments.RecursionLimit = Variables.RecursionLimit>
-	</cfif>
-	<!--- Ensure arguments exist. --->
-	<cfif NOT StructKeyExists(Arguments,"Args")>
-		<cfset Arguments["Args"] = {}>
-	</cfif>
-	<!--- Pass on result and This. --->
-	<cfif StructKeyExists(Arguments,"result") AND NOT StructKeyExists(Arguments.Args,"result")>
-		<cfset Arguments.Args.result = Arguments.result>
-	</cfif>
-	<cfif StructKeyExists(Arguments,"This") AND NOT StructKeyExists(Arguments.Args,"This")>
-		<cfset Arguments.Args.This = Arguments.This>
-	</cfif>
-
-	<!--- Make sure that the event hasn't been called more times that Observer allows per request. --->
-	<cfset checkEventRecursion(Arguments.EventName,Arguments.RecursionLimit)>
-
-	<!--- If the event has listeners, call the listener method for each. --->
-	<cfif StructKeyExists(Variables.sEvents,Arguments.EventName)>
-		<cfset ArrLen = ArrayLen(Variables.sEvents[Arguments.EventName])>
-		<cfif ArrLen>
-			<cfloop index="ii" from="1" to="#ArrLen#">
-				<cfset begin = getTickCount()>
-				<cfset callListener(Variables.sEvents[EventName][ii],Arguments.Args)>
-				<cfset end = getTickCount()>
-				<!--- Observer should know about its own announcements. --->
-				<cfif NOT StructKeyExists(request,"Observer_announcingevent")>
-					<cfset request["Observer_announcingevent"] = now()>
-					<cfset sRecursiveEvent = {
+	// If the event has listeners, call the listener method for each.
+	if ( StructKeyExists(Variables.sEvents,Arguments.EventName) ) {
+		ArrLen = ArrayLen(Variables.sEvents[Arguments.EventName]);
+		if ( ArrLen ) {
+			for ( ii=1; ii LTE ArrLen; ii++ ) {
+				begin = getTickCount();
+				callListener(Variables.sEvents[EventName][ii],Arguments.Args);
+				end = getTickCount();
+				// Observer should know about its own announcements.
+				if ( NOT StructKeyExists(request,"Observer_announcingevent") ) {
+					request["Observer_announcingevent"] = now();
+					sRecursiveEvent = {
 						EventName="Observer:announceEvent",
 						Args={
 							RunTime=end-begin,
@@ -85,40 +89,44 @@
 							MethodName="#Variables.sEvents[EventName][ii].ListenerMethod#",
 							args=Arguments.Args
 						}
-					}>
-					<cfinvoke
-						component="#Variables.Me#"
-						method="announceEvent"
-						argumentcollection="#sRecursiveEvent#"
-					>
-					</cfinvoke>
-					<cfset StructDelete(request,"Observer_announcingevent")>
-				</cfif>
-			</cfloop>
-		</cfif>
-	</cfif>
+					};
+					invoke(
+						Variables.Me,
+						"announceEvent",
+						sRecursiveEvent
+					);
+					StructDelete(request,"Observer_announcingevent");
+				}
+			}
+		}
+	}
 
-	<cfset request.ObserverEventStack[Arguments.EventName] = request.ObserverEventStack[Arguments.EventName] - 1>
+	request.ObserverEventStack[Arguments.EventName] = request.ObserverEventStack[Arguments.EventName] - 1;
+}
 
-</cffunction>
+/*
+* I call the method for a listener.
+*/
+public function callListener(
+	required struct sListener,
+	struct Args
+) {
+	
+	if ( sListener.delay ) {
+		callListenerLater(ArgumentCollection=Arguments)
+	} else {
+		callListenerNow(ArgumentCollection=Arguments);
+	}
 
-<cffunction name="callListener" access="public" returntype="any" output="no" hint="I call the method for a listener.">
-	<cfargument name="sListener" type="struct" required="true">
-	<cfargument name="Args" type="struct" required="false">
+}
 
-	<cfif sListener.delay>
-		<cfset callListenerLater(ArgumentCollection=Arguments)>
-	<cfelse>
-		<cfset callListenerNow(ArgumentCollection=Arguments)>
-	</cfif>
-
-</cffunction>
-
-<cffunction name="callListenerLater" access="public" returntype="any" output="no" hint="I call the method for a listener.">
-	<cfargument name="sListener" type="struct" required="true">
-	<cfargument name="Args" type="struct" required="false">
-
-	<cfscript>
+/*
+* I call the method for a listener.
+*/
+public function callListenerLater(
+	required struct sListener,
+	struct Args
+) {
 	var ii = 0;
 
 	Arguments["Hash"] = makeListenerCallHash(ArgumentCollection=Arguments);
@@ -136,102 +144,130 @@
 		request["Observer"]["aDelayeds"],
 		Arguments
 	);
-	</cfscript>
 
-</cffunction>
+}
 
-<cffunction name="callListenerNow" access="public" returntype="any" output="no" hint="I call the method for a listener.">
-	<cfargument name="sListener" type="struct" required="true">
-	<cfargument name="Args" type="struct" required="false">
+/*
+* I call the method for a listener.
+*/
+public function callListenerNow(
+	required struct sListener,
+	struct Args
+) {
+	invoke(
+		sListener.Listener,
+		sListener.ListenerMethod,
+		Arguments.Args
+	);
 
-	<cfinvoke
-		component="#sListener.Listener#"
-		method="#sListener.ListenerMethod#"
-		argumentcollection="#Arguments.Args#"
-	>
-	</cfinvoke>
+}
 
-</cffunction>
+/*
+* I return all of the event listeners that Observer is tracking.
+*/
+public struct function getEventListeners() {
 
-<cffunction name="getEventListeners" access="public" returntype="struct" output="no" hint="I return all of the event listeners that Observer is tracking.">
-	<cfreturn Variables.sEvents>
-</cffunction>
+	return Variables.sEvents;
+}
 
-<cffunction name="getListeners" access="public" returntype="struct" output="no" hint="I return all of the listeners for the given event.">
-	<cfargument name="EventName" type="string" default="update">
+/*
+* I return all of the listeners for the given event.
+*/
+public struct function getListeners(string EventName="update") {
+	var sResult = {};
+	var ii = "";
 
-	<cfset var sResult = StructNew()>
-	<cfset var ii = "">
+	// Look through all of the event listeners and get only the ones for the given event.
+	if ( StructKeyExists(Variables.sEvents,Arguments.EventName) AND ArrayLen(Variables.sEvents[Arguments.EventName]) ) {
+		for ( ii=1; ii LTE ArrayLen(Variables.sEvents[Arguments.EventName]); ii++ ) {
+			sResult[Variables.sEvents[Arguments.EventName][ii]["ListenerName"]] = Variables.sEvents[Arguments.EventName][ii];
+		}
+	}
 
-	<!--- Look through all of the event listeners and get only the ones for the given event. --->
-	<cfif StructKeyExists(Variables.sEvents,Arguments.EventName) AND ArrayLen(Variables.sEvents[Arguments.EventName])>
-		<cfloop index="ii" from="1" to="#ArrayLen(Variables.sEvents[Arguments.EventName])#">
-			<cfset sResult[Variables.sEvents[Arguments.EventName][ii]["ListenerName"]] = Variables.sEvents[Arguments.EventName][ii]>
-		</cfloop>
-	</cfif>
+	return sResult;
+}
 
-	<cfreturn sResult>
-</cffunction>
+/*
+* I make sure that an event isn't called more times than Observer is set to allow.
+*/
+private void function checkEventRecursion(
+	string EventName="update",
+	required numeric RecursionLimit
+) {
 
-<cffunction name="checkEventRecursion" access="private" returntype="void" output="no" hint="I make sure that an event isn't called more times than Observer is set to allow.">
-	<cfargument name="EventName" type="string" default="update">
-	<cfargument name="RecursionLimit" type="numeric" required="true">
+	// Make sure the request variable exists.
+	if ( NOT StructKeyExists(request,"ObserverEventStack") ) {
+		request["ObserverEventStack"] = {};
+	}
 
-	<!--- Make sure the request variable exists. --->
-	<cfif NOT StructKeyExists(request,"ObserverEventStack")>
-		<cfset request["ObserverEventStack"] = {}>
-	</cfif>
+	// Default the count to zero for this event.
+	if ( NOT StructKeyExists(request.ObserverEventStack,Arguments.EventName) ) {
+		request.ObserverEventStack[Arguments.EventName] = 0;
+	}
 
-	<!--- Default the count to zero for this event. --->
-	<cfif NOT StructKeyExists(request.ObserverEventStack,Arguments.EventName)>
-		<cfset request.ObserverEventStack[Arguments.EventName] = 0>
-	</cfif>
+	// Increment the count for this event
+	request.ObserverEventStack[Arguments.EventName] = request.ObserverEventStack[Arguments.EventName] + 1;
 
-	<!--- Increment the count for this event --->
-	<cfset request.ObserverEventStack[Arguments.EventName] = request.ObserverEventStack[Arguments.EventName] + 1>
+	// Throw an exception if the event is called more times in a request than allowed.
+	if ( request.ObserverEventStack[Arguments.EventName] GT Arguments.RecursionLimit ) {
+		throw(type="Observer",message="Event announced recursively",detail="The #Arguments.EventName# event was announced more than the maximum number of times allowed (#Arguments.RecursionLimit#) during a single request.");
+	}
 
-	<!--- Throw an exception if the event is called more times in a request than allowed. --->
-	<cfif request.ObserverEventStack[Arguments.EventName] GT Arguments.RecursionLimit>
-		<cfthrow type="Observer" message="Event announced recursively" detail="The #Arguments.EventName# event was announced more than the maximum number of times allowed (#Arguments.RecursionLimit#) during a single request.">
-	</cfif>
+}
 
-</cffunction>
+/*
+* I register a listener for an event. Not Idempotent.
+* @Listener The component listening for the event, on which a method will be called.
+* @ListenerName A name for the listening component.
+* @ListenerMethod The method to call on the component when the event occurs.
+* @EventName The name of the event to which this listener should respond.
+* @delay Indicate if the listener method call should be delayed until the runDelays method is called at the end of the request.
+*/
+public void function registerListener(
+	required Listener,
+	required string ListenerName,
+	string ListenerMethod="listen",
+	string EventName="update",
+	boolean delay="false"
+) {
+	
+	unregisterListener(ArgumentCollection=Arguments);
 
-<cffunction name="registerListener" access="public" returntype="void" output="no" hint="I register a listener for an event. Not Idempotent.">
-	<cfargument name="Listener" type="any" required="true" hint="The component listening for the event, on which a method will be called.">
-	<cfargument name="ListenerName" type="string" required="true" hint="A name for the listening component.">
-	<cfargument name="ListenerMethod" type="string" default="listen" hint="The method to call on the component when the event occurs.">
-	<cfargument name="EventName" type="string" default="update" hint="The name of the event to which this listener should respond.">
-	<cfargument name="delay" type="boolean" default="false" hint="Indicate if the listener method call should be delayed until the runDelays method is called at the end of the request.">
+	if ( NOT StructKeyExists(Variables.sEvents,Arguments.EventName) ) {
+		Variables.sEvents[Arguments.EventName] = ArrayNew(1);
+	}
 
-	<cfset unregisterListener(ArgumentCollection=Arguments)>
+	ArrayAppend(Variables.sEvents[Arguments.EventName],Arguments);
 
-	<cfif NOT StructKeyExists(Variables.sEvents,Arguments.EventName)>
-		<cfset Variables.sEvents[Arguments.EventName] = ArrayNew(1)>
-	</cfif>
+}
 
-	<cfset ArrayAppend(Variables.sEvents[Arguments.EventName],Arguments)>
+/*
+* I register one listener to listen for multiple events at once.
+* @Listener The component listening for the event, on which a method will be called.
+* @ListenerName A name for the listening component.
+* @ListenerMethod The method to call on the component when the event occurs.
+* @EventNames A list of events to which this listener should respond.
+* @delay Indicate if the listener method call should be delayed until the runDelays method is called at the end of the request.
+*/
+public void function registerListeners(
+	required Listener,
+	required string ListenerName,
+	string ListenerMethod="listen",
+	required string EventNames,
+	boolean delay
+) {
+	var event = "";
 
-</cffunction>
+	for ( event in ListToArray(Arguments.EventNames) ) {
+		registerListener(Listener=Listener,ListenerName=ListenerName,ListenerMethod=ListenerMethod,EventName=event);
+	}
 
-<cffunction name="registerListeners" access="public" returntype="void" output="no" hint="I register one listener to listen for multiple events at once.">
-	<cfargument name="Listener" type="any" required="true" hint="The component listening for the event, on which a method will be called.">
-	<cfargument name="ListenerName" type="string" required="true" hint="A name for the listening component.">
-	<cfargument name="ListenerMethod" type="string" default="listen" hint="The method to call on the component when the event occurs.">
-	<cfargument name="EventNames" type="string" required="true" hint="A list of events to which this listener should respond.">
-	<cfargument name="delay" type="boolean" default="false" hint="Indicate if the listener method call should be delayed until the runDelays method is called at the end of the request.">
+}
 
-	<cfset var event = "">
-
-	<cfloop list="#Arguments.EventNames#" index="event">
-		<cfset registerListener(Listener=Listener,ListenerName=ListenerName,ListenerMethod=ListenerMethod,EventName=event)>
-	</cfloop>
-
-</cffunction>
-
-<cffunction name="runDelays" access="public" returntype="void" output="no" hint="I run any delayed listener method calls.">
-
-	<cfscript>
+/*
+* I run any delayed listener method calls.
+*/
+public void function runDelays() {
 	var sListener = 0;
 
 	//Make sure request variables exist.
@@ -243,83 +279,84 @@
 		ArrayDeleteAt(request.Observer.aDelayeds,1);
 		callListenerNow(ArgumentCollection=sListener);
 	}
-	</cfscript>
+}
 
-</cffunction>
+/*
+* I make a listener no longer listen for the given event.
+* @Listener The component that was listening for the event.
+* @ListenerMethod The method that was to be called on the component when the event occurs.
+* @EventName The name of the event to which this listener would have responded. No action is taken unless this is included.
+*/
+public void function unregisterListener(
+	required string ListenerName,
+	string ListenerMethod="listen"	,
+	string EventName
+) {
+	var ii = 0;
 
-<cffunction name="unregisterListener" access="public" returntype="void" output="no" hint="I make a listener no longer listen for the given event.">
-	<cfargument name="ListenerName" type="string" required="true" hint="The component that was listening for the event.">
-	<cfargument name="ListenerMethod" type="string" default="listen" hint="The method that was to be called on the component when the event occurs.">
-	<cfargument name="EventName" type="string" required="false" hint="The name of the event to which this listener would have responded. No action is taken unless this is included.">
-
-	<cfset var ii = 0>
-
-	<cfif StructKeyExists(Variables.sEvents,Arguments.EventName)>
-		<cfloop index="ii" from="#ArrayLen(Variables.sEvents[Arguments.EventName])#" to="1" step="-1">
-			<cfif
+	if ( StructKeyExists(Variables.sEvents,Arguments.EventName) ) {
+		for ( ii=ArrayLen(Variables.sEvents[Arguments.EventName]); ii GTE 1; ii-- ) {
+			if (
 					Arguments.ListenerName EQ Variables.sEvents[Arguments.EventName][ii].ListenerName
 				AND	Arguments.ListenerMethod EQ Variables.sEvents[Arguments.EventName][ii].ListenerMethod
 				AND	Arguments.EventName EQ Variables.sEvents[Arguments.EventName][ii].EventName
-			>
-				<cfset ArrayDeleteAt(Variables.sEvents[Arguments.EventName],ii)>
-				<cfbreak>
-			</cfif>
-		</cfloop>
-	</cfif>
+			) {
+				ArrayDeleteAt(Variables.sEvents[Arguments.EventName],ii);
+				break;
+			}
+		}
+	}
+}
 
-</cffunction>
+public void function injectObserver(required Component) {
+	
+	Arguments.Component.setObserver = setObserver;
 
-<cffunction name="injectObserver" access="public" returntype="string" output="no">
-	<cfargument name="Component" type="any" required="true">
+	Arguments.Component.setObserver(This);
 
-	<cfset Arguments.Component.setObserver = setObserver>
+}
 
-	<cfset Arguments.Component.setObserver(This)>
+public void function setObserver(required Observer) {
+	
+	if ( NOT StructKeyExists(Variables,"Observer") ) {
+		Variables.Observer = Arguments.Observer;
+		This.Observer = Arguments.Observer;
+	}
+}
 
-</cffunction>
+public function setSubject(required Subject) {
 
-<cffunction name="setObserver" access="public" returntype="string" output="no">
-	<cfargument name="Observer" type="any" required="true">
+	Variables.Subject = Arguments.Subject;
 
-	<cfif NOT StructKeyExists(Variables,"Observer")>
-		<cfset Variables.Observer = Arguments.Observer>
-		<cfset This.Observer = Arguments.Observer>
-	</cfif>
+	if ( StructKeyExists(Variables.Subject,"setObserver") ) {
+		Variables.Subject.setObserver(This);
+	}
 
-</cffunction>
+	return This;
+}
 
-<cffunction name="setSubject" access="public" returntype="any" output="no">
-	<cfargument name="Subject" type="any" required="true">
-
-	<cfset Variables.Subject = Arguments.Subject>
-
-	<cfif StructKeyExists(Variables.Subject,"setObserver")>
-		<cfset Variables.Subject.setObserver(This)>
-	</cfif>
-
-	<cfreturn This>
-</cffunction>
-
-<cffunction name="loadRequestVars" access="private" returntype="any" output="no" hint="I make sure the needed request variables exist.">
-	<cfscript>
+/*
+* I make sure the needed request variables exist.
+*/
+private function loadRequestVars() {
+	
 	if ( NOT StructKeyExists(request,"Observer") ) {
 		request["Observer"] = {};
 	}
 	if ( NOT StructKeyExists(request["Observer"],"aDelayeds") ) {
 		request["Observer"]["aDelayeds"] = [];
 	}
-	</cfscript>
-</cffunction>
 
-<cffunction name="makeListenerCallHash" access="private" returntype="string" output="no">
-	<cfargument name="sListener" type="struct" required="true">
-	<cfargument name="Args" type="struct" required="false">
+}
 
-	<cfset var result = Arguments.sListener.ListenerName & "." & Arguments.sListener.ListenerMethod & "." & Arguments.sListener.EventName>
-	<cfset var sCanonicalArgs = {}>
-	<cfset var key = "">
+private string function makeListenerCallHash(
+	required struct sListener,
+	struct Args
+) {
+	var result = Arguments.sListener.ListenerName & "." & Arguments.sListener.ListenerMethod & "." & Arguments.sListener.EventName;
+	var sCanonicalArgs = {};
+	var key = "";
 
-	<cfscript>
 	if ( StructKeyExists(Arguments,"Args") AND StructCount(Arguments.Args) ) {
 		for ( key in Arguments.Args ) {
 			//We don't want to deal with null args
@@ -333,9 +370,9 @@
 	}
 
 	result = Hash(LCase(result));
-	</cfscript>
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
+</cfscript>
 
 </cfcomponent>

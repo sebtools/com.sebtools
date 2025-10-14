@@ -1,28 +1,34 @@
 <cfcomponent displayname="Amazon Signature Version Base Component" output="false">
+<cfscript>
+public function init(required AWS) {
+	var key = "";
 
-<cffunction name="init" access="public" returntype="any" output="false" hint="I initialize and return the component.">
-	<cfargument name="AWS" type="any" required="true">
+	for ( key in Arguments ) {
+		Variables[key] = Arguments[key];
+		if ( isObject(Arguments[key]) ) {
+			This[key] = Arguments[key];
+		}
+	}
 
-	<cfset var key = "">
+	return This;
+}
 
-	<cfloop collection="#Arguments#" item="key">
-		<cfset Variables[key] = Arguments[key]>
-		<cfif isObject(Arguments[key])>
-			<cfset This[key] = Arguments[key]>
-		</cfif>
-	</cfloop>
+/**
+* I return the raw(ish) results of Amazon REST Call.
+* @subdomain The subdomain for the AWS service being used.
+* @Action The AWS API action being called.
+* @method The HTTP method to invoke.
+* @parameters A struct of HTTP URL parameters to send in the request.
+* @timeout The default call timeout.
+*/
 
-	<cfreturn This>
-</cffunction>
-
-<cffunction name="getRequest" access="public" returntype="struct" output="false" hint="I return the raw(ish) results of Amazon REST Call.">
-	<cfargument name="subdomain" type="string" required="true" hint="The subdomain for the AWS service being used.">
-	<cfargument name="Action" type="string" required="true" hint="The AWS API action being called.">
-	<cfargument name="method" type="string" default="GET" hint="The HTTP method to invoke.">
-	<cfargument name="parameters" type="struct" default="#structNew()#" hint="An struct of HTTP URL parameters to send in the request.">
-	<cfargument name="timeout" type="numeric" default="20" hint="The default call timeout.">
-
-	<cfscript>
+public struct function getRequest(
+	required string subdomain,
+	required string Action,
+	string method="GET",
+	struct parameters="#{}#",
+	numeric timeout="20"
+) {
 	var timestamp = makeTimeStamp();
 	var paramtype = "URL";
 	var sortedParams = "";
@@ -62,51 +68,60 @@
 		},
 		params=[]
 	};
-	</cfscript>
-	<cfloop list="#sortedParams#" index="param">
-		<cfset ArrayAppend(
+
+	for ( param in ListToArray(sortedParams) ) {
+		ArrayAppend(
 			sRequest.params,
 			{type="#paramType#",name="#param#",value="#trim(arguments.parameters[param])#"}
-		)>
-	</cfloop>
+		);
+	}
 
-	<cfreturn sRequest>
-</cffunction>
+	return sRequest;
+}
 
-<cffunction name="createSignature" access="public" returntype="any" output="false" hint="Create request signature according to AWS standards">
-	<cfargument name="string" type="any" required="true" />
+/**
+* I create request signature according to AWS standards.
+*/
+public function createSignature(required any string) {
+	throw(message="Method must be created in the signature component.");
+}
 
-	<cfthrow message="Method must be created in the signature component.">
-</cffunction>
+/**
+* I get the Amazon access key.
+*/
+public string function getAccessKey() {
+	return Variables.AWS.getAccessKey();
+}
 
-<cffunction name="getAccessKey" access="public" returntype="string" output="false" hint="I get the Amazon access key.">
-	 <cfreturn Variables.AWS.getAccessKey()>
-</cffunction>
+/**
+* I get the region for AWS Service.
+*/
+public string function getRegion() {
+	return Variables.AWS.getRegion();
+}
 
-<cffunction name="getRegion" access="public" returntype="string" output="false" hint="I get the region for AWS Service.">
+/**
+* I get the Amazon secret key.
+*/
+public string function getSecretKey() {
+	return Variables.AWS.getSecretKey();
+}
 
-	<cfreturn Variables.AWS.getRegion()>
-</cffunction>
+/**
+* I return the authorization string.
+*/
+public string function getAuthorizationString(required string timestamp) {
+	throw(message="Method must be created in the signature component.");
+}
 
-<cffunction name="getSecretKey" access="public" returntype="string" output="false" hint="I get the Amazon access key.">
-	 <cfreturn Variables.AWS.getSecretKey()>
-</cffunction>
+public string function makeTimeStamp() {
+	return GetHTTPTimeString(Now());
+}
 
-<cffunction name="getAuthorizationString" access="public" returntype="string" output="false" hint="I return the authorization string.">
-	<cfargument name="timestamp" type="string" required="false">
-
-	<cfthrow message="Method must be created in the signature component.">
-</cffunction>
-
-<cffunction name="makeTimeStamp" access="public" returntype="string" output="false">
-	<cfreturn GetHTTPTimeString(Now())>
-</cffunction>
-
-<cffunction name="HMAC_SHA256" access="private" returntype="binary" output="false" hint="">
-	<cfargument name="signKey" type="string" required="true">
-	<cfargument name="signMessage" type="string" required="true">
-
-	<cfscript>
+private binary function HMAC_SHA256(
+	required string signKey,
+	required string signMessage
+) {
 	var jMsg = JavaCast("string",Arguments.signMessage).getBytes("utf-8");
 	var jKey = JavaCast("string",Arguments.signKey).getBytes("utf-8");
 	var key = createObject("java","javax.crypto.spec.SecretKeySpec").init(jKey,"HmacSHA256");
@@ -115,10 +130,10 @@
 	mac.update(jMsg);
 
 	return mac.doFinal();
-	</cfscript>
-</cffunction>
+}
 
-<!---
+
+/*
 <OWNER> = James Solo
 <YEAR> = 2013
 
@@ -135,24 +150,27 @@ Redistributions of source code must retain the above copyright notice, this list
 Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
---->
-<cffunction name="HMAC_SHA256_bin" access="public" returntype="binary" output="false" hint="THIS WORKS DO NOT FUCK WITH IT.">
-	<cfargument name="signMessage"    type="string" required="true" />
-	<cfargument name="signKey"        type="binary" required="true" />
+*/
+/**
+* THIS WORKS DO NOT FUCK WITH IT.
+*/
+public binary function HMAC_SHA256_bin(
+	required string signMessage,
+	required binary signKey
+) {
+	var jMsg = JavaCast("string",Arguments.signMessage).getBytes("UTF8");
+	var jKey = Arguments.signKey;
 
-	<cfset var jMsg = JavaCast("string",arguments.signMessage).getBytes("UTF8") />
-	<cfset var jKey = arguments.signKey />
+	var key = createObject("java","javax.crypto.spec.SecretKeySpec");
+	var mac = createObject("java","javax.crypto.Mac");
 
-	<cfset var key = createObject("java","javax.crypto.spec.SecretKeySpec") />
-	<cfset var mac = createObject("java","javax.crypto.Mac") />
+	key = key.init(jKey,"HmacSHA256");
 
-	<cfset key = key.init(jKey,"HmacSHA256") />
+	mac = mac.getInstance(key.getAlgorithm());
+	mac.init(key);
+	mac.update(jMsg);
 
-	<cfset mac = mac.getInstance(key.getAlgorithm()) />
-	<cfset mac.init(key) />
-	<cfset mac.update(jMsg) />
-
-	<cfreturn mac.doFinal() />
-</cffunction>
-
+	return mac.doFinal();
+}
+</cfscript>
 </cfcomponent>

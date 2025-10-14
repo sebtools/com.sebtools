@@ -1,151 +1,164 @@
 <cfcomponent>
+<cfscript>
+public function init(
+	string id="rate",
+	string timeSpan="#CreateTimeSpan(0,0,0,3)#"
+) {
 
-<cffunction name="init" access="public" returntype="any" output="false">
-	<cfargument name="id" type="string" default="rate">
-	<cfargument name="timeSpan" type="string" default="#CreateTimeSpan(0,0,0,3)#">
+	Variables.instance = Arguments;
+	Variables.running = {};
 
-	<cfset Variables.instance = Arguments>
-	<cfset Variables.running = StructNew()>
+	Variables.timeSpan_ms = Int(Arguments.timeSpan * 100000 / 1.1574074074) * 1000;
 
-	<cfset Variables.timeSpan_ms = Int(Arguments.timeSpan * 100000 / 1.1574074074) * 1000>
+	Variables.Cacher = CreateObject("component","MrECache").init("rlcache",CreateTimeSpan(0,0,10,0));
+	Variables.MrECache = CreateObject("component","MrECache").init("limit_#Arguments.id#",Arguments.timeSpan);
 
-	<cfset Variables.Cacher = CreateObject("component","MrECache").init("rlcache",CreateTimeSpan(0,0,10,0))>
-	<cfset Variables.MrECache = CreateObject("component","MrECache").init("limit_#Arguments.id#",Arguments.timeSpan)>
+	return This;
+}
 
-	<cfreturn This>
-</cffunction>
+/**
+* I mark an id as having just been called.
+*/
+public void function called(
+	required string id,
+	result
+) {
 
-<cffunction name="called" access="public" returntype="void" output="false" hint="I mark an id as having just been called.">
-	<cfargument name="id" type="string" required="true">
-	<cfargument name="result" type="any" required="false">
+	if ( NOT StructKeyExists(Arguments,"result") ) {
+		Arguments.result = now();
+	}
 
-	<cfif NOT StructKeyExists(Arguments,"result")>
-		<cfset Arguments.result = now()>
-	</cfif>
+	Variables.MrECache.put(Arguments.id,Arguments.result);
+	StructDelete(Variables.running,Arguments.id);
 
-	<cfset Variables.MrECache.put(Arguments.id,Arguments.result)>
-	<cfset StructDelete(Variables.running,Arguments.id)>
+}
 
-</cffunction>
+/**
+* I see if the given id is currently running.
+*/
+public void function calling(required string id) {
+	Variables.running[Arguments.id] = now();
+}
 
-<cffunction name="calling" access="public" returntype="void" output="false" hint="I see if the given id is currently running.">
-	<cfargument name="id" type="string" required="true">
+public boolean function isAvailable(required string id) {
+	return Variables.MrECache.exists(Arguments.id);
+}
 
-	<cfset Variables.running[Arguments.id] = now()>
+/**
+* I see if the given id is callable.
+*/
+public boolean function isCallable(required string id) {
+	return NOT ( isAvailable(Arguments.id) OR isCalling(Arguments.id) );
+}
 
-</cffunction>
+/**
+* I see if the given id is being called currently.
+* @check Check if it was run recently.
+*/
+public boolean function isCalling(
+	required string id,
+	boolean check="false"
+) {
 
-<cffunction name="isAvailable" access="public" returntype="boolean" output="false">
-	<cfargument name="id" type="string" required="true">
+	// If it was last called over 10 minutes ago, something is hinky and/or no need to worry about the rate limiting for this part.
+	if (
+		Arguments.check
+		AND
+		StructKeyExists(Variables.running,Arguments.id)
+		AND
+		DateAdd("n",10,Variables.running[Arguments.id]) LT now()
+	) {
+		StructDelete(Variables.running,Arguments.id);
+	}
 
-	<cfreturn Variables.MrECache.exists(Arguments.id)>
-</cffunction>
+	return StructKeyExists(Variables.running,Arguments.id);
+}
 
-<cffunction name="isCallable" access="public" returntype="boolean" output="false" hint="I see if the given id is callable.">
-	<cfargument name="id" type="string" required="true">
-
-	<cfreturn NOT ( isAvailable(Arguments.id) OR isCalling(Arguments.id) )>
-</cffunction>
-
-<cffunction name="isCalling" access="public" returntype="boolean" output="false" hint="I see if the given id is being called currently.">
-	<cfargument name="id" type="string" required="true">
-	<cfargument name="check" type="boolean" default="false" hint="Check if it was run recently.">
-
-	<!--- If it was last called over 10 minutes ago, something is hinky and/or no need to worry about the rate limiting for this part. --->
-	<cfif
-			Arguments.check
-		AND	StructKeyExists(Variables.running,Arguments.id)
-		AND	DateAdd("n",10,Variables.running[Arguments.id]) LT now()
-	>
-		<cfset StructDelete(Variables.running,Arguments.id)>
-	</cfif>
-
-	<cfreturn StructKeyExists(Variables.running,Arguments.id)>
-</cffunction>
-
-<cffunction name="cached" access="public" returntype="any" output="false" hint="I call the given method if it hasn't been called within the rate limit time. I return a cached value if one is available.">
-	<cfargument name="id" type="string" required="true">
-	<cfargument name="Component" type="any" required="true">
-	<cfargument name="MethodName" type="string" required="true">
-	<cfargument name="Args" type="struct" required="false">
-	<cfargument name="default" type="any" required="false">
-	<cfargument name="timeSpan" type="string" required="false">
-	<cfargument name="idleTime" type="string" required="false">
-	<cfargument name="waitlimit" type="numeric" default="100" hint="Maximum number of milliseconds to wait.">
-	<cfargument name="waitstep" type="numeric" default="20" hint="Milliseconds to wait between checks.">
-
-	<cfset var sCacherArgs = {
+/**
+* I call the given method if it hasn't been called within the rate limit time. I return a cached value if one is available.
+* @waitlimit Maximum number of milliseconds to wait.
+* @waitstep Milliseconds to wait between checks.
+*/
+public function cached(
+	required string id,
+	required Component,
+	required MethodName,
+	struct Args,
+	default,
+	string timeSpan,
+	numeric waitlimit="100",
+	numeric waitstep="20"
+) {
+	var sCacherArgs = {
 		Component=This,
 		MethodName="method",
 		Args=Arguments
-	}>
-	<cfif StructKeyExists(Arguments,"timeSpan")>
-		<cfset sCacherArgs["timeSpan"] = Arguments.timeSpan>
-	</cfif>
-	<cfif StructKeyExists(Arguments,"idleTime")>
-		<cfset sCacherArgs["idleTime"] = Arguments.idleTime>
-	</cfif>
+	};
+	if ( StructKeyExists(Arguments,"timeSpan") ) {
+		sCacherArgs["timeSpan"] = Arguments.timeSpan;
+	}
+	if ( StructKeyExists(Arguments,"idleTime") ) {
+		sCacherArgs["idleTime"] = Arguments.idleTime;
+	}
 
-	<cfreturn Variables.Cacher.meth(ArgumentCollection=sCacherArgs)>
-</cffunction>
+	return Variables.Cacher.meth(ArgumentCollection=sCacherArgs);
+}
 
-<cffunction name="method" access="public" returntype="any" output="false" hint="I call the given method if it hasn't been called within the rate limit time.">
-	<cfargument name="id" type="string" required="true">
-	<cfargument name="Component" type="any" required="true">
-	<cfargument name="MethodName" type="string" required="true">
-	<cfargument name="Args" type="struct" required="false">
-	<cfargument name="default" type="any" required="false">
-	<cfargument name="waitlimit" type="numeric" default="100" hint="Maximum number of milliseconds to wait.">
-	<cfargument name="waitstep" type="numeric" default="20" hint="Milliseconds to wait between checks.">
+/**
+* I call the given method if it hasn't been called within the rate limit time.
+* @waitlimit Maximum number of milliseconds to wait.
+* @waitstep Milliseconds to wait between checks.
+*/
+public function method(
+	required string id,
+	required Component,
+	required MethodName,
+	struct Args,
+	default,
+	numeric waitlimit="100",
+	numeric waitstep="20"
+) {
+	var local = {};
+	var waited = 0;
 
-	<cfset var local = StructNew()>
-	<cfset var waited = 0>
+	// No reason to wait longer than the limit of the rate limiter.
+	Arguments.waitlimit = Min(Arguments.waitlimit,Variables.timeSpan_ms);
 
-	<!--- No reason to wait longer than the limit of the rate limiter. --->
-	<cfset Arguments.waitlimit = Min(Arguments.waitlimit,Variables.timeSpan_ms)>
-
-	<!--- If method is currently running, wait up to the wait limit for it to finish. --->
-	<cfif isCalling(Arguments.id,true)>
-		<cfscript>
+	// If method is currently running, wait up to the wait limit for it to finish.
+	if ( isCalling(Arguments.id,true) ) {
 		while ( isCalling(Arguments.id) AND waited LT waitlimit ) {
 			sleep(Arguments.waitstep);
 			waited += Arguments.waitstep;
 		}
-		</cfscript>
-	</cfif>
+	}
 
-	<cfif NOT isCallable(Arguments.id)>
-		<!--- If MrECache has rate limiter value then we are within the rate limit and must return the default value. --->
-		<cfif NOT StructKeyExists(Arguments,"default")>
-			<cfif isAvailable(Arguments.id)>
-				<cfset Arguments.default = Variables.MrECache.get(Arguments.id)>
-			<cfelse>
-				<cfset called(Arguments.id)>
-				<cfthrow message="Unable to retrieve data from #Arguments.MethodName# (waited #waited# milliseconds)." type="RateLimiter">
-			</cfif>
-		</cfif>
-		<cfset called(Arguments.id,Arguments.default)>
-		<cfreturn Arguments.default>
-	<cfelse>
-		<!--- If not within the rate limit then call the method and return the value. --->
-		<cfset calling(Arguments.id)>
-		<cfif NOT StructKeyExists(Arguments,"Args")>
-			<cfset Arguments["Args"] = {}>
-		</cfif>
-		<cfinvoke
-			returnvariable="local.result"
-			component="#Arguments.Component#"
-			method="#Arguments.MethodName#"
-			argumentcollection="#Arguments.Args#"
-		>
-		<cfif StructKeyExists(local,"result")>
-			<cfset called(Arguments.id,local.result)>
-			<cfreturn local.result>
-		<cfelse>
-			<cfset called(Arguments.id)>
-		</cfif>
-	</cfif>
+	if ( NOT isCallable(Arguments.id) ) {
+		// If MrECache has rate limiter value then we are within the rate limit and must return the default value.
+		if ( NOT StructKeyExists(Arguments,"default") ) {
+			if ( isAvailable(Arguments.id) ) {
+				Arguments.default = Variables.MrECache.get(Arguments.id);
+			} else {
+				called(Arguments.id);
+				throw(message="Unable to retrieve data from #Arguments.MethodName# (waited #waited# milliseconds).",type="RateLimiter");
+			}
+		}
+		called(Arguments.id,Arguments.default);
+		return Arguments.default;
+	} else {
+		// If not within the rate limit then call the method and return the value.
+		calling(Arguments.id);
+		if ( NOT StructKeyExists(Arguments,"Args") ) {
+			Arguments["Args"] = {};
+		}
+		local.result = invoke(Arguments.Component,Arguments.MethodName,Arguments.Args);
+		if ( StructKeyExists(local,"result") ) {
+			called(Arguments.id,local.result);
+			return local.result;
+		} else {
+			called(Arguments.id);
+		}
+	}
 
-</cffunction>
-
+}
+</cfscript>
 </cfcomponent>

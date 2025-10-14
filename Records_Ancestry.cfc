@@ -1,22 +1,21 @@
 <cfcomponent displayname="Records (Ancestry)" extends="com.sebtools.Records" output="no">
 
-<cffunction name="getAncestors" access="public" returntype="string" output="no">
+<cfscript>
+public string function getAncestors() {
+	var sMeta = getMetaStruct();
+	var PrimaryKeyName = sMeta.arg_pk;
+	var ParentKeyName = "Parent#PrimaryKeyName#";
+	var ii = 0;
+	var NumRecs = numRecords();
+	var sGet = 0;
+	var qRecord = 0;
+	var result = "";
 
-	<cfset var sMeta = getMetaStruct()>
-	<cfset var PrimaryKeyName = sMeta.arg_pk>
-	<cfset var ParentKeyName = "Parent#PrimaryKeyName#">
-	<cfset var ii = 0>
-	<cfset var NumRecs = numRecords()>
-	<cfset var sGet = 0>
-	<cfset var qRecord = 0>
-	<cfset var result = "">
+	Arguments = convertArgs(ArgumentCollection=Arguments);
 
-	<cfset Arguments = convertArgs(ArgumentCollection=Arguments)>
+	sGet = {"#PrimaryKeyName#"=Arguments[PrimaryKeyName]};
+	qRecord = getRecord(ArgumentCollection=sGet,fieldlist=ParentKeyName);
 
-	<cfset sGet = {"#PrimaryKeyName#"=Arguments[PrimaryKeyName]}>
-	<cfset qRecord = getRecord(ArgumentCollection=sGet,fieldlist=ParentKeyName)>
-
-	<cfscript>
 	if ( Val(qRecord[ParentKeyName][1]) ) {
 		result = qRecord[ParentKeyName][1];
 	}
@@ -32,261 +31,256 @@
 		}
 		ii = ii + 1;
 	}
-	</cfscript>
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="getAncestorNamesParentID" access="public" returntype="string" output="no">
-	<cfargument name="AncestorNames" type="string" required="yes">
-
-	<cfset var sMeta = getMetaStruct()>
-	<!--- The last item on the AncestorNames list will be the label of the direct parent. --->
-	<cfset var sRecord = {
+public string function getAncestorNamesParentID(required string AncestorNames) {
+	var sMeta = getMetaStruct();
+	// The last item on the AncestorNames list will be the label of the direct parent.
+	var sRecord = {
 		"#sMeta.field_label#"=Trim(ListLast(Arguments.AncestorNames,"|")),
 		fieldlist="#sMeta.arg_pk#"
-	}>
-	<cfset var qRecord = 0>
+	};
+	var qRecord = 0;
 
-	<!--- If no AncesterNames value is passed, then no ancestor (return NULL) --->
-	<cfif NOT Len(Arguments.AncestorNames)>
-		<cfreturn "">
-	</cfif>
+	// If no AncesterNames value is passed, then no ancestor (return NULL)
+	if ( NOT Len(Arguments.AncestorNames) ) {
+		return "";
+	}
 
-	<cfif ListLen(Arguments.AncestorNames,"|") GT 1>
-		<cfset sRecord["AncestorNames"] = getAncestorNamesParentNames(Arguments.AncestorNames)>
-	<cfelse>
-		<cfset sRecord["AncestorNames"] = "">
-	</cfif>
+	if ( ListLen(Arguments.AncestorNames,"|") GT 1 ) {
+		sRecord["AncestorNames"] = getAncestorNamesParentNames(Arguments.AncestorNames);
+	} else {
+		sRecord["AncestorNames"] = "";
+	}
 
-	<!--- Find the ancestor record indicated --->
-	<cfset qRecord = getRecords(ArgumentCollection=sRecord)>
+	// Find the ancestor record indicated
+	qRecord = getRecords(ArgumentCollection=sRecord);
 
-	<!--- If an ancestor record is found, return its id. --->
-	<cfif qRecord.RecordCount>
-		<cfreturn qRecord[sMeta.arg_pk][1]>
-	</cfif>
+	// If an ancestor record is found, return its id.
+	if ( qRecord.RecordCount ) {
+		return qRecord[sMeta.arg_pk][1];
+	}
 
-	<!--- If no record found, then no ancestor (return NULL) --->
-	<cfreturn "">
-</cffunction>
+	// If no record found, then no ancestor (return NULL)
+	return "";
+}
 
-<cffunction name="getAncestorNamesParentNames" access="public" returntype="string" output="no">
-	<cfargument name="AncestorNames" type="string" required="yes">
+public string function getAncestorNamesParentNames(required string AncestorNames) {
+	var result = "";
 
-	<cfset var result = "">
-
-	<!--- If AncestorNames has more than one value then the values before the first will be the AncestorNames for the parent. --->
-	<cfif ListLen(Arguments.AncestorNames,"|") GT 1>
-		<cfset result = ListDeleteAt(
+	// If AncestorNames has more than one value then the values before the first will be the AncestorNames for the parent.
+	if ( ListLen(Arguments.AncestorNames,"|") GT 1 ) {
+		result = ListDeleteAt(
 			Arguments.AncestorNames,
 			ListLen(
 				Arguments.AncestorNames,
 				"|"
 			),
 			"|"
-		)>
-	</cfif>
+		);
+	}
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="getAncestorNames" access="public" returntype="string" output="no">
-	<cfargument name="Ancestors" type="string" required="yes">
+public string function getAncestorNames(required string Ancestors) {
+	var sMeta = getMetaStruct();
+	var qAncestors = 0;
+	var sAncestor = 0;
+	var sAdvSQL = {};
+	var OrderBy = "";
+	var ii = 0;
+	var result = "";
+	var sArgs = 0;
 
-	<cfset var sMeta = getMetaStruct()>
-	<cfset var qAncestors = 0>
-	<cfset var sAdvSQL = {}>
-	<cfset var OrderBy = "">
-	<cfset var ii = 0>
-	<cfset var result = "">
-	<cfset var sArgs = 0>
+	// Put records in order of list of ancestors
+	OrderBy = "case #sMeta.pkfields# ";
+	for ( ii=1; ii LTE ListLen(Arguments.Ancestors); ii++ ) {
+		OrderBy = "#OrderBy# WHEN #ListGetAt(Arguments.Ancestors,ii)# THEN #ii#";
+	}
+	OrderBy = "#OrderBy# ELSE #ii+1#";
+	OrderBy = "#OrderBy# END";
 
-	<!--- Put records in order of list of ancestors --->
-	<cfset OrderBy = "case #sMeta.pkfields# ">
-	<cfloop index="ii" from="1" to="#ListLen(Arguments.Ancestors)#">
-		<cfset OrderBy = "#OrderBy# WHEN #ListGetAt(Arguments.Ancestors,ii)# THEN #ii#">
-	</cfloop>
-	<cfset OrderBy = "#OrderBy# ELSE #ii+1#">
-	<cfset OrderBy = "#OrderBy# END">
+	sAdvSQL["ORDER BY"] = ArrayNew(1);
+	ArrayAppend(sAdvSQL["ORDER BY"],OrderBy);
 
-	<cfset sAdvSQL["ORDER BY"] = ArrayNew(1)>
-	<cfset ArrayAppend(sAdvSQL["ORDER BY"],OrderBy)>
-
-	<cfset sArgs = {
+	sArgs = {
 		"#sMeta.method_Plural#"=Arguments.Ancestors,
 		fieldlist="#sMeta.field_label#",
 		AdvSQL=sAdvSQL
-	}>
+	};
 
-	<cfset qAncestors = getRecords(ArgumentCollection=sArgs)>
+	qAncestors = getRecords(ArgumentCollection=sArgs);
 
-	<cfoutput query="qAncestors">
-		<cfset result = ListAppend(result,qAncestors[sMeta.field_label][CurrentRow],"|")>
-	</cfoutput>
+	for ( sAncestor in qAncestors ) {
+		result = ListAppend(result,sAncestor[sMeta.field_label],"|");
+	}
+	
+	return result;
+}
 
-	<cfreturn result>
-</cffunction>
+public struct function getFullTree() {
+	var sMeta = getMetaStruct();
+	var qRecords = getRecords(orderby="AncestorNames",fieldlist="#sMeta.pkfields#,#sMeta.field_label#,AncestorNames");
+	var sRecord = 0;
+	var sResults = {};
+	var node = "";
+	var ancestor = "";
 
-<cffunction name="getFullTree" access="public" returntype="struct" output="no">
-	<cfset var sMeta = getMetaStruct()>
-	<cfset var qRecords = getRecords(orderby="AncestorNames",fieldlist="#sMeta.pkfields#,#sMeta.field_label#,AncestorNames")>
-	<cfset var sResults = {}>
-	<cfset var node = "">
-	<cfset var ancestor = "">
+	for ( sRecord in qRecords ) {
+		sThis = sResults;
+		for ( ancestor in ListToArray(sRecord.AncestorNames,"|") ) {
+			if ( NOT StructKeyExists(sThis,ancestor) ) {
+				sThis[ancestor] = {};
+			}
+			sThis = sThis[ancestor];
+		}
+		sThis[LossDetailName][0] = {
+			"#sMeta.pkfields#":sRecord[sMeta.pkfields],
+			"#sMeta.field_label#":sRecord[sMeta.field_label]
+		};
+	}
 
-	<cfoutput query="qRecords">
-		<cfset sThis = sResults>
-		<cfloop list="#AncestorNames#" index="ancestor" delimiters="|">
-			<cfif NOT StructKeyExists(sThis,ancestor)>
-				<cfset sThis[ancestor] = {}>
-			</cfif>
-			<cfset sThis = sThis[ancestor]>
-		</cfloop>
-		<cfset sThis[LossDetailName][0] = {
-			"#sMeta.pkfields#":qRecords[sMeta.pkfields][CurrentRow],
-			"#sMeta.field_label#":qRecords[sMeta.field_label][CurrentRow]
-		}>
-	</cfoutput>
+	return sResults;
+}
 
-	<cfreturn sResults>
-</cffunction>
+public string function saveRecord() {
+	var result = 0;
 
-<cffunction name="saveRecord" access="public" returntype="string" output="no">
+	result = Super.saveRecord(ArgumentCollection=Arguments);
 
-	<cfset var result = 0>
+	setAncestors(result);
 
-	<cfset result = Super.saveRecord(ArgumentCollection=Arguments)>
+	return result;
+}
 
-	<cfset setAncestors(result)>
+public void function setAncestors() {
+	var sMeta = getMetaStruct();
+	var sDescend = 0;
+	var qDescendants = 0;
+	var sDescendant = 0;
+	var ancestor = "";
 
-	<cfreturn result>
-</cffunction>
+	Arguments = convertArgs(ArgumentCollection=Arguments);
 
-<cffunction name="setAncestors" access="public" returntype="void" output="no">
+	sDescend = {"Parent#sMeta.arg_pk#"=Arguments[sMeta.arg_pk],fieldlist=sMeta.arg_pk};
+	qDescendants = getRecords(ArgumentCollection=sDescend);
 
-	<cfset var sMeta = getMetaStruct()>
-	<cfset var sDescend = 0>
-	<cfset var qDescendants = 0>
-	<cfset var ancestor = "">
+	Arguments.Ancestors = getAncestors(Arguments[sMeta.arg_pk]);
+	if ( Len(Arguments.Ancestors) ) {
+		Arguments.AncestorNames = getAncestorNames(Arguments.Ancestors);
+	} else {
+		Arguments.AncestorNames = "";
+	}
 
-	<cfset Arguments = convertArgs(ArgumentCollection=Arguments)>
+	variables.DataMgr.saveRecord(tablename=variables.table,data=Arguments,fieldlist="#sMeta.arg_pk#,Ancestors,AncestorNames");
 
-	<cfset sDescend = {"Parent#sMeta.arg_pk#"=Arguments[sMeta.arg_pk],fieldlist=sMeta.arg_pk}>
-	<cfset qDescendants = getRecords(ArgumentCollection=sDescend)>
+	if ( NOT ( StructKeyExists(Arguments,"recurse") AND Arguments.recurse EQ false ) ) {
+		for ( sDescendant in qDescendants ) {
+			setAncestors(sDescendant[sMeta.arg_pk]);
+		}
+	}
 
-	<cfset Arguments.Ancestors = getAncestors(Arguments[sMeta.arg_pk])>
-	<cfif Len(Arguments.Ancestors)>
-		<cfset Arguments.AncestorNames = getAncestorNames(Arguments.Ancestors)>
-	<cfelse>
-		<cfset Arguments.AncestorNames = "">
-	</cfif>
+}
 
-	<cfset variables.DataMgr.saveRecord(tablename=variables.table,data=Arguments,fieldlist="#sMeta.arg_pk#,Ancestors,AncestorNames")>
+public struct function validateRecord() {
+	var sArgs = Super.validateRecord(ArgumentCollection=Arguments);
 
-	<cfif NOT ( StructKeyExists(Arguments,"recurse") AND Arguments.recurse EQ false )>
-		<cfloop query="qDescendants">
-			<cfset setAncestors(qDescendants[sMeta.arg_pk][CurrentRow])>
-		</cfloop>
-	</cfif>
+	sArgs = validateAncestry(ArgumentCollection=sArgs);
 
-</cffunction>
+	return sArgs;
+}
 
-<cffunction name="validateRecord" access="public" returntype="struct" output="no">
+	private struct function convertArgs() {
+		var sMeta = getMetaStruct();
 
-	<cfset var sArgs = Super.validateRecord(ArgumentCollection=Arguments)>
+		// If primary key argument isn't passed in by name, then get it from the first argument.
+		if ( NOT StructKeyExists(Arguments,sMeta.arg_pk) ) {
+			Arguments[sMeta.arg_pk] = Arguments[1];
+			StructDelete(Arguments,"1");
+		}
 
-	<cfset sArgs = validateAncestry(ArgumentCollection=sArgs)>
+		return Arguments;
+	}
 
-	<cfreturn sArgs>
-</cffunction>
+/**
+* I make sure that the ancestry can work.
+*/
+private struct function validateAncestry() {
+	var sMeta = getMetaStruct();
+	var qBefore = 0;
+	var sRec = 0;
 
-<cffunction name="convertArgs" access="private" returntype="struct" output="no">
-
-	<cfset var sMeta = getMetaStruct()>
-
-	<!--- If primary key argument isn't passed in by name, then get it from the first argument. --->
-	<cfif NOT StructKeyExists(Arguments,sMeta.arg_pk)>
-		<cfset Arguments[sMeta.arg_pk] = Arguments[1]>
-		<cfset StructDelete(Arguments,"1")>
-	</cfif>
-
-	<cfreturn Arguments>
-</cffunction>
-
-<cffunction name="validateAncestry" access="private" returntype="struct" output="no" hint="I make sure that the ancestry can work.">
-
-	<cfset var sMeta = getMetaStruct()>
-	<cfset var qBefore = 0>
-	<cfset var sRec = 0>
-
-	<!--- Make sure that the label doesn't contain a pipe. --->
-	<cfif
+	// Make sure that the label doesn't contain a pipe.
+	if (
 			StructKeyExists(Arguments,smeta.label_Singular)
 		AND	isSimpleValue(Arguments[smeta.label_Singular])
 		AND	Len(Arguments[smeta.label_Singular])
 		AND	Arguments[smeta.label_Singular] CONTAINS "|"
-	>
-		<cfset Arguments[smeta.label_Singular] = ReplaceNoCase(Arguments[smeta.label_Singular],"|","&##124;","ALL")>
-	</cfif>
+	) {
+		Arguments[smeta.label_Singular] = ReplaceNoCase(Arguments[smeta.label_Singular],"|","&##124;","ALL");
+	}
 
-	<!--- Allow parent value to be set using ancestor arguments --->
-	<cfif NOT StructKeyExists(Arguments,"Parent#sMeta.arg_pk#")>
-		<cfif StructKeyHasLen(Arguments,"Ancestors")>
-			<cfset Arguments["Parent#sMeta.arg_pk#"] = ListLast(Arguments.Ancestors)>
-		<cfelseif StructKeyHasLen(Arguments,"AncestorNames")>
-			<cfset Arguments["Parent#sMeta.arg_pk#"] = getAncestorNamesParentID(Arguments.AncestorNames)>
-			<cfif NOT Val(Arguments["Parent#sMeta.arg_pk#"])>
-				<cfset StructDelete(Arguments,"Parent#sMeta.arg_pk#")>
-				<cfif StructKeyExists(Arguments,"createMissingAncestors") AND Arguments.createMissingAncestors IS true>
-					<cfinvoke
-						component="#This#"
-						method="save#variables.methodSingular#"
-						returnvariable="Arguments.Parent#sMeta.arg_pk#"
-					>
-						<cfinvokeargument name="#smeta.field_label#" value="#ListLast(Arguments.AncestorNames,'|')#">
-						<cfinvokeargument name="AncestorNames" value="#getAncestorNamesParentNames(Arguments.AncestorNames)#">
-						<cfinvokeargument name="createMissingAncestors" value="true">
-					</cfinvoke>
-				<cfelse>
-					<cfthrow type="#smeta.method_Plural#" message="AncestorNames (#Arguments.AncestorNames#) passed in for which no value was found.">
-				</cfif>
-			</cfif>
-		</cfif>
-	</cfif>
+	// Allow parent value to be set using ancestor arguments
+	if ( NOT StructKeyExists(Arguments,"Parent#sMeta.arg_pk#") ) {
+		if ( StructKeyHasLen(Arguments,"Ancestors") ) {
+			Arguments["Parent#sMeta.arg_pk#"] = ListLast(Arguments.Ancestors);
+		} else if ( StructKeyHasLen(Arguments,"AncestorNames") ) {
+			Arguments["Parent#sMeta.arg_pk#"] = getAncestorNamesParentID(Arguments.AncestorNames);
+			if ( NOT Val(Arguments["Parent#sMeta.arg_pk#"]) ) {
+				StructDelete(Arguments,"Parent#sMeta.arg_pk#");
+				if ( StructKeyExists(Arguments,"createMissingAncestors") AND Arguments.createMissingAncestors IS true ) {
+					Arguments["Parent#sMeta.arg_pk#"] = invoke(
+						This,
+						"save#variables.methodSingular#",
+						{
+							"#smeta.field_label#":ListLast(Arguments.AncestorNames,'|'),
+							"AncestorNames":getAncestorNamesParentNames(Arguments.AncestorNames),
+							"createMissingAncestors":true
+						}
+					);
+				} else {
+					throw(type="#smeta.method_Plural#",message="AncestorNames (#Arguments.AncestorNames#) passed in for which no value was found.");
+				}
+			}
+		}
+	}
 
-	<!--- Make sure that a record cannot change its parent (unless specified). --->
-	<cfif StructKeyExists(Arguments,"#sMeta.arg_pk#") AND StructKeyExists(Arguments,"Parent#sMeta.arg_pk#")>
-		<cfset sRec = {"#sMeta.arg_pk#"=Arguments[sMeta.arg_pk],fieldlist="Parent#sMeta.arg_pk#"}>
-		<cfset qBefore = getRecord(ArgumentCollection=sRec)>
+	// Make sure that a record cannot change its parent (unless specified).
+	if ( StructKeyExists(Arguments,"#sMeta.arg_pk#") AND StructKeyExists(Arguments,"Parent#sMeta.arg_pk#") ) {
+		sRec = {"#sMeta.arg_pk#"=Arguments[sMeta.arg_pk],fieldlist="Parent#sMeta.arg_pk#"};
+		qBefore = getRecord(ArgumentCollection=sRec);
 
-		<cfif
+		if (
 			qBefore.RecordCount
 			AND
 			qBefore["Parent#sMeta.arg_pk#"][1] NEQ Arguments["Parent#sMeta.arg_pk#"]
-		>
-			<cfif NOT ( StructKeyExists(Arguments,"doChangeParent") AND Arguments.doChangeParent IS true )>
-				<cfthrow type="#smeta.method_Plural#" message="Parent #LCase(smeta.label_Plural)# may not be altered. If you want to change the parent, then pass in true for the argument 'doChangeParent'.">
-			</cfif>
-		</cfif>
-	</cfif>
+		) {
+			if ( NOT ( StructKeyExists(Arguments,"doChangeParent") AND Arguments.doChangeParent IS true ) ) {
+				throw(type="#smeta.method_Plural#",message="Parent #LCase(smeta.label_Plural)# may not be altered. If you want to change the parent, then pass in true for the argument 'doChangeParent'.");
+			}
+		}
+	}
 
-	<!--- Make sure than a record is not its own ancestor --->
-	<cfset StructDelete(Arguments,"Ancestors")>
-	<cfset StructDelete(Arguments,"AncestorNames")>
-	<cfif
+	// Make sure than a record is not its own ancestor
+	StructDelete(Arguments,"Ancestors");
+	StructDelete(Arguments,"AncestorNames");
+	if (
 			StructKeyExists(Arguments,"#sMeta.arg_pk#")
 		AND StructKeyExists(Arguments,"Parent#sMeta.arg_pk#")
 		AND	isNumeric(Arguments["#sMeta.arg_pk#"])
 		AND	isNumeric(Arguments["Parent#sMeta.arg_pk#"])
-	>
-		<cfset Arguments.Ancestors = getAncestors(Arguments["Parent#sMeta.arg_pk#"])>
-		<cfif ( Arguments["Parent#sMeta.arg_pk#"] EQ Arguments["#sMeta.arg_pk#"] OR ListFindNoCase(Arguments.Ancestors,Arguments["#sMeta.arg_pk#"]) )>
-			<cfset variables.Parent.throwError("A #LCase(sMeta.label_Singular)# cannot be a child of itself.")>
-		</cfif>
-	</cfif>
+	) {
+		Arguments.Ancestors = getAncestors(Arguments["Parent#sMeta.arg_pk#"]);
+		if ( ( Arguments["Parent#sMeta.arg_pk#"] EQ Arguments["#sMeta.arg_pk#"] OR ListFindNoCase(Arguments.Ancestors,Arguments["#sMeta.arg_pk#"]) ) ) {
+			variables.Parent.throwError("A #LCase(sMeta.label_Singular)# cannot be a child of itself.");
+		}
+	}
 
-	<cfreturn Arguments>
-</cffunction>
+	return Arguments;
+}
+</cfscript>
 
 </cfcomponent>

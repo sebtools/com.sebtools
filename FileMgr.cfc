@@ -1,7 +1,7 @@
 <!--- 1.6 (Build 17) --->
 <!--- Last Updated: 2011-12-14 --->
 <!--- Information: sebtools.com --->
-<cfcomponent displayname="File Manager">
+<cfcomponent displayname="File Manager" extends="com.sebtools.component">
 <!--- %%Handle folders w/o write permission --->
 <cffunction name="init" access="public" returntype="FileMgr" output="no" hint="I instantiate and return this object.">
 	<cfargument name="UploadPath" type="string" required="yes" hint="The file path for uploads.">
@@ -178,15 +178,15 @@
 	<cfset var filename = "mime-db.json">
 
 	<cfif NOT StructKeyExists(Variables,"sTypes")>
-		<cfset Variables.sTypes = {}>
-
-		<cfhttp
-			method="get"
-			result="CFHTTP"
-			url="https://cdn.rawgit.com/jshttp/mime-db/v1.30.0/db.json">
-		</cfhttp>
-
 		<cfscript>
+		Variables.sTypes = {};
+
+		cfhttp(
+			method="get",
+			result="CFHTTP",
+			url="https://cdn.rawgit.com/jshttp/mime-db/v1.30.0/db.json"
+		);
+
 		if ( isJSON(CFHTTP.FileContent) ) {
 			sMimes = DeserializeJSON(CFHTTP.FileContent);
 			/* Save the JSON locally in case we can't reach it remotely later. */
@@ -299,7 +299,7 @@
 	<cfset var exdir = false>
 	<cfset var qDirs = 0>
 	<cfset var qFiles = 0>
-	<cfset var cols = "attributes,datelastmodified,mode,name,size,type,directory">
+	<cfset var cols = "attributes,datelastmodified,mode,name,size,type,directory,folder">
 	<cfset var sDirectoryAttributes = {name="qFiles",directory="#arguments.directory#",type="file"}>
 	<cfset var replacer = ReplaceNoCase(Arguments.directory, Variables.UploadPath, "", "ONE")>
 
@@ -356,10 +356,19 @@
 		<cfset QuerySetCell(arguments.dirInfo,"size",size)>
 		<cfset QuerySetCell(arguments.dirInfo,"type",type)>
 		<cfset QuerySetCell(arguments.dirInfo,"directory",arguments.directory)>
+		<cfset QuerySetCell(arguments.dirInfo,"folder",arguments.directory)>
 	</cfoutput>
 
 	<cfreturn arguments.dirInfo>
 </cffunction>
+
+<cfscript>
+public boolean function fileExists(required string fileName, required string folder) {
+	var filePath = getFilePath(Arguments.fileName, Arguments.folder);
+
+	return booleanFormat(FileExists(filePath));
+}
+</cfscript>
 
 <cffunction name="FileNameFromString" access="public" returntype="string" output="no">
 	<cfargument name="string" type="string" required="yes">
@@ -395,7 +404,7 @@
 
 	<cfset var result = variables.UploadPath>
 
-	<cfif StructKeyExists(arguments,"Folder")>
+	<cfif StructKeyHasLen(arguments,"Folder")>
 		<cfset arguments.Folder = convertFolder(arguments.Folder,variables.dirdelim)>
 		<cfif len(result) gt 1>
 			<cfif Right(result,1) EQ variables.dirdelim>
@@ -498,7 +507,9 @@
 <cffunction name="makedir_private" access="private" returntype="any" output="no" hint="I make a directory.">
 	<cfargument name="Directory" type="string" required="yes">
 
-	<cfdirectory action="CREATE" directory="#Arguments.Directory#">
+	<cfif NOT DirectoryExists(Arguments.Directory)>
+		<cfdirectory action="CREATE" directory="#Arguments.Directory#">
+	</cfif>
 
 </cffunction>
 
@@ -842,7 +853,7 @@ Copies a directory.
 
 </cffunction>
 
-<cffunction name="fixFileName" access="private" returntype="string" output="false">
+<cffunction name="fixFileName" access="public" returntype="string" output="false">
 	<cfargument name="name" type="string" required="yes">
 	<cfargument name="dir" type="string" required="yes">
 	<cfargument name="maxlength" type="numeric" default="0">

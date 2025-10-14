@@ -1,154 +1,200 @@
 <cfcomponent displayname="AWS" output="false">
+<cfscript>
+/**
+* I initialize and return the component.
+* @Credentials AWS Credentials.
+* @region The AWS region.
+*/
+public function init(
+	required Credentials,
+	string region,
+	string signature="v4"
+) {
+	var key = "";
 
-<cffunction name="init" access="public" returntype="any" output="false" hint="I initialize and return the component.">
-	<cfargument name="Credentials" type="any" required="true" hint="AWS Credentials.">
-	<cfargument name="region" type="string" required="false" hint="The AWS region.">
-	<cfargument name="signature" type="string" default="v4">
+	for ( key in Arguments ) {
+		Variables[key] = Arguments[key];
+		if ( isObject(Arguments[key]) ) {
+			This[key] = Arguments[key];
+		}
+	}
 
-	<cfset var key = "">
+	// If region is not explicitely set, use the region from the credentials (if there is one).
+	if ( NOT StructKeyExists(Variables,"region") ) {
+		if ( Variables.Credentials.has("region") ) {
+			Variables.region = Variables.Credentials.get("region");
+		}
+	}
 
-	<cfloop collection="#Arguments#" item="key">
-		<cfset Variables[key] = Arguments[key]>
-		<cfif isObject(Arguments[key])>
-			<cfset This[key] = Arguments[key]>
-		</cfif>
-	</cfloop>
+	// Make sure needed credentials exist.
+	if ( NOT ( Variables.Credentials.has("AccessKey") AND Variables.Credentials.has("SecretKey") ) ) {
+		throw(message="AWS requires AWS credentials (AccessKey,SecretKey).",type="AWS");
+	}
 
-	<!--- If region is not explicitely set, use the region from the credentials (if there is one). --->
-	<cfif NOT StructKeyExists(Variables,"region")>
-		<cfif Variables.Credentials.has("region")>
-			<cfset Variables.region = Variables.Credentials.get("region")>
-		</cfif>
-	</cfif>
+	// Make sure region is set.
+	if ( NOT Variables.Credentials.has("region") ) {
+		throw(message="AWS region has not been indicated.",type="AWS");
+	}
 
-	<!--- Make sure needed credentials exist. --->
-	<cfif NOT ( Variables.Credentials.has("AccessKey") AND Variables.Credentials.has("SecretKey") )>
-		<cfthrow message="AWS requires AWS credentials (AccessKey,SecretKey)." type="AWS">
-	</cfif>
+	Variables.LockID = Hash(getAccessKey());
 
-	<!--- Make sure region is set. --->
-	<cfif NOT Variables.Credentials.has("region")>
-		<cfthrow message="AWS region has not been indicated." type="AWS">
-	</cfif>
+	Variables.MrECache = CreateObject("component","MrECache").init("AWS:#Variables.LockID#");
+	This.MrECache = Variables.MrECache;
 
-	<cfset Variables.LockID = Hash(getAccessKey())>
+	Variables.RateLimiter = CreateObject("component","RateLimiter").init("AWS:#Variables.LockID#");
+	This.RateLimiter = Variables.RateLimiter;
 
-	<cfset Variables.MrECache = CreateObject("component","MrECache").init("AWS:#Variables.LockID#")>
-	<cfset This.MrECache = Variables.MrECache>
+	Variables.sServices = {};
 
-	<cfset Variables.RateLimiter = CreateObject("component","RateLimiter").init("AWS:#Variables.LockID#")>
-	<cfset This.RateLimiter = Variables.RateLimiter>
+	Variables.oSignature = CreateObject("component","aws.sigs.#Arguments.signature#").init(This);
 
-	<cfset Variables.sServices = StructNew()>
+	return This;
+}
 
-	<cfset Variables.oSignature = CreateObject("component","aws.sigs.#Arguments.signature#").init(This)>
+/**
+* I get the requested AWS service.
+*/
+public function getService(required string service) {
 
-	<cfreturn This>
-</cffunction>
+	if ( NOT StructKeyExists(Variables.sServices,Arguments.service) ) {
+		Variables.sServices[Arguments.service] = CreateObject("component","aws.#LCase(Arguments.service)#").init(This);
+	}
 
-<cffunction name="getService" access="public" returntype="any" output="false" hint="I get the requested AWS service.">
-	<cfargument name="service" type="string" required="true">
+	return Variables.sServices[Arguments.service];
+}
 
-	<cfif NOT StructKeyExists(Variables.sServices,Arguments.service)>
-		<cfset Variables.sServices[Arguments.service] = CreateObject("component","aws.#LCase(Arguments.service)#").init(This)>
-	</cfif>
+/**
+* I get the LockID used by this instance of AWS.
+*/
+public function getLockID() {
+	return Variables.LockID;
+}
 
-	 <cfreturn Variables.sServices[Arguments.service]>
-</cffunction>
+/**
+* I get the Amazon credentials.
+*/
+public function getCredentials() {
+	return Variables.Credentials;
+}
 
-<cffunction name="getLockID" access="public" returntype="any" output="false" hint="I get the LockID used by this instance of AWS.">
-	 <cfreturn Variables.LockID>
-</cffunction>
+/**
+* I get the Amazon access key.
+*/
+public string function getAccessKey() {
+	return Variables.Credentials.get("AccessKey");
+}
 
-<cffunction name="getCredentials" access="public" returntype="any" output="false" hint="I get the Amazon credentials.">
-	 <cfreturn Variables.Credentials>
-</cffunction>
+/**
+* I get the Amazon secret key.
+*/
+public string function getSecretKey() {
+	return Variables.Credentials.get("SecretKey");
+}
 
-<cffunction name="getAccessKey" access="public" returntype="string" output="false" hint="I get the Amazon access key.">
-	 <cfreturn Variables.Credentials.get("AccessKey")>
-</cffunction>
+/**
+* I get the endpoint for AWS Service.
+* @subdomain The subdomain for the AWS service being used.
+*/
+public string function getEndPointUrl(required string subdomain) {
+	return "https://#getHost(Arguments.subdomain)#/";
+}
 
-<cffunction name="getSecretKey" access="public" returntype="string" output="false" hint="I get the Amazon secret key.">
-	 <cfreturn Variables.Credentials.get("SecretKey")>
-</cffunction>
+/**
+* I get the host for AWS Service.
+* @subdomain The subdomain for the AWS service being used.
+*/
+public string function getHost(required string subdomain) {
+	return "#Arguments.subdomain#.#Variables.region#.amazonaws.com";
+}
 
-<cffunction name="getEndPointUrl" access="public" returntype="string" output="false" hint="I get the endpoint for AWS Service.">
-	<cfargument name="subdomain" type="string" required="true" hint="The subdomain for the AWS service being used.">
+/**
+* I get the region for AWS Service.
+*/
+public string function getRegion() {
+	return Variables.region;
+}
 
-	<cfreturn "https://#getHost(Arguments.subdomain)#/">
-</cffunction>
+/**
+* I determine if the action can be called.
+* @subdomain The subdomain for the AWS service being used.
+* @Action The AWS API action being called.
+*/
+public boolean function isCallable(
+	required string subdomain,
+	required string Action
+) {
+	return Variables.RateLimiter.isCallable("#Arguments.subdomain#_#Arguments.Action#");
+}
 
-<cffunction name="getHost" access="public" returntype="string" output="false" hint="I get the host for AWS Service.">
-	<cfargument name="subdomain" type="string" required="true" hint="The subdomain for the AWS service being used.">
-
-	<cfreturn "#Arguments.subdomain#.#Variables.region#.amazonaws.com">
-</cffunction>
-
-<cffunction name="getRegion" access="public" returntype="string" output="false" hint="I get the region for AWS Service.">
-
-	<cfreturn Variables.region>
-</cffunction>
-
-<cffunction name="isCallable" access="public" returntype="boolean" output="false" hint="I determine if the action can be called.">
-	<cfargument name="subdomain" type="string" required="true" hint="The subdomain for the AWS service being used.">
-	<cfargument name="Action" type="string" required="true" hint="The AWS API action being called.">
-
-	<cfreturn Variables.RateLimiter.isCallable("#Arguments.subdomain#_#Arguments.Action#")>
-</cffunction>
-
-<cffunction name="callLimitedAPI" access="public" returntype="any" output="false" hint="I return the results of Amazon REST Call in the form easiest to use.">
-	<cfargument name="subdomain" type="string" required="true" hint="The subdomain for the AWS service being used.">
-	<cfargument name="Action" type="string" required="true" hint="The AWS API action being called.">
-	<cfargument name="default" type="any" required="false" hint="The value to return if within the rate limit.">
-	<cfargument name="method" type="string" default="GET" hint="The HTTP method to invoke.">
-	<cfargument name="parameters" type="struct" default="#structNew()#" hint="An struct of HTTP URL parameters to send in the request.">
-	<cfargument name="timeout" type="numeric" default="20" hint="The default call timeout.">
-	<cfargument name="timeSpan" type="string" required="false">
-	<cfargument name="idleTime" type="string" required="false">
-
-	<cfset var sArgs = {
+/**
+* I return the results of Amazon REST Call in the form easiest to use.
+* @subdomain The subdomain for the AWS service being used.
+* @Action The AWS API action being called.
+* @default The value to return if within the rate limit.
+* @method The HTTP method to invoke.
+* @parameters An struct of HTTP URL parameters to send in the request.
+* @timeout The default call timeout.
+*/
+public function callLimitedAPI(
+	required string subdomain,
+	required string Action,
+	default,
+	string method="GET",
+	struct parameters="#{}#",
+	numeric timeout="20",
+	string timeSpan,
+	string idleTime
+) {
+	var sArgs = {
 		id="#Arguments.subdomain#_#Arguments.Action#",
 		Component=This,
 		MethodName="callAPI",
 		Args=StructCopy(Arguments)
-	}>
+	};
 
-	<cfif StructKeyExists(Arguments,"default")>
-		<cfset sArgs["default"] = Arguments.default>
-	</cfif>
-	<cfif StructKeyExists(Arguments,"timeSpan")>
-		<cfset sArgs["timeSpan"] = Arguments.timeSpan>
-		<cfset StructDelete(sArgs["Args"],"timeSpan")>
-	</cfif>
-	<cfif StructKeyExists(Arguments,"idleTime")>
-		<cfset sArgs["idleTime"] = Arguments.idleTime>
-		<cfset StructDelete(sArgs["Args"],"idleTime")>
-	</cfif>
-	<cfif StructKeyExists(Arguments,"waitlimit")>
-		<cfset sArgs["waitlimit"] = Arguments.waitlimit>
-		<cfset StructDelete(sArgs["Args"],"waitlimit")>
-	</cfif>
+	if ( StructKeyExists(Arguments,"default") ) {
+		sArgs["default"] = Arguments.default;
+	}
+	if ( StructKeyExists(Arguments,"timeSpan") ) {
+		sArgs["timeSpan"] = Arguments.timeSpan;
+		StructDelete(sArgs["Args"],"timeSpan");
+	}
+	if ( StructKeyExists(Arguments,"idleTime") ) {
+		sArgs["idleTime"] = Arguments.idleTime;
+		StructDelete(sArgs["Args"],"idleTime");
+	}
+	if ( StructKeyExists(Arguments,"waitlimit") ) {
+		sArgs["waitlimit"] = Arguments.waitlimit;
+		StructDelete(sArgs["Args"],"waitlimit");
+	}
 
-	<cfif StructKeyExists(Arguments,"timeSpan")>
-		<cfreturn Variables.RateLimiter.cached(ArgumentCollection=sArgs)>
-	<cfelse>
-		<cfreturn Variables.RateLimiter.method(ArgumentCollection=sArgs)>
-	</cfif>
-</cffunction>
+	if ( StructKeyExists(Arguments,"timeSpan") ) {
+		return Variables.RateLimiter.cached(ArgumentCollection=sArgs);
+	} else {
+		return Variables.RateLimiter.method(ArgumentCollection=sArgs);
+	}
+}
 
-<cffunction name="callAPI" access="public" returntype="any" output="false" hint="I return the results of Amazon REST Call in the form easiest to use.">
-	<cfargument name="subdomain" type="string" required="true" hint="The subdomain for the AWS service being used.">
-	<cfargument name="Action" type="string" required="true" hint="The AWS API action being called.">
-	<cfargument name="method" type="string" default="GET" hint="The HTTP method to invoke.">
-	<cfargument name="parameters" type="struct" default="#structNew()#" hint="An struct of HTTP URL parameters to send in the request.">
-	<cfargument name="timeout" type="numeric" default="20" hint="The default call timeout.">
+/**
+* I return the results of Amazon REST Call in the form easiest to use.
+* @subdomain The subdomain for the AWS service being used.
+* @Action The AWS API action being called.
+* @default The value to return if within the rate limit.
+* @method The HTTP method to invoke.
+* @parameters An struct of HTTP URL parameters to send in the request.
+*/
+public function callAPI(
+	required string subdomain,
+	required string Action,
+	string method="GET",
+	struct parameters="#{}#",
+	numeric timeout="20"
+) {
+	var response = _callAPI(ArgumentCollection=Arguments);
+	var response_result = 0;
+	var result = 0;
+	var ii = 0;
 
-	<cfset var response = _callAPI(ArgumentCollection=Arguments)>
-	<cfset var response_result = 0>
-	<cfset var result = 0>
-	<cfset var ii = 0>
-
-	<cfscript>
 	// Traverse down the response tree to get the most accurate result possible.
 	if ( StructKeyExists(response,"RESPONSE") ) {
 		if ( isSimpleValue(response["RESPONSE"]) ) {
@@ -210,10 +256,10 @@
 	} else {
 		result = response_result;
 	}
-	</cfscript>
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
+</cfscript>
 
 <cffunction name="_callAPI" access="public" returntype="struct" output="false" hint="I return the raw(ish) results of Amazon REST Call.">
 	<cfargument name="subdomain" type="string" required="true" hint="The subdomain for the AWS service being used.">
@@ -300,19 +346,20 @@
 	</cfscript>
 </cffunction>
 
-<cffunction name="createSignature" returntype="any" access="public" output="false" hint="Create request signature according to AWS standards">
-	<cfargument name="string" type="any" required="true" />
+<cfscript>
+/**
+* Create request signature according to AWS standards.
+*/
+public function createSignature(required any string) {
+	var fixedData = Replace(Arguments.string,"\n","#chr(10)#","all");
 
-	<cfset var fixedData = Replace(Arguments.string,"\n","#chr(10)#","all")>
+	return toBase64( HMAC_SHA256(getSecretKey(),fixedData) );
+}
 
-	<cfreturn toBase64(HMAC_SHA256(getSecretKey(),fixedData) )>
-</cffunction>
-
-<cffunction name="HMAC_SHA256" access="private" returntype="binary" output="false" hint="">
-	<cfargument name="signKey" type="string" required="true">
-	<cfargument name="signMessage" type="string" required="true">
-
-	<cfscript>
+private binary function HMAC_SHA256(
+	required string signKey,
+	required string signMessage
+) {
 	var jMsg = JavaCast("string",Arguments.signMessage).getBytes("utf-8");
 	var jKey = JavaCast("string",Arguments.signKey).getBytes("utf-8");
 	var key = createObject("java","javax.crypto.spec.SecretKeySpec").init(jKey,"HmacSHA256");
@@ -321,38 +368,41 @@
 	mac.update(jMsg);
 
 	return mac.doFinal();
-	</cfscript>
-</cffunction>
+}
 
-<cffunction name="throwError" access="public" returntype="void" output="false" hint="">
-	<cfargument name="message" type="string" required="yes">
-	<cfargument name="errorcode" type="string" default="">
-	<cfargument name="detail" type="string" default="">
-	<cfargument name="extendedinfo" type="string" default="">
-
-	<cfthrow
-		type="AWS"
-		message="#Arguments.message#"
-		errorcode="#Arguments.errorcode#"
-		detail="#Arguments.detail#"
+public void function throwError(
+	required string message,
+	string errorcode="",
+	string detail="",
+	string extendedinfo=""
+) {
+	throw(
+		type="AWS",
+		message="#Arguments.message#",
+		errorcode="#Arguments.errorcode#",
+		detail="#Arguments.detail#",
 		extendedinfo="#Arguments.extendedinfo#"
-	>
+	);
+}
 
-</cffunction>
-
-<cffunction name="onMissingMethod" access="public" returntype="any" output="false" hint="">
-	<cfif ListLen(Arguments["missingMethodName"],"_") EQ 2>
-		<cfreturn callAPI(
+public function onMissingMethod() {
+	
+	if ( ListLen(Arguments["missingMethodName"],"_") EQ 2 ) {
+		return callAPI(
 			subdomain=ListFirst(Arguments["missingMethodName"],"_"),
 			Action=ListLast(Arguments["missingMethodName"],"_"),
 			parameters=Arguments.missingMethodArguments
-		)>
-	<cfelse>
-		<cfthrow message="The method #Arguments.missingMethodName# was not found in component." detail="Ensure that the method is defined, and that it is spelled correctly." type="Application">
-	</cfif>
-</cffunction>
+		);
+	} else {
+		throw(
+			message="The method #Arguments.missingMethodName# was not found in component.",
+			detail="Ensure that the method is defined, and that it is spelled correctly.",
+			type="Application"
+		);
+	}
+}
 
-<!---
+/*
 Like anything worthwhile, this has had lots of influence:
 https://github.com/anujgakhar/AmazonSESCFC/blob/master/com/anujgakhar/AmazonSES.cfc
 http://webdeveloperpadawan.blogspot.com/2012/02/coldfusion-and-amazon-aws-ses-simple.html
@@ -367,5 +417,6 @@ http://amazonsnscfc.riaforge.org/
 https://www.snip2code.com/Snippet/1180201/Amazon-Web-Services-(AWS)-S3-Wrapper-for
 https://codegists.com/snippet/coldfusion-cfc/s3wrappercfc_malpaso_coldfusion-cfc
 https://www.petefreitag.com/item/833.cfm
---->
+*/
+</cfscript>
 </cfcomponent>

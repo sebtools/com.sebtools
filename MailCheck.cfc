@@ -7,25 +7,10 @@
 	<cfargument name="MailServer" type="string" default="">
 	<cfargument name="username" type="string" default="">
 	<cfargument name="password" type="string" default="">
-	<!---<cfargument name="mode" type="string" required="false">--->
 	
 	<cfset variables.MailServer = arguments.MailServer>
 	<cfset variables.username = arguments.username>
 	<cfset variables.password = arguments.password>
-	
-	<!---<cfif NOT Len(arguments.MailServer)>
-		<cfset arguments.mode = "Sim">
-	</cfif>
-	
-	<cfif NOT StructKeyExists(arguments,"mode")>
-		<cfif getMetaData(this).name CONTAINS "Sim">
-			<cfset arguments.mode = "Sim">
-		<cfelse>
-			<cfset arguments.mode = "Live">
-		</cfif>
-	</cfif>
-	
-	<cfset setMode(arguments.mode)>--->
 	
 	<cfreturn This>
 </cffunction>
@@ -73,18 +58,5 @@
 	
 	<cfreturn qMessages>
 </cffunction>
-
-<!---<cffunction name="setMode" access="public" returntype="void" output="no">
-	<cfargument name="mode" type="string" required="yes">
-	
-	<cfset var SimModes = "Sim,Dev">
-	
-	<cfif ListFindNoCase(SimModes,arguments.mode)>
-		<cfset variables.mode = "Sim">
-	<cfelse>
-		<cfset variables.mode = "Live">
-	</cfif>
-	
-</cffunction>--->
 
 </cfcomponent>

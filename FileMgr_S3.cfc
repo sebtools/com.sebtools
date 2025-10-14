@@ -32,6 +32,24 @@
 	<cfreturn LCase(Super.convertFolder(ArgumentCollection=Arguments))>
 </cffunction>
 
+<cfscript>
+public void function deleteFile(required string FileName, required string Folder) {
+
+	if (this.FileExists(Arguments.FileName, Arguments.folder)) {
+		var deleteFilePath = getFilePath(argumentCollection=arguments);
+		cffile(action="DELETE", file=deleteFilePath);
+		notifyEvent("deleteFile",Arguments);
+	}
+}
+
+public boolean function fileExists(required string fileName, required string folder) {
+	var fileURL = getFileURL(Arguments.fileName, Arguments.folder);
+	cfhttp(url=fileURL, method="head");
+
+	return booleanFormat(cfhttp.statusCode contains "200");
+}
+</cfscript>
+
 <cffunction name="getDirDelim" acess="public" returntype="string" output="no">
 
 	<cfif NOT StructKeyExists(variables,"dirdelim")>
@@ -70,85 +88,109 @@
 
 </cffunction>
 
-<cffunction name="uploadFile" access="public" returntype="any" output="no">
-	<cfargument name="FieldName" type="string" required="yes">
-	<cfargument name="Folder" type="string" required="no">
-	<cfargument name="NameConflict" type="string" default="Error">
-	<cfargument name="TempDirectory" default="#variables.TempDir#">
+<cfscript>
+public any function uploadFile(
+	required string FieldName,
+	string Folder,
+	string NameConflict="Error",
+	string TempDirectory=variables.TempDir
+) {
+	var destination = getDirectory(argumentCollection=arguments);
+	var CFFILE = StructNew();
+	var sOrigFile = 0;
+	var tempPath = "";
+	var serverPath = "";
+	var skip = false;
+	var dirdelim = '/';
+	var result = "";
+	var S3Folder = destination;
+	var S3FileName = "";
+	var S3FileExists = false;
 
-	<cfset var destination = getDirectory(argumentCollection=arguments)>
-	<cfset var CFFILE = StructNew()>
-	<cfset var sOrigFile = 0>
-	<cfset var tempPath = "">
-	<cfset var serverPath = "">
-	<cfset var skip = false>
-	<cfset var dirdelim = '/' />
-	<cfset var result = "">
+	// Make sure the destination exists.
+	if ( StructKeyExists(arguments, "Folder") ) {
+		 makeFolder(arguments.Folder);
+	}
 
-	<!--- Make sure the destination exists. --->
-	<cfif StructKeyExists(arguments,"Folder")>
-		<cfset makeFolder(arguments.Folder)>
-	</cfif>
+	// Set default extensions.
+	if ( NOT StructKeyExists(arguments, "extensions") ) {
+		arguments.extensions = variables.DefaultExtensions;
+	}
 
-	<!--- Set default extensions --->
-	<cfif NOT StructKeyExists(arguments,"extensions")>
-		<cfset arguments.extensions = variables.DefaultExtensions>
-	</cfif>
+	// Upload to temp directory.
+	if ( StructKeyExists(Form, Arguments.FieldName) ) {
+		S3FileName = cleanFileName(getClientFileName(Arguments.FieldName));
+		destination = "#destination##S3FileName#";
+		// Handle nameconflict resolution
+		if (this.fileExists(S3FileName, S3Folder)) {
+			switch(arguments.NameConflict) {
+				case "error":
+					throw(type="FileMgr", message="File already exists at destination.");
+					break;
+				case "skip":
+					return StructNew();
+					break;
+				case "overwrite":
+					// Have to delete the file on S3 before we save the new version
+					cffile(action="DELETE", file=destination);
+					break;
+				case "makeunique":
+					destination = createUniqueFileName(destination);
+					break;
+			}
+		}
+		if ( StructKeyExists(arguments, "accept") ) {
+			if ( ListFindNoCase(arguments.accept, "application/msword") AND NOT ListFindNoCase(arguments.accept, "application/unknown") ) {
+				arguments.accept = ListAppend(arguments.accept, "application/unknown");
+			}
+			if ( ListFindNoCase(arguments.accept, "application/vnd.ms-excel") AND NOT ListFindNoCase(arguments.accept, "application/octet-stream") ) {
+				arguments.accept = ListAppend(arguments.accept, "application/octet-stream");
+			}
+			cffile(action="UPLOAD", filefield=Arguments.FieldName, destination=destination, nameconflict=Arguments.NameConflict, result="CFFILE", accept=arguments.accept);
+		} else {
+			cffile(action="UPLOAD", filefield=Arguments.FieldName, destination=destination, nameconflict=Arguments.NameConflict, result="CFFILE");
+		}
+	} else {
+		cffile(destination=Arguments.TempDirectory, source=Arguments.FieldName, action="copy", result="CFFILE");
+	}
+	serverPath = ListAppend(CFFILE.ServerDirectory, CFFILE.ServerFile, getDirDelim());
 
-	<!--- Upload to temp directory. --->
-	<cfif StructKeyExists(Form,Arguments.FieldName)>
-		<cfif StructKeyExists(arguments,"accept")>
-			<cfif ListFindNoCase(arguments.accept,"application/msword") AND NOT ListFindNoCase(arguments.accept,"application/unknown")>
-				<cfset arguments.accept = ListAppend(arguments.accept,"application/unknown")>
-			</cfif>
-			<cfif ListFindNoCase(arguments.accept,"application/vnd.ms-excel") AND NOT ListFindNoCase(arguments.accept,"application/octet-stream")>
-				<cfset arguments.accept = ListAppend(arguments.accept,"application/octet-stream")>
-			</cfif>
-			<cffile action="UPLOAD" filefield="#Arguments.FieldName#" destination="#destination##cleanFileName(getClientFileName(Arguments.FieldName))#" nameconflict="#Arguments.NameConflict#" result="CFFILE" accept="#arguments.accept#">
-		<cfelse>
-			<cffile action="UPLOAD" filefield="#Arguments.FieldName#" destination="#destination##cleanFileName(getClientFileName(Arguments.FieldName))#" nameconflict="#Arguments.NameConflict#" result="CFFILE">
-		</cfif>
-		<cfset serverPath = ListAppend(CFFILE.ServerDirectory, CFFILE.ServerFile, getDirDelim())>
-	<cfelse>
-		<cffile destination="#Arguments.TempDirectory#" source="#Arguments.FieldName#" action="copy" result="CFFILE">
-		<cfset serverPath = ListAppend(CFFILE.ServerDirectory, CFFILE.ServerFile, getDirDelim())>
-	</cfif>
-
-	<!--- Check file extension --->
-	<cfif
+	// Check file extension
+	if (
 			Len(arguments.extensions)
-		AND	NOT ListFindNoCase(arguments.extensions,ListLast(serverPath,"."))
-	>
-		<!--- Bad file extension.  Delete file. --->
-		<cffile action="DELETE" file="#serverPath#">
-		<cfreturn StructNew()>
-	</cfif>
+		AND	NOT ListFindNoCase(arguments.extensions, ListLast(serverPath, "."))
+	) {
+		// Bad file extension.  Delete file.
+		cffile(action="DELETE", file=serverPath);
+		return StructNew();
+	}
 
-	<cfset StoreSetMetadata("#serverPath#",convertS3MetaFromCFFILE(CFFILE))>
+	StoreSetMetadata(serverPath, convertS3MetaFromCFFILE(CFFILE));
 
-	<!--- set permissions on the newly created file on S3 --->
-	<cfset setFilePermissions(serverPath)>
+	// set permissions on the newly created file on S3
+	setFilePermissions(serverPath);
 
-	<cfset CFFILE.ServerDirectory = getDirectoryFromPath(serverPath)>
-	<cfset CFFILE.ServerFile = getFileFromPath(serverPath)>
-	<cfset CFFILE.ServerFileName = ReReplaceNoCase(CFFILE.ServerFile,"\.#CFFILE.SERVERFILEEXT#$","")>
+	CFFILE.ServerDirectory = getDirectoryFromPath(serverPath);
+	CFFILE.ServerFile = getFileFromPath(serverPath);
+	CFFILE.ServerFileName = ReReplaceNoCase(CFFILE.ServerFile, "\.#CFFILE.SERVERFILEEXT#$", "");
 
-	<cfif StructKeyExists(arguments,"return") AND isSimpleValue(arguments.return)>
-		<cfif arguments.return EQ "name">
-			<cfset arguments.return = "ServerFile">
-		</cfif>
-		<cfif StructKeyExists(CFFILE,arguments.return)>
-			<cfset result = CFFILE[arguments.return]>
-			<cfif isSimpleValue(result) AND isSimpleValue(variables.dirdelim)>
-				<cfset result = ListLast(result,variables.dirdelim)>
-			</cfif>
-		</cfif>
-	<cfelse>
-		<cfset result = CFFILE>
-	</cfif>
+	if ( StructKeyExists(arguments, "return") AND isSimpleValue(arguments.return) ) {
+		if ( arguments.return EQ "name" ) {
+			arguments.return = "ServerFile";
+		}
+		if ( StructKeyExists(CFFILE, arguments.return) ) {
+			result = CFFILE[arguments.return];
+			if ( isSimpleValue(result) AND isSimpleValue(variables.dirdelim) ) {
+				result = ListLast(result, variables.dirdelim);
+			}
+		}
+	} else {
+		result = CFFILE;
+	}
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
+</cfscript>
 
 <cffunction name="writeFile" access="public" returntype="string" output="no" hint="I save a file.">
 	<cfargument name="FileName" type="string" required="yes">

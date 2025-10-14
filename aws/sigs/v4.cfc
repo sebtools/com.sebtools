@@ -1,28 +1,36 @@
 <cfcomponent displayname="Amazon Signature Version 4" extends="base" output="false">
-<!---
+<cfscript>
+/*
 The underscores before a method name indicate how close they are to that which should be called externally
 Method order and indention should reflect the order of events for the process, not alphabetical as usual
---->
-<cffunction name="init" access="public" returntype="any" output="false" hint="I initialize and return the component.">
-	<cfargument name="AWS" type="any" required="true">
+*/
+public function init(required AWS) {
+	
+	Super.init(ArgumentCollection=Arguments);
 
-	<cfset Super.init(ArgumentCollection=Arguments)>
+	return This;
+}
 
-	<cfreturn This>
-</cffunction>
+public string function getCommonParameters() {
+	return "Action,Version,X-Amz-Algorithm,X-Amz-Credential,X-Amz-Date,X-Amz-Security-Token,X-Amz-Signature,X-Amz-SignedHeaders";
+}
 
-<cffunction name="getCommonParameters" access="public" returntype="string" output="false">
-	<cfreturn "Action,Version,X-Amz-Algorithm,X-Amz-Credential,X-Amz-Date,X-Amz-Security-Token,X-Amz-Signature,X-Amz-SignedHeaders">
-</cffunction>
+/**
+* I return the raw(ish) results of Amazon REST Call.
+* @subdomain The subdomain for the AWS service being used.
+* @Action The AWS API action being called.
+* @method The HTTP method to invoke.
+* @parameters A struct of HTTP URL parameters to send in the request.
+* @timeout The default call timeout.
+*/
 
-<cffunction name="getRequest" access="public" returntype="struct" output="false" hint="I return the raw(ish) results of Amazon REST Call.">
-	<cfargument name="subdomain" type="string" required="true" hint="The subdomain for the AWS service being used.">
-	<cfargument name="Action" type="string" required="true" hint="The AWS API action being called.">
-	<cfargument name="method" type="string" default="GET" hint="The HTTP method to invoke.">
-	<cfargument name="parameters" type="struct" default="#structNew()#" hint="An struct of HTTP URL parameters to send in the request.">
-	<cfargument name="timeout" type="numeric" default="20" hint="The default call timeout.">
-
-	<cfscript>
+public struct function getRequest(
+	required string subdomain,
+	required string Action,
+	string method="GET",
+	struct parameters="#{}#",
+	numeric timeout="20"
+) {
 	var CommmonParameters = getCommonParameters();
 	var sRequest = Super.getRequest(ArgumentCollection=Arguments);
 	var timestamp = sRequest.headers["Date"];
@@ -71,25 +79,24 @@ Method order and indention should reflect the order of events for the process, n
 
 	//StructDelete(sRequest["Headers"],"Date");
 	StructAppend(sRequest["Headers"],sHeaders);
-	</cfscript>
 
+	return sRequest;
+}
 
-	<cfreturn sRequest>
-</cffunction>
-
-<cffunction name="getAuthorizationString" access="public" returntype="string" output="false" hint="I return the authorization string.">
-	<cfargument name="Method" type="string" required="true">
-	<cfargument name="URI" type="string" required="true">
-	<cfargument name="Headers" type="struct" required="false">
-	<cfargument name="FormStruct" type="struct" default="#{}#">
-	<cfargument name="Payload" type="string" default="">
-	<cfargument name="AccessKey" type="string" required="true">
-	<cfargument name="SecretKey" type="string" required="true">
-	<cfargument name="Region" type="string" required="true">
-	<cfargument name="Service" type="string" required="true">
-	<cfargument name="RequestDateTime" type="date" default="#now()#">
-
-	<cfscript>
+/**
+* I return the authorization string.
+*/
+public string function getAuthorizationString(
+	required string Method,
+	required string URI,
+	struct Headers,
+	struct FormStruct="#{}#",
+	string Payload="",
+	required string AccessKey,
+	required string SecretKey,
+	required string Region,
+	date RequestDateTime="#now()#"
+) {
 	var sLoc = {};
 
 	StructAppend(Arguments.Headers,{"x-amz-date":getStringToSignDateFormat(Arguments.RequestDateTime)});
@@ -115,8 +122,7 @@ Method order and indention should reflect the order of events for the process, n
 		&	sLoc.T1_5_SignedHeaders & chr(10)
 		&	sLoc.T1_6_PayloadHash
 	);
-	</cfscript>
-	<cfscript>
+
 	sLoc.T1_8_HashedCanonicalRequest = hashy(sLoc.T1_7_CanonicalRequest);
 	sLoc.T2_1_Algorithm = "AWS4-HMAC-SHA256";
 	sLoc.T2_2_DateTimeISO = getStringToSignDateFormat(Arguments.RequestDateTime);
@@ -145,26 +151,23 @@ Method order and indention should reflect the order of events for the process, n
 	);
 	sLoc.Credential = "#Arguments.AccessKey#/#sLoc.T2_3_CredentialScope#";
 	sLoc.T4_AuthHeader = "#sLoc.T2_1_Algorithm# Credential=#sLoc.Credential#, SignedHeaders=#sLoc.T1_5_SignedHeaders#, Signature=#sLoc.T3_2_Signature#";
-	</cfscript>
-	<!---
-	<cfdump var="#Arguments#">
-	<cfdump var="#sLoc#">
-	<cfabort>
-	--->
-	<cfreturn sLoc.T4_AuthHeader>
-</cffunction>
 
-<cffunction name="getSignature" access="public" returntype="string" output="false" hint="I get the signature for the given request.">
-	<cfargument name="Method" type="string" required="true">
-	<cfargument name="URI" type="string" required="true">
-	<cfargument name="Headers" type="struct" required="false">
-	<cfargument name="Payload" type="string" default="">
-	<cfargument name="SecretKey" type="string" required="true">
-	<cfargument name="Region" type="string" required="true">
-	<cfargument name="Service" type="string" required="true">
-	<cfargument name="RequestDateTime" type="date" default="#now()#">
+	return sLoc.T4_AuthHeader;
+}
 
-	<cfscript>
+/**
+* I get the signature for the given request.
+*/
+public string function getSignature(
+	required string Method,
+	required string URI,
+	struct Headers,
+	string Payload="",
+	required string SecretKey,
+	required string Region,
+	required string Service,
+	date RequestDateTime="#now()#"
+) {
 	var HashedCanonicalRequest = _createCanonicalRequestHash(
 		Method=Arguments.Method,
 		URI=Arguments.URI,
@@ -184,29 +187,33 @@ Method order and indention should reflect the order of events for the process, n
 		Service=Arguments.Service,
 		RequestDateTime=Arguments.RequestDateTime
 	);
-	</cfscript>
 
-	<cfreturn Signature>
-</cffunction>
+	return Signature;
+}
 
-	<cffunction name="_createCanonicalRequestHash" access="public" returntype="string" output="false" hint="Step 1: Task 1">
-		<cfargument name="Method" type="string" required="true">
-		<cfargument name="URI" type="string" required="true">
-		<cfargument name="Headers" type="struct" required="false">
-		<cfargument name="Payload" type="string" default="">
+	/**
+	* Step 1: Task 1
+	*/
+	public string function _createCanonicalRequestHash(
+		required string Method,
+		required string URI,
+		struct Headers,
+		string Payload=""
+	) {
+		return hashy(_createCanonicalRequest(ArgumentCollection=Arguments));
+	}
 
-		<cfreturn hashy(_createCanonicalRequest(ArgumentCollection=Arguments))>
-	</cffunction>
+	/**
+	* Step 1: Task 1
+	*/
+	public string function _createCanonicalRequest(
+		required string Method,
+		required string URI,
+		struct Headers,
+		string Payload=""
+	) {
+		var result = "";
 
-	<cffunction name="_createCanonicalRequest" access="public" returntype="string" output="false" hint="Step 1: Task 1">
-		<cfargument name="Method" type="string" required="true">
-		<cfargument name="URI" type="string" required="true">
-		<cfargument name="Headers" type="struct" required="false">
-		<cfargument name="Payload" type="string" default="">
-
-		<cfset var result = "">
-
-		<cfscript>
 		result = (
 				""
 			&	UCase(Arguments.Method) & chr(10)
@@ -216,50 +223,52 @@ Method order and indention should reflect the order of events for the process, n
 			&	__buildSignedHeaders(Arguments.Headers) & chr(10)
 			&	__buildPayloadHash(Arguments.Payload)
 		);
-		</cfscript>
 
-		<cfreturn result>
-	</cffunction>
+		return result;
+	}
 
-		<cffunction name="__buildCanonicalURI" access="public" returntype="string" output="false" hint="Step 1: Task 1: Part 1: Canonical URI.">
-			<cfargument name="URI" type="string" required="true">
+		/**
+		* Step 1: Task 1: Part 1: Canonical URI.
+		*/
+		public string function __buildCanonicalURI(required string URI) {
+			var result = ListFirst(Arguments.URI,"?");
 
-			<cfset var result = ListFirst(Arguments.URI,"?")>
+			result = REReplaceNoCase(result, "^\w+://", "", "ONE");
+			result = ListDeleteAt(result,1,"/");
 
-			<cfset result = REReplaceNoCase(result, "^\w+://", "", "ONE")>
-			<cfset result = ListDeleteAt(result,1,"/")>
+			result = "/#result#";
 
-			<cfset result = "/#result#">
+			result = replace( urlEncode( result ), "%2F", "/", "all");
+			// Double-encode (except S3)
+			result = replace( urlEncode( result ), "%2F", "/", "all");
 
-			<cfset result = replace( urlEncode( result ), "%2F", "/", "all")>
-			<!--- Double-encode (except S3) --->
-			<cfset result = replace( urlEncode( result ), "%2F", "/", "all")>
+			return result;
+		}
 
-			<cfreturn result>
-		</cffunction>
+		/**
+		* Step 1: Task 1: Part 2: Canonical Query String.
+		*/
+		public string function __buildCanonicalQueryString(
+			required parameters,
+			boolean isEncoded="true"
+		) {
+			var sParams = {};
+			var param = "";
+			var aParams = [];
+			var aResults = [];
 
-		<cffunction name="__buildCanonicalQueryString" access="public" returntype="string" output="false" hint="Step 1: Task 1: Part 2: Canonical Query String.">
-			<cfargument name="parameters" type="any" required="true">
-			<cfargument name="isEncoded" type="boolean" default="true">
+			// Make sure parameters are a struct.
+			if ( isStruct(Arguments.parameters) ) {
+				sParams = Arguments.parameters;
+			} else if ( isSimpleValue(Arguments.parameters) ) {
+				Arguments.parameters = ListRest(Arguments.parameters,"?");
+				for ( param in ListToArray(Arguments.parameters,"&") ) {
+					sParams[ListFirst(param,"=")] = ListRest(param,"=");
+				}
+			} else {
+				throw(message="parameters must be either a query string or a structure.");
+			}
 
-			<cfset var sParams = {}>
-			<cfset var param = "">
-			<cfset var aParams = []>
-			<cfset var aResults = []>
-
-			<!--- Make sure parameters are a struct. --->
-			<cfif isStruct(Arguments.parameters)>
-				<cfset sParams = Arguments.parameters>
-			<cfelseif isSimpleValue(Arguments.parameters)>
-				<cfset Arguments.parameters = ListRest(Arguments.parameters,"?")>
-				<cfloop list="#Arguments.parameters#" index="param" delimiters="&">
-					<cfset sParams[ListFirst(param,"=")] = ListRest(param,"=")>
-				</cfloop>
-			<cfelse>
-				<cfthrow message="parameters must be either a query string or a structure.">
-			</cfif>
-
-			<cfscript>
 			sParams = isEncoded ? sParams : encodeQueryParams( sParams );
 
 			// Sort parameters
@@ -269,15 +278,14 @@ Method order and indention should reflect the order of events for the process, n
 			arrayEach( aParams, function(string param) {
 				ArrayAppend( aResults, Arguments.param & "=" & sParams[ Arguments.param ] );
 			});
-			</cfscript>
 
-			<cfreturn ArrayToList(aResults, "&")>
-		</cffunction>
+			return ArrayToList(aResults, "&");
+		}
 
-		<cffunction name="__buildCanonicalHeaders" access="public" returntype="string" output="false" hint="Step 1: Task 1: Part 3: Canonical Headers.">
-			<cfargument name="sHeaders" type="struct" required="true">
-
-			<cfscript>
+		/**
+		* Step 1: Task 1: Part 3: Canonical Headers.
+		*/
+		public string function __buildCanonicalHeaders(required struct sHeaders) {
 			var aPairs = "";
 			var aHeaders = "";
 			// Scrub the header names and values first
@@ -296,14 +304,13 @@ Method order and indention should reflect the order of events for the process, n
 
 			// Generate list. Note: List must END WITH a new line character
 			return ArrayToList( aPairs, chr(10)) & chr(10);
-			</cfscript>
 
-		</cffunction>
+		}
 
-		<cffunction name="__buildSignedHeaders" access="public" returntype="string" output="false" hint="Step 1: Task 1: Part 4: Signed Headers.">
-			<cfargument name="sHeaders" type="struct" required="true">
-
-			<cfscript>
+		/**
+		* Step 1: Task 1: Part 4: Signed Headers.
+		*/
+		public string function __buildSignedHeaders(required struct sHeaders) {
 			var aPairs = "";
 			var aHeaders = "";
 			// Scrub the header names and values first
@@ -322,26 +329,26 @@ Method order and indention should reflect the order of events for the process, n
 
 			// Generate list.
 			return ArrayToList( aPairs, ";");
-			</cfscript>
+		}
+	
+		/**
+		* Step 1: Task 1: Part 4: Payload Hash.
+		*/
+		public string function __buildPayloadHash(string Payload="") {
+			return hashy(Arguments.Payload);
+		}
+	
+	/**
+	* Step 1: Task 2
+	*/
+	public string function _createSigningString(
+		required string ServiceName,
+		required string Region,
+		required string CanonicalRequestHash,
+		date RequestDateTime="#now()#"
+	) {
+		var result = "";
 
-		</cffunction>
-
-		<cffunction name="__buildPayloadHash" access="public" returntype="string" output="false" hint="Step 1: Task 1: Part 4: Payload Hash.">
-			<cfargument name="Payload" type="string" default="">
-
-			<cfreturn hashy(Arguments.Payload)>
-		</cffunction>
-
-
-	<cffunction name="_createSigningString" access="public" returntype="string" output="false" hint="Step 1: Task 2">
-		<cfargument name="ServiceName" type="string" required="true">
-		<cfargument name="Region" type="string" required="true">
-		<cfargument name="CanonicalRequestHash" type="string" required="true">
-		<cfargument name="RequestDateTime" type="date" default="#now()#">
-
-		<cfset var result = "">
-
-		<cfscript>
 		result = (
 				""
 			&	"AWS4-HMAC-SHA256" & chr(10)
@@ -349,30 +356,34 @@ Method order and indention should reflect the order of events for the process, n
 			&	"#DateFormat(Arguments.RequestDateTime,'yyyymmdd')#/#LCase(Arguments.Region)#/#LCase(Arguments.ServiceName)#/aws4_request" & chr(10)
 			&	Arguments.CanonicalRequestHash
 		);
-		</cfscript>
 
-		<cfreturn result>
-	</cffunction>
+		return result;
+	}
 
-	<cffunction name="_createSignature" access="public" returntype="string" output="false" hint="Step 1: Task 3">
-		<cfargument name="StringToSign" type="string" required="true">
-		<cfargument name="SecretKey" type="string" required="true">
-		<cfargument name="Region" type="string" required="true">
-		<cfargument name="Service" type="string" required="true">
-		<cfargument name="RequestDateTime" type="date" default="#now()#">
+	/**
+	* Step 1: Task 3
+	*/
+	public string function _createSignature(
+		required string StringToSign,
+		required string SecretKey,
+		required string Region,
+		required string Service,
+		date RequestDateTime="#now()#"
+	) {
+		var key = __buildSigningKey(ArgumentCollection=Arguments);
 
-		<cfset var key = __buildSigningKey(ArgumentCollection=Arguments)>
+		return LCase( BinaryEncode( HMAC_SHA256_bin( Arguments.StringToSign, key), "hex") );
+	}
 
-		<cfreturn LCase( BinaryEncode( HMAC_SHA256_bin( Arguments.StringToSign, key), "hex") )>
-	</cffunction>
-
-		<cffunction name="__buildSigningKey" access="public" returntype="binary" output="false" hint="Step 1: Task 3: Part 1">
-			<cfargument name="SecretKey" type="string" required="true">
-			<cfargument name="Region" type="string" required="true">
-			<cfargument name="Service" type="string" required="true">
-			<cfargument name="RequestDateTime" type="date" default="#now()#">
-
-			<cfscript>
+		/**
+		* Step 1: Task 3: Part 1
+		*/
+		public binary function __buildSigningKey(
+			required string SecretKey,
+			required string Region,
+			required string Service,
+			date RequestDateTime="#now()#"
+		) {
 			var DateStamp = DateFormat(Arguments.RequestDateTime,"yyyymmdd");
 			/*
 			var kSecret = charsetDecode("AWS4" & Arguments.SecretKey, "UTF-8");
@@ -391,35 +402,32 @@ Method order and indention should reflect the order of events for the process, n
 			var kService    = HMAC_SHA256_bin(arguments.Service, kRegion);
 			var kSigning    = HMAC_SHA256_bin("aws4_request", kService);
 
-			//return kSigning;
-			</cfscript>
+			return kSigning;
+		}
 
-			<cfreturn kSigning>
-		</cffunction>
+		/**
+		* Step 1: Task 3: Part 1
+		*/
+		public string function __buildSigningKeyString(
+			required string SecretKey,
+			required string Region,
+			required string Service,
+			date RequestDateTime="#now()#"
+		) {
+			return BinaryEncode( __buildSigningKey(ArgumentCollection=Arguments), "hex" );
+		}
 
-		<cffunction name="__buildSigningKeyString" access="public" returntype="string" output="false" hint="Step 1: Task 3: Part 1">
-			<cfargument name="SecretKey" type="string" required="true">
-			<cfargument name="Region" type="string" required="true">
-			<cfargument name="Service" type="string" required="true">
-			<cfargument name="RequestDateTime" type="date" default="#now()#">
+			/**
+			* I return a formatted date time for the string to sign section
+			*/
+			private string function getStringToSignDateFormat(required date date) {
+				return "#Dateformat(Arguments.date, 'yyyymmdd')#T#TimeFormat(Arguments.date, 'HHmmss')#Z";
+			}
 
-			<cfreturn BinaryEncode( __buildSigningKey(ArgumentCollection=Arguments), "hex" )>
-		</cffunction>
+			private string function hashy(string string="") {
+				return LCase(Hash(Arguments.string, "SHA-256"));
+			}
 
-
-			<cffunction name="getStringToSignDateFormat" access="private" returntype="string" output="false" hint="I return a formatted date time for the string to sign section">
-				<cfargument name="date" type="date" required="true">
-
-				<cfreturn "#Dateformat(Arguments.date, 'yyyymmdd')#T#TimeFormat(Arguments.date, 'HHmmss')#Z">
-			</cffunction>
-
-			<cffunction name="hashy" access="private" returntype="string" output="false">
-				<cfargument name="string" type="string" default="">
-
-				<cfreturn LCase(Hash(Arguments.string, "SHA-256"))>
-			</cffunction>
-
-			<cfscript>
 			/**
 			 * Scrubs header names and values:
 			 * <ul>
@@ -498,10 +506,11 @@ Method order and indention should reflect the order of events for the process, n
 
 				return result;
 			}
-			</cfscript>
 
-<!---
+/*
 https://gist.github.com/Leigh-/a2798584b79fd9072605a4cc7ff60df4
 https://webdeveloperpadawan.blogspot.com/2013/07/amazon-aws-signature-version-4.html
---->
+*/
+</cfscript>
+
 </cfcomponent>

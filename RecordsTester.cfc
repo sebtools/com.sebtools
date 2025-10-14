@@ -2,430 +2,448 @@
 <!--- Last Updated: 2010-11-23 --->
 <!--- Created by Steve Bryant 2009-07-14 --->
 <cfcomponent displayname="Records" extends="mxunit.framework.TestCase">
+<cfscript>
+include "udfs.cfm";
+Variables.sObserverChecks = {};
+Variables.sObserverEvents = {};
+request.isTesting = true;
 
-<cfinclude template="udfs.cfm">
-<cfset request["isTesting"] = true>
-<cfset Variables.sObserverChecks = {}>
-<cfset Variables.sObserverEvents = {}>
+public function init() {
 
-<cffunction name="init" access="public" returntype="any" output="no">
-
-	<cfscript>
+	request["isTesting"] = true;
 	var key = "";
 
-	for (key in Arguments) {
+	for ( key in Arguments ) {
 		variables[key] = Arguments[key];
 	}
-	</cfscript>
 
-	<cfreturn This>
-</cffunction>
+	return This;
+}
 
-<cffunction name="setUp" access="public" returntype="void" output="no">
-
-	<cfscript>
+public void function setUp() {
 	var key = "";
 
 	for (key in arguments) {
 		variables[key] = arguments[key];
 	}
-	</cfscript>
+}
 
-</cffunction>
+/**
+* I assert that given date is recent, as defined by the arguments provided.
+*/
+public void function assertRecent(
+	required date date,
+	string message="",
+	numeric range="3",
+	string interval="n"
+) {
 
-<cffunction name="assertRecent" access="public" returntype="void" output="no" hint="I assert that given date is recent, as defined by the arguments provided.">
-	<cfargument name="date" type="date" required="true">
-	<cfargument name="message" type="string" default="">
-	<cfargument name="range" type="numeric" default="3">
-	<cfargument name="interval" type="string" default="n">
+	assert("#arguments.date# GTE #getRecentDateTime(range=arguments.range,interval=arguments.interval)#",arguments.message);
 
-	<cfset assert("#arguments.date# GTE #getRecentDateTime(range=arguments.range,interval=arguments.interval)#",arguments.message)>
+}
 
-</cffunction>
+/**
+* I assert that email can be tested using isEmailTestable().
+*/
+public void function assertEmailTestable() {
+	
+	if ( NOT isEmailTestable() ) {
+		fail("Email is not currently testable (DataMgr and Mailer must be available in the test component and logging email and DataMgr must be available and not in Simulation mode.)");
+	}
 
-<cffunction name="assertEmailTestable" access="public" returntype="void" output="no" hint="I assert that email can be tested using isEmailTestable().">
-	<cfif NOT isEmailTestable()>
-		<cfset fail("Email is not currently testable (DataMgr and Mailer must be available in the test component and logging email and DataMgr must be available and not in Simulation mode.)")>
-	</cfif>
-</cffunction>
+}
 
-<cffunction name="assertEmailSent" access="public" returntype="void" output="no" hint="I assert than an email has been sent. Arguments will match the keys of the email.">
-	<cfargument name="when" type="date" default="#now()#">
-	<cfargument name="message" type="string" default="Email was not sent">
+/**
+* I assert than an email has been sent. Arguments will match the keys of the email.
+*/
+public void function assertEmailSent(
+	date when="#now()#",
+	string message="Email was not sent"
+) {
 
-	<cfset assertEmailTestable()>
+	assertEmailTestable();
 
-	<cfif NOT isEmailSent(argumentCollection=arguments)>
-		<cfset fail(Arguments.message)>
-	</cfif>
+	if ( NOT isEmailSent(argumentCollection=arguments) ) {
+		fail(Arguments.message);
+	}
 
-</cffunction>
+}
 
-<cffunction name="assertEmailNotSent" access="public" returntype="void" output="no">
-	<cfargument name="when" type="date" default="#now()#">
-	<cfargument name="message" type="string" default="Email was sent">
+public void function assertEmailNotSent(
+	date when="#now()#",
+	string message="Email was not sent"
+) {
 
-	<cfif isEmailSent(argumentCollection=arguments)>
-		<cfset fail(Arguments.message)>
-	</cfif>
+	if ( isEmailSent(argumentCollection=arguments) ) {
+		fail(Arguments.message);
+	}
 
-</cffunction>
+}
 
-<cffunction name="assertNoticeSent" access="public" returntype="void" output="no">
-	<cfargument name="notice" type="string" required="true">
-	<cfargument name="to" type="string" required="false">
-	<cfargument name="when" type="date" default="#now()#">
+public void function assertNoticeSent(
+	required string notice,
+	string to,
+	date when="#now()#"
+) {
+	var message = "Notice (#arguments.notice#) was not sent";
 
-	<cfset var message = "Notice (#arguments.notice#) was not sent">
+	if ( StructKeyExists(arguments,"to") ) {
+		message = "#message# to #arguments.to#";
+	}
+	message = "#message#.";
 
-	<cfif StructKeyExists(arguments,"to")>
-		<cfset message = "#message# to #arguments.to#">
-	</cfif>
-	<cfset message = "#message#.">
+	if ( NOT isNoticeSent(argumentCollection=arguments) ) {
+		fail(message);
+	}
 
-	<cfif NOT isNoticeSent(argumentCollection=arguments)>
-		<cfset fail(message)>
-	</cfif>
+}
 
-</cffunction>
+public void function assertNoticeNotSent(
+	required string notice,
+	string to,
+	date when="#now()#"
+) {
+	var message = "Notice (#arguments.notice#) was sent";
 
-<cffunction name="assertNoticeNotSent" access="public" returntype="void" output="no">
-	<cfargument name="notice" type="string" required="true">
-	<cfargument name="to" type="string" required="false">
-	<cfargument name="when" type="date" default="#now()#">
+	if ( StructKeyExists(arguments,"to") ) {
+		message = "#message# to #arguments.to#";
+	}
+	message = "#message#.";
 
-	<cfset var message = "Notice (#arguments.notice#) was sent">
+	if ( isNoticeSent(argumentCollection=arguments) ) {
+		fail(message);
+	}
 
-	<cfif StructKeyExists(arguments,"to")>
-		<cfset message = "#message# to #arguments.to#">
-	</cfif>
-	<cfset message = "#message#.">
+}
 
-	<cfif isNoticeSent(argumentCollection=arguments)>
-		<cfset fail(message)>
-	</cfif>
+public void function clearCaches() {
+	var aCacheIDs = cacheGetAllIds();
+	var ii = 0;
+	var CacheName = "";
 
-</cffunction>
+	// Clear all cached queries.
+	objectcache(action="clear");
 
-<cffunction name="clearCaches" access="public" returntype="void" output="no">
-	<cfset var aCacheIDs = cacheGetAllIds()>
-	<cfset var ii = 0>
-	<cfset var CacheName = "">
+	// Clear all EhCaches except for those used by the Rate Limiter (I'm cheating here by know the implementation details of Rate Limiter).
+	for ( ii=1; ii LTE ArrayLen(aCacheIDs); ii++ ) {
+		CacheName = aCacheIDs[ii];
+		if ( ListFirst(CacheName,"_") NEQ "LIMIT" ) {
+			cacheRemove(CacheName);
+		}
+	}
 
-	<!--- Clear all cached queries. --->
-	<cfobjectcache action="clear">
+}
 
-	<!--- Clear all EhCaches except for those used by the Rate Limiter (I'm cheating here by know the implementation details of Rate Limiter). --->
-	<cfloop index="ii" from="1" to="#ArrayLen(aCacheIDs)#">
-		<cfset CacheName = aCacheIDs[ii]>
-		<cfif ListFirst(CacheName,"_") NEQ "LIMIT">
-			<cfset cacheRemove(CacheName)>
-		</cfif>
-	</cfloop>
+public struct function getRandomData(
+	required comp,
+	struct data
+) {
+	var aFields = Arguments.comp.getFieldsArray();
+	var sResult = {};
+	var ii = 0;
+	var sArgs = StructCopy(Arguments);
+	var skiptypes = "DeletionMark,Sorter,DeletionDate,UUID";
 
-</cffunction>
-
-<cffunction name="getRandomData" access="public" returntype="struct" output="no">
-	<cfargument name="comp" type="any" required="yes">
-	<cfargument name="data" type="struct" required="no">
-
-	<cfset var aFields = Arguments.comp.getFieldsArray()>
-	<cfset var sResult = StructNew()>
-	<cfset var ii = 0>
-	<cfset var sArgs = StructCopy(Arguments)>
-	<cfset var skiptypes = "DeletionMark,Sorter,DeletionDate,UUID">
-
-	<!--- Create test data --->
-	<cfloop index="ii" from="1" to="#ArrayLen(aFields)#" step="1">
-		<cfif
+	// Create test data
+	for ( ii=1; ii LTE ArrayLen(aFields); ii++ ) {
+		if (
 				StructKeyExists(aFields[ii],"name")
 			AND	NOT ( StructKeyExists(arguments,"data") AND StructKeyExists(arguments.data,aFields[ii]["name"]) )
-		>
-			<cfif
-					StructKeyExists(aFields[ii],"fentity")
-				AND	StructKeyExists(Arguments.comp,"Parent")
-				AND	StructKeyExists(Arguments.comp,"Manager")
-				AND	StructKeyExists(Arguments.comp.Manager,"pluralize")
-				AND	StructKeyExists(Arguments.comp.Parent,Arguments.comp.Manager.pluralize(aFields[ii].fentity))
-				AND	isObject(Arguments.comp.Parent[Arguments.comp.Manager.pluralize(aFields[ii].fentity)])
-			>
-				<cfset sResult[aFields[ii]["name"]] = getRandomPrimaryKeyValue(
+		) {
+			if (
+				StructKeyExists(aFields[ii],"fentity")
+				AND
+				StructKeyExists(Arguments.comp,"Parent")
+				AND
+				StructKeyExists(Arguments.comp,"Manager")
+				AND
+				StructKeyExists(Arguments.comp.Manager,"pluralize")
+				AND
+				StructKeyExists(Arguments.comp.Parent,Arguments.comp.Manager.pluralize(aFields[ii].fentity))
+				AND
+				isObject(Arguments.comp.Parent[Arguments.comp.Manager.pluralize(aFields[ii].fentity)])
+			) {
+				sResult[aFields[ii]["name"]] = getRandomPrimaryKeyValue(
 					Arguments.comp.Parent[Arguments.comp.Manager.pluralize(aFields[ii].fentity)],
 					( StructKeyExists(aFields[ii],"jointype") AND aFields[ii].jointype CONTAINS "many" )
-				)>
-			<cfelseif
+				);
+			} else if (
 					StructKeyExists(aFields[ii],"ftable")
 				AND	Len(aFields[ii]["ftable"])
-			>
-				<cfset sResult[aFields[ii]["name"]] = getRandomTablePrimaryKeyValue(
+			) {
+				sResult[aFields[ii]["name"]] = getRandomTablePrimaryKeyValue(
 					aFields[ii].ftable,
 					( StructKeyExists(aFields[ii],"jointype") AND aFields[ii].jointype CONTAINS "many" )
-				)>
-			<cfelseif
-					StructKeyExists(aFields[ii],"datatype")
-				AND	ListFindNoCase("pk,fk",ListFirst(aFields[ii].type,":"))
-			>
-				<!--- No value --->
-				<cfelseif
-						StructKeyExists(aFields[ii],"relation")
-				>
-					<!--- No value --->
-			<cfelseif
-					StructKeyExists(aFields[ii],"datatype")
-				AND	ListFirst(aFields[ii].type,":") NEQ "pk"
-				AND	ListFirst(aFields[ii].type,":") NEQ "fk"
-				AND	NOT ListFindNoCase(skiptypes,aFields[ii].type)
-				AND	NOT ( StructKeyExists(aFields[ii],"Special") AND ListFindNoCase(skiptypes,aFields[ii].Special) )
-				AND	NOT ( StructKeyExists(aFields[ii],"test") AND aFields[ii].test IS false )
-			>
-				<cfset sResult[aFields[ii]["name"]] = getRandomFieldValue(aFields[ii])>
-			<cfelse>
-				<cfset sResult[aFields[ii]["name"]] = "">
-			</cfif>
-		</cfif>
-	</cfloop>
+				);
+			} else if (
+				StructKeyExists(aFields[ii],"datatype")
+				AND
+				ListFindNoCase("pk,fk",ListFirst(aFields[ii].type,":"))
+			) {
+				// No value
+			} else if (
+				StructKeyExists(aFields[ii],"relation")
+			) {
+					// No value
+			} else if (
+				StructKeyExists(aFields[ii],"datatype")
+				AND
+				ListFirst(aFields[ii].type,":") NEQ "pk"
+				AND
+				ListFirst(aFields[ii].type,":") NEQ "fk"
+				AND
+				NOT ListFindNoCase(skiptypes,aFields[ii].type)
+				AND
+				NOT ( StructKeyExists(aFields[ii],"Special") AND ListFindNoCase(skiptypes,aFields[ii].Special) )
+				AND
+				NOT ( StructKeyExists(aFields[ii],"test") AND aFields[ii].test IS false )
+			) {
+				sResult[aFields[ii]["name"]] = getRandomFieldValue(aFields[ii]);
+			} else {
+				sResult[aFields[ii]["name"]] = "";
+			}
+		}
+	}
 
-	<cfif StructKeyExists(arguments,"data")>
-		<cfset StructAppend(sResult,arguments.data,"yes")>
-	</cfif>
+	if ( StructKeyExists(arguments,"data") ) {
+		StructAppend(sResult,arguments.data,"yes");
+	}
 
-	<!--- Ability to pass in named arguments directly without loading into data struct --->
-	<cfset StructDelete(sArgs,"comp")>
-	<cfset StructDelete(sArgs,"data")>
-	<cfif StructCount(sArgs)>
-		<cfset StructAppend(sResult,sArgs,"yes")>
-	</cfif>
+	// Ability to pass in named arguments directly without loading into data struct
+	StructDelete(sArgs,"comp");
+	StructDelete(sArgs,"data");
+	if ( StructCount(sArgs) ) {
+		StructAppend(sResult,sArgs,"yes");
+	}
 
-	<cfreturn sResult>
-</cffunction>
+	return sResult;
+}
 
-<cffunction name="getRandomFieldValue" access="public" returntype="string" output="no">
-	<cfargument name="field" type="any" required="yes">
+public string function getRandomFieldValue(required field) {
+	var sField = arguments.field;
+	var result = getRandomValue(sField.datatype);
+	var length = 0;
+	var email_suffix = "@example.com";
 
-	<cfset var sField = arguments.field>
-	<cfset var result = getRandomValue(sField.datatype)>
-	<cfset var length = 0>
-	<cfset var email_suffix = "@example.com">
+	if ( StructKeyExists(sField,"Length") ) {
+		length = sField.Length;
+		if ( StructKeyExists(sField,"type") AND sField.type EQ "email" ) {
+			length = length - Len(email_suffix);
+		}
+		if ( Len(result) GT length ) {
+			result = Left(result,length);
+		}
+	}
 
-	<cfif StructKeyExists(sField,"Length")>
-		<cfset length = sField.Length>
-		<cfif StructKeyExists(sField,"type") AND sField.type EQ "email">
-			<cfset length = length - Len(email_suffix)>
-		</cfif>
-		<cfif Len(result) GT length>
-			<cfset result = Left(result,length)>
-		</cfif>
-	</cfif>
+	if ( StructKeyExists(sField,"type") AND sField.type EQ "email" ) {
+		result = "#result##email_suffix#";
+	}
 
-	<cfif StructKeyExists(sField,"type") AND sField.type EQ "email">
-		<cfset result = "#result##email_suffix#">
-	</cfif>
+	return result;
+}
 
-	<cfreturn result>
-</cffunction>
+public string function getRandomPrimaryKeyValue(
+	required comp,
+	boolean  multi="false"
+) {
+	var keys = Arguments.comp.getPrimaryKeyValues();
+	var result = "";
+	var times = 1;
+	var ii = 0;
 
-<cffunction name="getRandomPrimaryKeyValue" access="public" returntype="string" output="no">
-	<cfargument name="comp" type="any" required="yes">
-	<cfargument name="multi" type="boolean" default="false">
+	if ( ListLen(keys) ) {
+		if ( Arguments.multi ) {
+			times = RandRange(0,Min(50,ListLen(keys)));
+		}
 
-	<cfset var keys = Arguments.comp.getPrimaryKeyValues()>
-	<cfset var result = "">
-	<cfset var times = 1>
-	<cfset var ii = 0>
-
-	<cfif ListLen(keys)>
-		<cfif Arguments.multi>
-			<cfset times = RandRange(0,Min(50,ListLen(keys)))>
-		</cfif>
-
-		<cfif Val(times)>
-			<cfloop index="ii" from="1" to="#times#">
-				<cfset result = ListAppend(
+		if ( Val(times) ) {
+			for ( ii=1; ii LTE times; ii++ ) {
+				result = ListAppend(
 					result,
 					ListGetAt(keys,RandRange(1,ListLen(keys)))
-				)>
-			</cfloop>
-		</cfif>
-	</cfif>
+				);
+			}
+		}
+	}
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="getRandomTablePrimaryKeyValue" access="public" returntype="string" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="multi" type="boolean" default="false">
+public string function getRandomTablePrimaryKeyValue(
+	required string tablename,
+	boolean  multi="false"
+) {
+	var pklist = "";
+	var qRecords = 0;
+	var keys = "";
+	var times = 1;
+	var result = "";
+	var sRecord = 0;
 
-	<cfset var pklist = "">
-	<cfset var qRecords = 0>
-	<cfset var keys = "">
-	<cfset var times = 1>
-	<cfset var result = "">
+	cf_service(name="DataMgr");
 
-	<cf_service name="DataMgr">
+	pklist = Variables.DataMgr.getPrimaryKeyFieldNames(Arguments.tablename);
 
-	<cfset pklist = Variables.DataMgr.getPrimaryKeyFieldNames(Arguments.tablename)>
+	if ( ListLen(pklist) EQ 1 ) {
+		qRecords = Variables.DataMgr.getRecords(tablename=Arguments.tablename,fieldlist=pklist,maxrows=50);
+		for ( sRecord in qRecords ) {
+			keys = ListAppend(keys,sRecord[pklist]);
+		}
+	}
 
-	<cfif ListLen(pklist) EQ 1>
-		<cfset qRecords = Variables.DataMgr.getRecords(tablename=Arguments.tablename,fieldlist=pklist,maxrows=50)>
-		<cfoutput query="qRecords">
-			<cfset keys = ListAppend(keys,qRecords[pklist][CurrentRow])>
-		</cfoutput>
-	</cfif>
+	if ( ListLen(keys) ) {
+		if ( Arguments.multi) {
+			times = RandRange(0,ListLen(keys));
+		}
 
-	<cfif ListLen(keys)>
-		<cfif Arguments.multi>
-			<cfset times = RandRange(0,ListLen(keys))>
-		</cfif>
-
-		<cfif Val(times)>
-			<cfloop index="ii" from="1" to="#times#">
-				<cfset result = ListAppend(
+		if ( Val(times) ) {
+			for ( ii=1; ii LTE times; ii++ ) {
+				result = ListAppend(
 					result,
 					ListGetAt(keys,RandRange(1,ListLen(keys)))
-				)>
-			</cfloop>
-		</cfif>
-	</cfif>
+				);
+			}
+		}
+	}
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="getRandomValue" access="public" returntype="string" output="no">
-	<cfargument name="datatype" type="string" required="yes">
-	<cfargument name="allowNulls" type="boolean" default="yes">
+public string function getRandomValue(
+	required string datatype,
+	boolean allowNulls="yes"
+) {
+	var result = "";
 
-	<cfset var result = "">
+	switch (arguments.datatype) {
+		case "boolean":
+				result = RandRange(0,1);
+			break;
+		case "date":
+				result = DateFormat(DateAdd("d",RandRange(30,1095),now()),"yyyy-mm-dd");
+			break;
+		case "integer":
+		case "number":
+				result = RandRange(0,100);
+			break;
+		case "text":
+				result = "Test#RandRange(1,1000000)#";
+			break;
+		case "email":
+				result = "Test#RandRange(1,1000000)#@example.com";
+			break;
+	}
 
-	<cfswitch expression="#arguments.datatype#">
-	<cfcase value="boolean">
-		<cfset result = RandRange(0,1)>
-	</cfcase>
-	<cfcase value="date">
-		<cfset result = DateFormat(DateAdd("d",RandRange(30,1095),now()),"yyyy-mm-dd")>
-	</cfcase>
-	<cfcase value="integer,number">
-		<cfset result = RandRange(0,100)>
-	</cfcase>
-	<cfcase value="text">
-		<cfset result = "Test#RandRange(1,1000000)#">
-	</cfcase>
-	<cfcase value="email">
-		<cfset result = "Test#RandRange(1,1000000)#@example.com">
-	</cfcase>
-	</cfswitch>
+	// Add a 20% chance of a NULL/empty
+	if ( Arguments.allowNulls AND RandRange(1,5) EQ 1 ) {
+		return "";
+	}
 
-	<!--- Add a 20% chance of a NULL/empty --->
-	<cfif Arguments.allowNulls AND RandRange(1,5) EQ 1>
-		<cfreturn "">
-	</cfif>
+	return result;
+}
 
-	<cfreturn result>
-</cffunction>
+public boolean function isEmailTestable() {
+	var result = false;
 
-<cffunction name="isEmailTestable" access="public" returntype="boolean" output="no">
+	if ( StructKeyExists(variables,"NoticeMgr") ) {
+		if ( NOT StructKeyExists(variables,"DataMgr") ) {
+			variables.DataMgr = variables.NoticeMgr.getDataMgr();
+		}
+		if ( NOT StructKeyExists(variables,"Mailer") ) {
+			variables.Mailer = variables.NoticeMgr.getMailer();
+		}
+	}
+	if ( StructKeyExists(variables,"Manager") AND NOT StructKeyExists(Variables,"DataMgr") ) {
+		variables.DataMgr = variables.Manager.DataMgr;
+	}
 
-	<cfset var result = false>
-
-	<cfif StructKeyExists(variables,"NoticeMgr")>
-		<cfif NOT StructKeyExists(variables,"DataMgr")>
-			<cfset variables.DataMgr = variables.NoticeMgr.getDataMgr()>
-		</cfif>
-		<cfif NOT StructKeyExists(variables,"Mailer")>
-			<cfset variables.Mailer = variables.NoticeMgr.getMailer()>
-		</cfif>
-	</cfif>
-	<cfif StructKeyExists(variables,"Manager") AND NOT StructKeyExists(Variables,"DataMgr")>
-		<cfset variables.DataMgr = variables.Manager.DataMgr>
-	</cfif>
-
-	<cfset result = (
+	result = (
 			StructKeyExists(variables,"DataMgr")
 		AND	StructKeyExists(variables,"Mailer")
 		AND	variables.DataMgr.getDatabase() NEQ "Sim"
-	)>
+	);
 
-	<cfif NOT variables.Mailer.getIsLogging()>
-		<cfset Variables.Mailer.startLogging(Variables.DataMgr)>
-	</cfif>
+	if ( NOT variables.Mailer.getIsLogging() ) {
+		Variables.Mailer.startLogging(Variables.DataMgr);
+	}
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="isEmailSent" access="public" returntype="boolean" output="no">
-	<cfargument name="when" type="date" default="#now()#">
+public boolean function isEmailSent(date when="#now()#") {
+	var result = false;
 
-	<cfset var result = false>
+	if ( NumEmailsSent(argumentCollection=arguments) ) {
+		result = true;
+	}
 
-	<cfif NumEmailsSent(argumentCollection=arguments)>
-		<cfset result = true>
-	</cfif>
+	return result;
+}
 
-	<cfreturn result>
-</cffunction>
+public boolean function isNoticeSent(
+	required string notice,
+	string to,
+	date when="#now()#"
+) {
 
-<cffunction name="isNoticeSent" access="public" returntype="boolean" output="no">
-	<cfargument name="notice" type="string" required="true">
-	<cfargument name="to" type="string" required="false">
-	<cfargument name="when" type="date" default="#now()#">
+	return isEmailSent(argumentCollection=arguments);
+}
 
-	<cfreturn isEmailSent(argumentCollection=arguments)>
-</cffunction>
+public date function getRecentDateTime(
+	date date="#now()#",
+	numeric range="3",
+	string interval="n"
+) {
 
-<cffunction name="getRecentDateTime" access="public" returntype="date" output="no">
-	<cfargument name="date" type="date" default="#now()#">
-	<cfargument name="range" type="numeric" default="3">
-	<cfargument name="interval" type="string" default="n">
+	return DateAdd(arguments.interval,-Abs(arguments.range),arguments.date);
+}
 
-	<cfreturn DateAdd(arguments.interval,-Abs(arguments.range),arguments.date)>
-</cffunction>
+public numeric function NumEmailsSent(date when="#now()#") {
+	var result = 0;
+	var aFilters = [];
+	var sFilter = {};
+	var qSentMessages = 0;
+	var sSentMessage = 0;
+	var oDataMgr = 0;
+	var fieldlist = "LogID";
+	var sData = Duplicate(Arguments);
+	var RecipientFields = "To,CC,BCC,From";
+	var ii = 0;
+	var key = "";
 
-<cffunction name="NumEmailsSent" access="public" returntype="numeric" output="no">
-	<cfargument name="when" type="date" default="#now()#">
+	assertEmailTestable();
 
-	<cfset var result = 0>
-	<cfset var aFilters = ArrayNew(1)>
-	<cfset var sFilter = StructNew()>
-	<cfset var qSentMessages = 0>
-	<cfset var oDataMgr = 0>
-	<cfset var fieldlist = "LogID">
-	<cfset var sData = Duplicate(Arguments)>
-	<cfset var RecipientFields = "To,CC,BCC,From">
-	<cfset var ii = 0>
-	<cfset var key = "">
+	oDataMgr = variables.DataMgr;
 
-	<cfset assertEmailTestable()>
+	sFilter["field"] = "DateSent";
+	sFilter["operator"] = ">=";
+	sFilter["value"] = DateAdd("n",-3,arguments.when);
 
-	<cfset oDataMgr = variables.DataMgr>
+	ArrayAppend(aFilters,sFilter);
 
-	<cfset sFilter["field"] = "DateSent">
-	<cfset sFilter["operator"] = ">=">
-	<cfset sFilter["value"] = DateAdd("n",-3,arguments.when)>
+	if ( StructKeyExists(arguments,"regex") AND Len(arguments.regex) ) {
+		fieldlist = "LogID,Subject,Contents,HTML,Text";
+	}
 
-	<cfset ArrayAppend(aFilters,sFilter)>
+	qSentMessages = oDataMgr.getRecords(tablename=variables.Mailer.getLogTable(),data=sData,filters=aFilters,fieldlist=fieldlist);
 
-	<cfif StructKeyExists(arguments,"regex") AND Len(arguments.regex)>
-		<cfset fieldlist = "LogID,Subject,Contents,HTML,Text">
-	</cfif>
+	if ( qSentMessages.RecordCount EQ 0 ) {
+		// look more thoroughly for a match
+		// Exclude recipient fields from the query
+		for ( key in ListToArray(RecipientFields) ) {
+			StructDelete(sData,key);
+		}
+		fieldlist = ListAppend(fieldlist,RecipientFields);
+		qSentMessages = oDataMgr.getRecords(tablename=variables.Mailer.getLogTable(),data=sData,filters=aFilters,fieldlist=fieldlist);
 
-	<cfset qSentMessages = oDataMgr.getRecords(tablename=variables.Mailer.getLogTable(),data=sData,filters=aFilters,fieldlist=fieldlist)>
+		if ( qSentMessages.RecordCount ) {
+			// Get just the email addresses themselves
+			for ( key in ListToArray(RecipientFields) ) {
+				if ( StructKeyExists(Arguments,key) AND Len(Arguments[key]) ) {
+					Arguments[key] = getEmailAddresses(Arguments[key] );
+				}
+			}
 
-	<cfif qSentMessages.RecordCount EQ 0>
-		<!--- look more thoroughly for a match --->
-		<!--- Exclude recipient fields from the query --->
-		<cfloop list="#RecipientFields#" index="key">
-			<cfset StructDelete(sData,key)>
-		</cfloop>
-		<cfset fieldlist = ListAppend(fieldlist,RecipientFields)>
-		<cfset qSentMessages = oDataMgr.getRecords(tablename=variables.Mailer.getLogTable(),data=sData,filters=aFilters,fieldlist=fieldlist)>
-
-		<cfif qSentMessages.RecordCount>
-			<!--- Get just the email addresses themselves --->
-			<cfloop list="#RecipientFields#" index="key">
-				<cfif StructKeyExists(Arguments,key) AND Len(Arguments[key])>
-					<cfset Arguments[key] = getEmailAddresses(Arguments[key] ) />
-				</cfif>
-			</cfloop>
-			<cfscript>
 			//Find by just email address (must be in cfscript as CFCONTINUE is not available until CF9 and we need to support CF8)
 			for ( ii = qSentMessages.RecordCount; ii GTE 1; ii=ii-1 ) {
 				for ( key in Arguments ) {
@@ -433,63 +451,67 @@
 						if ( StructKeyExists(Arguments,key) AND Len(Arguments[key]) ) {
 							//Are all emails that were passed in as arguments found in the query record?
 							if (
-									NOT (
-												Len(qSentMessages[key][ii])
-											AND	isListInList(Arguments[key],getEmailAddresses(qSentMessages[key][ii]))
-									)
-								) {
-									qSentMessages = QueryDeleteRows(qSentMessages,ii);
-									continue;
+								NOT (
+									Len(qSentMessages[key][ii])
+									AND
+									isListInList(Arguments[key],getEmailAddresses(qSentMessages[key][ii]))
+								)
+							) {
+								qSentMessages = QueryDeleteRows(qSentMessages,ii);
+								continue;
 							}
 						}
 					}
 				}
 			}
-			</cfscript>
-		</cfif>
-	</cfif>
+		}
+	}
 
-	<cfset result = qSentMessages.RecordCount>
+	result = qSentMessages.RecordCount;
 
-	<cfif result AND StructKeyExists(arguments,"regex") AND Len(arguments.regex)>
-		<cfoutput query="qSentMessages">
-			<cfif NOT (
-					ReFindNoCase(arguments.regex,Subject)
-				OR	ReFindNoCase(arguments.regex,Contents)
-				OR	ReFindNoCase(arguments.regex,Text)
-				OR	ReFindNoCase(arguments.regex,HTML)
-			)>
-				<cfset result = result - 1>
-			</cfif>
-		</cfoutput>
-	</cfif>
+	if ( result AND StructKeyExists(arguments,"regex") AND Len(arguments.regex) ) {
+		for ( sSentMessage in qSentMessages ) {
+			if (
+				NOT (
+					ReFindNoCase(arguments.regex,sSentMessage.Subject)
+					OR
+					ReFindNoCase(arguments.regex,sSentMessage.Contents)
+					OR
+					ReFindNoCase(arguments.regex,sSentMessage.Text)
+					OR
+					ReFindNoCase(arguments.regex,sSentMessage.HTML)
+				)
+			) {
+				result--;
+			}
+		}
+	}
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="getEmailAddresses">
-	<cfargument name="string" type="string">
-	<cfargument name="EmailAddresses" type="string" default="">
+public function getEmailAddresses(
+	string string,
+	string EmailAddresses=""
+) {
+	var sLenPos = 0;
+	var emailAddress = "";
 
-	<cfset var sLenPos = 0>
-	<cfset var emailAddress = "">
+	if ( REFind("([a-zA-Z0-9_\.=-]+@[a-zA-Z0-9_\.-]+\.[[:alpha:]]{2,6})",arguments.string) ) {
+		sLenPos = REFind("([a-zA-Z0-9_\.=-]+@[a-zA-Z0-9_\.-]+\.[[:alpha:]]{2,6})",arguments.string,1,true);
+		emailAddress = mid(arguments.string, sLenPos.pos[1], sLenPos.len[1]);
+		if ( NOT ListFindNoCase(arguments.EmailAddresses,emailAddress) ) {
+			arguments.EmailAddresses = ListAppend(arguments.EmailAddresses, emailAddress);
+		}
+		arguments.string = Mid(arguments.string, sLenPos.pos[1] + sLenPos.len[1], len(arguments.string));
+		if ( REFind("([a-zA-Z0-9_\.=-]+@[a-zA-Z0-9_\.-]+\.[[:alpha:]]{2,6})",arguments.string) ) {
+			arguments.EmailAddresses = getEmailAddresses(arguments.string, arguments.EmailAddresses);
+		}
+	}
 
-	<cfif REFind("([a-zA-Z0-9_\.=-]+@[a-zA-Z0-9_\.-]+\.[[:alpha:]]{2,6})",arguments.string)>
-		<cfset sLenPos = REFind("([a-zA-Z0-9_\.=-]+@[a-zA-Z0-9_\.-]+\.[[:alpha:]]{2,6})",arguments.string,1,true) />
-		<cfset emailAddress = mid(arguments.string, sLenPos.pos[1], sLenPos.len[1]) />
-		<cfif NOT ListFindNoCase(arguments.EmailAddresses,emailAddress)>
-			<cfset arguments.EmailAddresses = ListAppend(arguments.EmailAddresses, emailAddress)>
-		</cfif>
-		<cfset arguments.string = Mid(arguments.string, sLenPos.pos[1] + sLenPos.len[1], len(arguments.string))>
-		<cfif REFind("([a-zA-Z0-9_\.=-]+@[a-zA-Z0-9_\.-]+\.[[:alpha:]]{2,6})",arguments.string)>
-			<cfset arguments.EmailAddresses = getEmailAddresses(arguments.string, arguments.EmailAddresses)>
-		</cfif>
-	</cfif>
+	return arguments.EmailAddresses;
+}
 
-	<cfreturn arguments.EmailAddresses>
-</cffunction>
-
-<cfscript>
 /**
  * Removes rows from a query.
  * Added var col = "";
@@ -506,19 +528,17 @@ function QueryDeleteRows(Query,Rows) {
     var i = 1;
     var x = 1;
 
-    for(i=1;i lte Query.recordCount; i=i+1) {
-        if(not ListFind(Rows,i)) {
+    for( i=1;i LTE Query.recordCount; i=i+1 ) {
+        if( NOT ListFind(Rows,i) ) {
             QueryAddRow(tmp,1);
-            for(x=1;x lte ListLen(tmp.ColumnList);x=x+1) {
+            for(x=1;x LTE ListLen(tmp.ColumnList);x=x+1) {
                 QuerySetCell(tmp, ListGetAt(tmp.ColumnList,x), query[ListGetAt(tmp.ColumnList,x)][i]);
             }
         }
     }
     return tmp;
 }
-</cfscript>
 
-<cfscript>
 /**
  * Checks is all elements of a list X is found in a list Y.
  * v2 by Raymond Camden
@@ -550,350 +570,452 @@ function isListInList(l1,l2) {
     }
     return not matchany;
 }
-</cfscript>
 
-<cffunction name="loadExternalVars" access="public" returntype="void" output="no">
-	<cfargument name="varlist" type="string" required="true">
-	<cfargument name="scope" type="string" default="Application">
-	<cfargument name="skipmissing" type="boolean" default="false">
+public void function loadExternalVars(
+	required string varlist,
+	string scope="Application",
+	boolean skipmissing="false"
+) {
+	var varname = "";
+	var scopestruct = 0;
+	var OriginalScope = Arguments.scope;
 
-	<cfset var varname = "">
-	<cfset var scopestruct = 0>
-	<cfset var OriginalScope = Arguments.scope>
+	// Scopes that start with a dot are nested within a service.
+	if ( Left(arguments.scope,1) EQ "." AND Len(arguments.scope) GTE 2 ) {
+		// To start, drop the leading dot from the scope name since we know what it is within this conditional block.
+		arguments.scope = Right(arguments.scope,Len(arguments.scope)-1);
 
-	<!--- Scopes that start with a dot are nested within a service. --->
-	<cfif Left(arguments.scope,1) EQ "." AND Len(arguments.scope) GTE 2>
-		<!--- To start, drop the leading dot from the scope name since we know what it is within this conditional block. --->
-		<cfset arguments.scope = Right(arguments.scope,Len(arguments.scope)-1)>
+		// Get it from ServiceFactory if we can.
+		if ( Application.Framework.Loader.hasService(arguments.scope) ) {
+			variables[arguments.scope] = Application.ServiceFactory.getService(arguments.scope);
+		} else {
+			// If not, try to get it from Application scope (may result in an exception).
+			variables[arguments.scope] = Application[arguments.scope];
+		}
+		// Now we can just treat the service we got back as a scope.
+		arguments.scope = "Variables.#arguments.scope#";
+	}
 
-		<!--- Get it from ServiceFactory if we can. --->
-		<cfif Application.Framework.Loader.hasService(arguments.scope)>
-			<cfset variables[arguments.scope] = Application.ServiceFactory.getService(arguments.scope)>
-		<cfelse>
-			<!--- If not, try to get it from Application scope (may result in an exception). --->
-			<cfset variables[arguments.scope] = Application[arguments.scope]>
-		</cfif>
-		<!--- Now we can just treat the service we got back as a scope. --->
-		<cfset arguments.scope = "Variables.#arguments.scope#">
-	</cfif>
+	scopestruct = StructGet(arguments.scope);
 
-	<cfset scopestruct = StructGet(arguments.scope)>
+	for ( varname in ListToArray(arguments.varlist) ) {
+		if ( StructKeyExists(scopestruct,varname) ) {
+			// Try to get it from the scope.
+			variables[varname] = scopestruct[varname];
+		} else if ( StructKeyExists(Application,"Framework") AND Application.Framework.Loader.hasService(varname) ) {
+			// Get it from ServiceFactory if we can.
+			variables[varname] = Application.ServiceFactory.getService(varname);
+		} else if ( NOT arguments.skipmissing ) {
+			throw(message="#scope#.#varname# is not available.");
+		}
+	}
 
-	<cfloop index="varname" list="#arguments.varlist#">
-		<cfif StructKeyExists(scopestruct,varname)>
-			<!--- Try to get it from the scope. --->
-			<cfset variables[varname] = scopestruct[varname]>
-		<cfelseif StructKeyExists(Application,"Framework") AND Application.Framework.Loader.hasService(varname)>
-			<!--- Get it from ServiceFactory if we can. --->
-			<cfset variables[varname] = Application.ServiceFactory.getService(varname)>
-		<cfelseif NOT arguments.skipmissing>
-			<cfthrow message="#scope#.#varname# is not available.">
-		</cfif>
-	</cfloop>
+}
 
-</cffunction>
+public function getService(required string ServiceName) {
 
-<cffunction name="getService" access="public" returntype="any" output="no">
-	<cfargument name="ServiceName" type="string" required="yes">
+	loadServiceFactory();
 
-	<cfset loadServiceFactory()>
+	if ( NOT StructKeyExists(Variables,Arguments.ServiceName) ) {
+		// Get it from ServiceFactory if we can.
+		if ( StructKeyExists(Variables,"ServiceFactory") AND Variables.ServiceFactory.hasService(Arguments.ServiceName) ) {
+			variables[Arguments.ServiceName] = Variables.ServiceFactory.getService(Arguments.ServiceName);
+		} else {
+			// If not, try to get it from Application scope (may result in an exception).
+			variables[Arguments.ServiceName] = Application[Arguments.ServiceName];
+		}
+	}
 
-	<cfif NOT StructKeyExists(Variables,Arguments.ServiceName)>
-		<!--- Get it from ServiceFactory if we can. --->
-		<cfif StructKeyExists(Variables,"ServiceFactory") AND Variables.ServiceFactory.hasService(Arguments.ServiceName)>
-			<cfset variables[Arguments.ServiceName] = Variables.ServiceFactory.getService(Arguments.ServiceName)>
-		<cfelse>
-			<!--- If not, try to get it from Application scope (may result in an exception). --->
-			<cfset variables[Arguments.ServiceName] = Application[Arguments.ServiceName]>
-		</cfif>
-	</cfif>
+	return Variables[Arguments.ServiceName];
+}
 
-	<cfreturn Variables[Arguments.ServiceName]>
-</cffunction>
+public any function loadServiceFactory() {
 
-<cffunction name="loadServiceFactory" access="public" returntype="any" output="no">
+	if ( NOT StructKeyExists(Variables,"ServiceFactory") ) {
+		if ( NOT StructKeyExists(request,"TestServiceFactory") ) {
+			request.TestServiceFactory = getServiceFactory();
+		}
+		// Variable won't exist unless running on Neptune.
+		if ( StructKeyExists(request,"TestServiceFactory") ) {
+			Variables.ServiceFactory = request.TestServiceFactory;
+		}
+	}
 
-	<cfif NOT StructKeyExists(Variables,"ServiceFactory")>
-		<cfif NOT StructKeyExists(request,"TestServiceFactory")>
-			<cfset request.TestServiceFactory = getServiceFactory()>
-		</cfif>
-		<!--- Variable won't exist unless running on Neptune. --->
-		<cfif StructKeyExists(request,"TestServiceFactory")>
-			<cfset Variables.ServiceFactory = request.TestServiceFactory>
-		</cfif>
-	</cfif>
+	// Variable won't exist unless running on Neptune.
+	if ( StructKeyExists(Variables,"ServiceFactory") ) {
+		return Variables.ServiceFactory;
+	}
+}
 
-	<!--- Variable won't exist unless running on Neptune. --->
-	<cfif StructKeyExists(Variables,"ServiceFactory")>
-		<cfreturn Variables.ServiceFactory>
-	</cfif>
-</cffunction>
+public any function getServiceFactory() {
+	var RootPath = "";
+	var CompCFMPath = "";
+	var oConfigExisting = 0;
+	var oConfigNew = 0;
+	var sConfigData = 0;
+	var sConfigObject = 0;
+	var result = 0;
 
-<cffunction name="getServiceFactory" access="public" returntype="any" output="no">
-
-	<cfset var RootPath = "">
-	<cfset var CompCFMPath = "">
-	<cfset var oConfigExisting = 0>
-	<cfset var oConfigNew = 0>
-	<cfset var sConfigData = 0>
-	<cfset var sConfigObject = 0>
-	<cfset var result = 0>
-
-	<cfif StructKeyExists(Application,"Framework") AND StructKeyExists(Application.Framework,"Config")>
-		<!--- Get reference to existing Config object --->
-		<cfset oConfigExisting = Application.Framework.Config>
-		<!--- Get meta data on existing Config object just so we can init it from the same path --->
-		<cfset sConfigObject = GetMetaData(oConfigExisting)>
-		<!--- Get existing settings so we can pass them (perhaps altered) into our new config object --->
-		<cfset sConfigData = StructCopy(oConfigExisting.getSettings())>
-		<!--- Get path to components.cfm file --->
-		<cfset RootPath = oConfigExisting.getSetting('RootPath')>
-		<cfset CompCFMPath = RootPath & "_config\components.cfm">
-		<!--- New config object (should only look in request, not Application) --->
-		<cfset oConfigNew = CreateObject("component","#sConfigObject.Name#").init("request")>
-		<!--- Copy existing settings in --->
-		<cfset oConfigNew.setSettings(ArgumentCollection=sConfigData)>
-		<!---
+	if ( StructKeyExists(Application,"Framework") AND StructKeyExists(Application.Framework,"Config") ) {
+		// Get reference to existing Config object
+		oConfigExisting = Application.Framework.Config;
+		// Get meta data on existing Config object just so we can init it from the same path
+		sConfigObject = GetMetaData(oConfigExisting);
+		// Get existing settings so we can pass them (perhaps altered) into our new config object
+		sConfigData = StructCopy(oConfigExisting.getSettings());
+		// Get path to components.cfm file
+		RootPath = oConfigExisting.getSetting('RootPath');
+		CompCFMPath = RootPath & "_config\components.cfm";
+		// New config object (should only look in request, not Application)
+		oConfigNew = CreateObject("component","#sConfigObject.Name#").init("request");
+		// Copy existing settings in
+		oConfigNew.setSettings(ArgumentCollection=sConfigData);
+		/*
 		This is our hook to allow RecordsTester to be extended and have extension pass in whatever it needs to new Config.
 		Should be set up so that it will be the same for any test run in the same request.
-		 --->
-		<cfset setSettings(oConfigNew)>
+		 */
+		setSettings(oConfigNew);
 
-		<!--- Create new service factory from existing one (with potentially changed data) --->
-		<cfset result = CreateObject("component","_framework.ServiceFactory").init(oConfigNew,CompCFMPath)>
+		// Create new service factory from existing one (with potentially changed data)
+		result = CreateObject("component","_framework.ServiceFactory").init(oConfigNew,CompCFMPath);
 
-		<cfreturn result>
-	</cfif>
-</cffunction>
+		return result;
+	}
+}
 
-<cffunction name="setSettings" access="public" returntype="any" output="no">
-	<cfargument name="oConfig" type="any" required="yes">
+public any function setSettings(required any oConfig) {
 
-	<!--- This method can be extended to pass in or change any configuration for testing. --->
+	// This method can be extended to pass in or change any configuration for testing.
 
-</cffunction>
+}
 
-<cffunction name="RecordObject" access="public" returntype="any" output="no">
-	<cfargument name="Service" type="any" required="yes">
-	<cfargument name="Record" type="any" required="yes">
-	<cfargument name="fields" type="string" default="">
+public any function RecordObject(
+	required Service,
+	required Record,
+	string fields
+) {
 
-	<cfset Arguments.Service = CreateObject("component","com.sebtools.TestRecords").init(Arguments.Service)>
+	Arguments.Service = CreateObject("component","com.sebtools.TestRecords").init(Arguments.Service);
 
-	<cfreturn CreateObject("component","RecordObject").init(ArgumentCollection=Arguments)>
-</cffunction>
+	return CreateObject("component","RecordObject").init(ArgumentCollection=Arguments);
+}
 
-<cffunction name="runInRollbackTransaction" access="public" returntype="any" output="no">
-	<cfargument name="method" type="any" required="yes">
-	<cfargument name="comp" type="any" required="no">
-	<cfargument name="args" type="struct" default="#StructNew()#">
+/*
+* I run an array of a test structures
+* @Tests: A structure of test. Each struct should have "expected", "args", "message"
+* @component: The component to test.
+* @method: The name of the method to test (can be private)
+* @type: Either "assert", which will run an assertion on each test or "dump" which will dump and abort all of the tests with their actual values.
+*/
+public void function runMethodTests(
+	required array aTests,
+	required string method,
+	component="#Variables#",
+	string type="assert"
+) {
+	var sTest = 0;
 
-	<cfset var result = 0>
-	<cfset var fMethod = 0>
+	makePublic(Arguments.component,Arguments.method);
 
-	<cfif StructKeyExists(arguments,"comp") AND isSimpleValue(arguments.method)>
-		<cfset fMethod = arguments.com[arguments.method]>
-	<cfelseif isCustomFunction(arguments.method)>
-		<cfset fMethod = arguments.method>
-	<cfelse>
-		<cfthrow message="Method must be either the name of a method in a component or the method itself.">
-	</cfif>
+	//Verify structs in array
+	for ( sTest in aTests ) {
+		if ( NOT isStruct(sTest) ) {
+			throw("Every entry in the tests array must be a structure.");
+		}
+		if ( NOT StructKeyExists(sTest,"expected") ) {
+			throw("Every key of each test must have an 'expected' key.");
+		}
+	}
 
-	<cftransaction>
-		<cftry>
-			<cfset result = fMethod(argumentCollection=arguments.args)>
-		<cfcatch type="any">
-			<cftransaction action="rollback">
-			<cfrethrow>
-		</cfcatch>
-		</cftry>
 
-		<cftransaction action="rollback">
-	</cftransaction>
+	for ( sTest in aTests ) {
+		sTest["actual"] = invoke(Arguments.component,Arguments.method,sTest.args);
+	}
 
-	<cfif isDefined("result")>
-		<cfreturn result>
-	</cfif>
-</cffunction>
+	handleTestResultsArray(aTests,Arguments.type);
 
-<cffunction name="stub" access="public" returntype="void" output="no">
-	<cfset fail("No test written yet.")>
-</cffunction>
+}
 
-<cffunction name="getTestRecord" access="public" returntype="query" output="no">
-	<cfargument name="comp" type="any" required="yes">
-	<cfargument name="data" type="struct" required="no">
-	<cfargument name="fieldlist" type="string" default="">
+/**
+* I handle a test results array
+*/
+public function handleTestResultsArray(
+	required array aTests,
+	string type="assert"
+) {
+	var aFails = [];
 
-	<cfset var sCompMeta = Arguments.comp.getMetaStruct()>
-	<cfset var id = saveTestRecord(argumentCollection=Arguments)>
-	<cfset var qRecord = 0>
+	if ( Arguments.type EQ "dump" ) {
+		writeDump(var=aTests,abort=true);
+	} else {
+		for ( sTest in aTests ) {
+			
+			if ( NOT StructKeyExists(sTest,"args") ) {
+				sTest["args"] = {};
+			}
+			if ( NOT StructKeyExists(sTest,"message") ) {
+				sTest["message"] = '"#Arguments.method#" method fails for arguments #SerializeJSON(sTest.args)#';
+			}
+			if ( NOT StructKeyExists(sTest,"assert") ) {
+				sTest["assert"] = "Equals";
+			}
 
-	<cfinvoke
-		returnvariable="qRecord"
-		component="#arguments.comp#"
-		method="#sCompMeta.method_get#"
-	>
-		<cfinvokeargument name="#sCompMeta.arg_pk#" value="#id#">
-		<cfinvokeargument name="fieldlist" value="#Arguments.fieldlist#">
-	</cfinvoke>
+			try {
+				invoke(
+					Variables,
+					"assert#sTest.Assert#",
+					{
+						condition=sTest["actual"],
+						expected=sTest["expected"],
+						actual=sTest["actual"],
+						message=sTest["message"]
+					}
+				);
+			} catch ( mxunit.exception.AssertionFailedError e ) {
+				ArrayAppend(aFails,sTest);
+				sTest["isFail"] = true;
+			}
 
-	<cfreturn qRecord>
-</cffunction>
+		}
 
-<cffunction name="getTestRecords" access="public" returntype="query" output="no">
-	<cfargument name="comp" type="any" required="yes">
-	<cfargument name="records" type="numeric" required="no">
-	<cfargument name="data" type="struct" required="no">
-	<cfargument name="fieldlist" type="string" default="">
+		if ( ArrayLen(aFails) ) {
+			if ( Arguments.type EQ "dumpfails" ) {
+				writeDump(var=aFails,abort=true);
+			} else {
+				if ( ArrayLen(aFails) EQ 1 ) {
+					fail(ArgumentCollection=aFails[1]);
+				} else {
+					fail(message='#ArrayLen(aFails)# tests out of #ArrayLen(aTests)# failed. Switch to handleTestResultsArray to a type of "assert" or "dumpfails" to see the details.');
+				}
+			}
+		}
+		if (
+			Arguments.type EQ "dumpfails"
+			AND
+			ArrayLen(aFails)
+		) {
+			writeDump(var=aFails,abort=true);
+		} else {
+			if ( ArrayLen(aFails) )
+			fail();
+		}
 
-	<cfset var sCompMeta = Arguments.comp.getMetaStruct()>
-	<cfset var ids = saveTestRecords(argumentCollection=Arguments)>
-	<cfset var qRecords = 0>
+	}
 
-	<cfinvoke
-		returnvariable="qRecords"
-		component="#arguments.comp#"
-		method="#sCompMeta.method_gets#"
-	>
-		<cfinvokeargument name="#LCase(sCompMeta.arg_sort)#" value="#ids#">
-		<cfinvokeargument name="fieldlist" value="#Arguments.fieldlist#">
-	</cfinvoke>
+}
 
-	<cfreturn qRecords>
-</cffunction>
+public any function runInRollbackTransaction(
+	required method,
+	comp,
+	struct args="#{}#"
+) {
+	var result = 0;
+	var fMethod = 0;
 
-<cffunction name="saveTestRecord" access="public" returntype="string" output="no">
-	<cfargument name="comp" type="any" required="yes">
-	<cfargument name="data" type="struct" required="no">
+	if ( StructKeyExists(arguments,"comp") AND isSimpleValue(arguments.method) ) {
+		fMethod = arguments.com[arguments.method];
+	} else if ( isCustomFunction(arguments.method) ) {
+		fMethod = arguments.method;
+	} else {
+		throw(message="Method must be either the name of a method in a component or the method itself.");
+	}
 
-	<cfset var sCompMeta = arguments.comp.getMetaStruct()>
-	<cfset var sData = getRandomData(argumentCollection=arguments)>
-	<cfset var result = 0>
+	transaction {
+		try {
+			result = fMethod(argumentCollection=arguments.args);
+		} catch ( any e ) {
+			transaction action="rollback";
+			rethrow;
+		}
 
-	<cfinvoke
-		returnvariable="result"
-		component="#arguments.comp#"
-		method="#sCompMeta.method_save#"
-		argumentCollection="#sData#"
-	>
-	</cfinvoke>
+		transaction action="rollback";
+	}
 
-	<cfreturn result>
-</cffunction>
+	if ( isDefined("result") ) {
+		return result;
+	}
+}
 
-<cffunction name="loadTestRecords" access="public" returntype="string" output="no">
-	<cfargument name="comp" type="any" required="yes">
-	<cfargument name="records" type="numeric" required="no">
-	<cfargument name="data" type="struct" required="no">
+public void function stub() {
+	fail("No test written yet.");
+}
 
-	<cfset var result = "">
+public query function getTestRecord(
+	required comp,
+	string data,
+	string fieldlist=""
+) {
+	var sCompMeta = Arguments.comp.getMetaStruct();
+	var id = saveTestRecord(argumentCollection=Arguments);
+	var qRecord = 0;
+	var sArgs = {
+		"#sCompMeta.arg_pk#":id,
+		"fieldlist":Arguments.fieldlist
+	};
 
-	<cfset Arguments = convertTestRecordsArgs(ArgumentCollection=Arguments)>
+	qRecord = invoke(arguments.comp,sCompMeta.method_get,sArgs);
 
-	<cfset result = Arguments.comp.getPrimaryKeyValues(ArgumentCollection=Arguments.data,MaxRows=Arguments.records)>
-	<cfset Arguments.records = Arguments.records - ListLen(result)>
+	return qRecord;
+}
 
-	<cfif Arguments.records GT 0>
-		<cfset result = ListAppend(result,saveTestRecords(ArgumentCollection=Arguments))>
-	</cfif>
+public query function getTestRecords(
+	required comp,
+	numeric records,
+	struct data,
+	string fieldlist=""
+) {
+	var sCompMeta = Arguments.comp.getMetaStruct();
+	var ids = saveTestRecords(argumentCollection=Arguments);
+	var qRecords = 0;
+	var sArgs = {
+		"#LCase(sCompMeta.arg_sort)#":ids,
+		"fieldlist":Arguments.fieldlist
+	};
 
-	<cfreturn result>
-</cffunction>
+	qRecords = invoke(arguments.comp,sCompMeta.method_gets,sArgs);
 
-<cffunction name="convertTestRecordsArgs" access="public" returntype="struct" output="no">
-	<cfargument name="comp" type="any" required="yes">
-	<cfargument name="records" type="numeric" required="no">
-	<cfargument name="data" type="struct" required="no">
+	return qRecords;
+}
 
-	<!--- Handle if data is passed in to records slot or if arguments are reversed --->
-	<cfif
-			StructKeyExists(Arguments,"records")
-		AND	isStruct(Arguments.records)
-		AND	(
-					NOT StructKeyExists(Arguments,"data")
-				OR	isNumeric(Arguments.data)
+public string function saveTestRecord(
+	required comp,
+	struct data
+) {
+	var sCompMeta = arguments.comp.getMetaStruct();
+	var sData = getRandomData(argumentCollection=arguments);
+
+	return invoke(arguments.comp,sCompMeta.method_save,sData);
+}
+
+public string function loadTestRecords(
+	required comp,
+	numeric records,
+	struct data
+) {
+	var result = "";
+
+	Arguments = convertTestRecordsArgs(ArgumentCollection=Arguments);
+
+	result = Arguments.comp.getPrimaryKeyValues(ArgumentCollection=Arguments.data,MaxRows=Arguments.records);
+	Arguments.records = Arguments.records - ListLen(result);
+
+	if ( Arguments.records GT 0 ) {
+		result = ListAppend(result,saveTestRecords(ArgumentCollection=Arguments));
+	}
+
+	return result;
+}
+
+public struct function convertTestRecordsArgs(
+	required comp,
+	numeric records,
+	struct data
+) {
+
+	// Handle if data is passed in to records slot or if arguments are reversed
+	if (
+		StructKeyExists(Arguments,"records")
+		AND
+		isStruct(Arguments.records)
+		AND
+		(
+			NOT StructKeyExists(Arguments,"data")
+			OR
+			isNumeric(Arguments.data)
 		)
-	>
-		<cfif StructKeyExists(Arguments,"data")>
-			<cfset Arguments.temp = Arguments.data>
-		</cfif>
-		<cfset Arguments.data = Arguments.records>
-		<cfif StructKeyExists(Arguments,"temp")>
-			<cfset Arguments.records = Arguments.temp>
-			<cfset StructDelete(Arguments,"temp")>
-		</cfif>
-	</cfif>
+	) {
+		if ( StructKeyExists(Arguments,"data") ) {
+			Arguments.temp = Arguments.data;
+		}
+		Arguments.data = Arguments.records;
+		if ( StructKeyExists(Arguments,"temp") ) {
+			Arguments.records = Arguments.temp;
+			StructDelete(Arguments,"temp");
+		}
+	}
 
-	<cfif
+	if (
 		NOT (
-				StructKeyExists(Arguments,"records")
-			AND	isSimpleValue(Arguments.records)
-			AND	Val(Arguments.records)
+			StructKeyExists(Arguments,"records")
+			AND
+			isSimpleValue(Arguments.records)
+			AND
+			Val(Arguments.records)
 		)
-	>
-		<cfset Arguments.records = 0>
-	</cfif>
+	) {
+		Arguments.records = 0;
+	}
 
-	<cfif NOT ( StructKeyExists(Arguments,"data") AND isStruct(Arguments.data) )>
-		<cfset Arguments.data = StructNew()>
-	</cfif>
+	if ( NOT ( StructKeyExists(Arguments,"data") AND isStruct(Arguments.data) ) ) {
+		Arguments.data = {};
+	}
 
-	<cfreturn Arguments>
-</cffunction>
+	return Arguments;
+}
 
-<!--- *** Observer Tests *** --->
+// *** Observer Tests ***
+/**
+* I assert that the given listener was called.
+*/
+public void function assertAnnounced(
+	required string UUID,
+	string message=""
+) {
 
-<cffunction name="assertAnnounced" access="public" returntype="void" output="no" hint="I assert that the given listener was called.">
-	<cfargument name="UUID" type="string" required="true">
-	<cfargument name="message" type="string" default="">
+	listened(Arguments.UUID);
 
-	<cfset listened(Arguments.UUID)>
+	if ( NOT ArrayLen(Variables.sObserverEvents[UUID]) ) {
+		fail(Arguments.message);
+	}
 
-	<cfif NOT ArrayLen(Variables.sObserverEvents[UUID])>
-		<cfset fail(Arguments.message)>
-	</cfif>
+}
 
-</cffunction>
+/**
+* I assert that the given listener was called.
+*/
+public void function assertNotAnnounced(
+	required string UUID,
+	string message=""
+) {
 
-<cffunction name="assertNotAnnounced" access="public" returntype="void" output="no" hint="I assert that the given listener was called.">
-	<cfargument name="UUID" type="string" required="true">
-	<cfargument name="message" type="string" default="">
+	listened(Arguments.UUID);
 
-	<cfset listened(Arguments.UUID)>
+	if ( ArrayLen(Variables.sObserverEvents[UUID]) ) {
+		fail(Arguments.message);
+	}
 
-	<cfif ArrayLen(Variables.sObserverEvents[UUID])>
-		<cfset fail(Arguments.message)>
-	</cfif>
+}
 
-</cffunction>
+/**
+* I make sure that the listener is listening for the given event.
+*/
+public string function listen(
+	required string EventName,
+	struct Args
+) {
+	var UUID = createUUID();
 
-<cffunction name="listen" access="public" returntype="string" output="no" hint="I make sure that the listener is listening for the given event.">
-	<cfargument name="EventName" type="string" required="true">
-	<cfargument name="Args" type="struct" required="false">
+	Variables.sObserverChecks[UUID] = Arguments;
+	Variables.sObserverEvents[UUID] = [];
 
-	<cfset var UUID = createUUID()>
+	cf_service(name="Observer");
 
-	<cfset Variables.sObserverChecks[UUID] = Arguments>
-	<cfset Variables.sObserverEvents[UUID] = []>
-
-	<cf_service name="Observer">
-
-	<cfset Variables.Observer.registerListener(
+	Variables.Observer.registerListener(
 		Listener=This,
 		ListenerName=UUID,
 		ListenerMethod="listen_callback",
 		EventName=Arguments.EventName
-	)>
+	);
 
-	<cfreturn UUID>
-</cffunction>
+	return UUID;
+}
 
-<cffunction name="listen_callback" access="public" returntype="any" output="no" hint="I respond to the an event from a listener.">
+/**
+* I respond to the an event from a listener.
+*/
+public function listen_callback() {
+	var UUID = "";
 
-	<cfset var UUID = "">
-
-	<cfscript>
 	var UUID = "";
 	var isCalled = false;
 	var arg = "";
@@ -909,90 +1031,82 @@ function isListInList(l1,l2) {
 			ArrayAppend(Variables.sObserverEvents[UUID],Arguments);
 		}
 	}
-	</cfscript>
+	
+}
 
-</cffunction>
+/**
+* I run code to end listening for an event.
+*/
+public void function listened(required string UUID) {
 
-<cffunction name="listened" access="public" returntype="void" output="no" hint="I run code to end listening for an event.">
-	<cfargument name="UUID" type="string" required="true">
+	Variables.Observer.runDelays();
 
-	<cfset Variables.Observer.runDelays()>
-
-	<cfif StructKeyExists(Variables.sObserverChecks,UUID)>
-		<cfset Variables.Observer.registerListener(
+	if ( StructKeyExists(Variables.sObserverChecks,UUID) ) {
+		Variables.Observer.registerListener(
 			Listener=This,
 			ListenerName=UUID,
 			ListenerMethod="listen_callback",
 			EventName=Variables.sObserverChecks[UUID].EventName
-		)>
-	</cfif>
+		);
+	}
 
-</cffunction>
+}
 
-<cffunction name="saveTestRecords" access="public" returntype="string" output="no">
-	<cfargument name="comp" type="any" required="yes">
-	<cfargument name="records" type="any" required="no">
-	<cfargument name="data" type="struct" required="no">
+public string function saveTestRecords(
+	required comp,
+	records,
+	struct data
+) {
+	var ii = 0;
+	var result = "";
 
-	<cfset var ii = 0>
-	<cfset var result = "">
+	Arguments = convertTestRecordsArgs(ArgumentCollection=Arguments);
 
-	<cfset Arguments = convertTestRecordsArgs(ArgumentCollection=Arguments)>
+	if ( NOT Val(Arguments.records) ) {
+		Arguments.records = RandRange(10,40);
+	}
 
-	<cfif NOT Val(Arguments.records)>
-		<cfset Arguments.records = RandRange(10,40)>
-	</cfif>
+	if ( StructKeyExists(Arguments,"data") AND NOT isStruct(Arguments.data) ) {
+		StructDelete(Arguments,"data");
+	}
 
-	<cfif StructKeyExists(Arguments,"data") AND NOT isStruct(Arguments.data)>
-		<cfset StructDelete(Arguments,"data")>
-	</cfif>
+	for ( ii=1; ii LTE Arguments.records; ii++ ) {
+		result = ListAppend(result,saveTestRecord(ArgumentCollection=Arguments));
+	}
 
-	<cfloop index="ii" from="1" to="#Arguments.records#">
-		<cfset result = ListAppend(result,saveTestRecord(ArgumentCollection=Arguments))>
-	</cfloop>
+	return result;
+}
 
-	<cfreturn result>
-</cffunction>
+public string function saveTestRecordOnly(
+	required comp,
+	struct data
+) {
+	var sCompMeta = arguments.comp.getMetaStruct();
+	var sData = getRandomData(argumentCollection=arguments);
+	var result = 0;
 
-<cffunction name="saveTestRecordOnly" access="public" returntype="string" output="no">
-	<cfargument name="comp" type="any" required="yes">
-	<cfargument name="data" type="struct" required="no">
+	result = invoke(arguments.comp,"saveRecordOnly",sData);
 
-	<cfset var sCompMeta = arguments.comp.getMetaStruct()>
-	<cfset var sData = getRandomData(argumentCollection=arguments)>
-	<cfset var result = 0>
+	return result;
+}
 
-	<cfinvoke
-		returnvariable="result"
-		component="#arguments.comp#"
-		method="saveRecordOnly"
-		argumentCollection="#sData#"
-	>
-	</cfinvoke>
+public query function QueryGetRandomRow(required query) {
+	var cols = arguments.query.ColumnList;
+	var qResult = QueryNew(cols);
+	var rownum = 0;
+	var col = "";
 
-	<cfreturn result>
-</cffunction>
+	if ( arguments.query.RecordCount ) {
+		rownum = RandRange(1,arguments.query.RecordCount);
+		QueryAddRow(qResult);
+		for ( col in ListToArray(cols) ) {
+			QuerySetCell(qResult,col,arguments.query[col][rownum]);
+		}
+	}
 
-<cffunction name="QueryGetRandomRow" access="public" returntype="query" output="no">
-	<cfargument name="query" type="any" required="yes">
+	return qResult;
+}
 
-	<cfset var cols = arguments.query.ColumnList>
-	<cfset var qResult = QueryNew(cols)>
-	<cfset var rownum = 0>
-	<cfset var col = "">
-
-	<cfif arguments.query.RecordCount>
-		<cfset rownum = RandRange(1,arguments.query.RecordCount)>
-		<cfset QueryAddRow(qResult)>
-		<cfloop list="#cols#" index="col">
-			<cfset QuerySetCell(qResult,col,arguments.query[col][rownum])>
-		</cfloop>
-	</cfif>
-
-	<cfreturn qResult>
-</cffunction>
-
-<cfscript>
 function QueryFromArgs() {
 	return Struct2Query(arguments);
 }
@@ -1001,7 +1115,7 @@ function Struct2Query(struct) {
 	var key = "";
 	var qResult = 0;
 
-	if (NOT isStruct(arguments.struct)) return false;
+	if ( NOT isStruct(arguments.struct) ) return false;
 
 	qResult = QueryNew(StructKeyList(arguments.struct));
 	QueryAddRow(qResult, 1);
@@ -1058,27 +1172,26 @@ function QuerySim(queryData) {
 
 	return( tmpQuery );
 }
+
+public struct function StructFromArgs() {
+	var sTemp = 0;
+	var sResult = {};
+	var key = "";
+
+	if ( ArrayLen(arguments) EQ 1 AND isStruct(arguments[1]) ) {
+		sTemp = arguments[1];
+	} else {
+		sTemp = arguments;
+	}
+
+	// set all arguments into the return struct
+	for ( key in sTemp ) {
+		if ( StructKeyExists(sTemp, key) ) {
+			sResult[key] = sTemp[key];
+		}
+	}
+
+	return sResult;
+}
 </cfscript>
-<cffunction name="StructFromArgs" access="public" returntype="struct" output="false" hint="">
-
-	<cfset var sTemp = 0>
-	<cfset var sResult = StructNew()>
-	<cfset var key = "">
-
-	<cfif ArrayLen(arguments) EQ 1 AND isStruct(arguments[1])>
-		<cfset sTemp = arguments[1]>
-	<cfelse>
-		<cfset sTemp = arguments>
-	</cfif>
-
-	<!--- set all arguments into the return struct --->
-	<cfloop collection="#sTemp#" item="key">
-		<cfif StructKeyExists(sTemp, key)>
-			<cfset sResult[key] = sTemp[key]>
-		</cfif>
-	</cfloop>
-
-	<cfreturn sResult>
-</cffunction>
-
 </cfcomponent>

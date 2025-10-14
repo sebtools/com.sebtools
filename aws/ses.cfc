@@ -1,57 +1,57 @@
 <cfcomponent extends="service" output="false">
+<cfscript>
+public function init(required AWS) {
+	
+	Arguments.service = "ses";
+	Arguments.subdomain = "email";
 
-<cffunction name="init" access="public" returntype="any" output="false" hint="I initialize and return the component.">
-	<cfargument name="AWS" type="any" required="true">
+	initInternal(ArgumentCollection=Arguments);
 
-	<cfset Arguments.service = "ses">
-	<cfset Arguments.subdomain = "email">
+	return This;
+}
 
-	<cfset initInternal(ArgumentCollection=Arguments)>
+/**
+* I return the URL to the API reference.
+*/
+public string function GetAPIReferenceURL() {
+	return "http://docs.aws.amazon.com/ses/latest/APIReference/";
+}
 
-	<cfreturn This>
-</cffunction>
-
-<cffunction name="GetAPIReferenceURL" access="public" returntype="string" output="no" hint="I return the URL to the API reference.">
-	<cfreturn "http://docs.aws.amazon.com/ses/latest/APIReference/">
-</cffunction>
-
-<cffunction name="GetIdentities" access="public" returntype="string" output="no">
-
-	<cfset var aIdentities = Variables.AWS.callLimitedAPI(
+public string function GetIdentities() {
+	var aIdentities = Variables.AWS.callLimitedAPI(
 		subdomain="email",
 		Action="ListIdentities",
 		timeSpan=CreateTimeSpan(0,3,0,0),
 		waitlimit=300
-	)>
+	);
 
-	<!--- Handle failure to retrieve identies with as much grace as possible. --->
-	<cfif isArray(aIdentities)>
-		<!--- Save latest identies in case they fail later --->
-		<cfset Variables.aSafetyIdentities = aIdentities>
-	<cfelseif StructKeyExists(Variables,"aSafetyIdentities")>
-		<!--- If identities isn't retrieved, but the safety value is availablem then use that and alert devs. --->
-		<cf_scaledAlert message="Unable to retrieve AWS Email Identities.">
-		<cfset aIdentities = Variables.aSafetyIdentities>
-	<cfelse>
-		<!--- If identities isn't retrieved and safety value is unavailable, then throw an error. --->
-		<cfset throwError("Unable to retrieve AWS Email Identities.")>
-	</cfif>
+	// Handle failure to retrieve identies with as much grace as possible. --->
+	if ( isArray(aIdentities) ) {
+		// Save latest identies in case they fail later --->
+		Variables.aSafetyIdentities = aIdentities;
+	} else if ( StructKeyExists(Variables,"aSafetyIdentities") ) {
+		// If identities isn't retrieved, but the safety value is availablem then use that and alert devs. --->
+		cf_scaledAlert(message="Unable to retrieve AWS Email Identities.");
+		aIdentities = Variables.aSafetyIdentities;
+	} else {
+		// If identities isn't retrieved and safety value is unavailable, then throw an error. --->
+		throwError("Unable to retrieve AWS Email Identities.");
+	}
 
-	<cfreturn ArrayToList(aIdentities)>
-</cffunction>
+	return ArrayToList(aIdentities);
+}
 
-<cffunction name="GetIdentityNotificationAttributes" access="public" returntype="any" output="no">
-	<cfargument name="Members" type="string" required="true">
-
-	<cfset var result = Variables.AWS.callLimitedAPI(
+public function GetIdentityNotificationAttributes(required string Members) {
+	var result = Variables.AWS.callLimitedAPI(
 		subdomain="email",
 		Action="GetIdentityNotificationAttributes",
 		Parameters={"Identities.member.1"=Arguments.Members},
 		timeSpan=CreateTimeSpan(0,0,1,0)
-	)>
+	);
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
+</cfscript>
 
 <cffunction name="GetBounceRate" access="public" returntype="numeric" output="no">
 	<cfset var qSendStatistics = GetSendStatistics()>
@@ -72,15 +72,16 @@
 
 	<cfreturn result>
 </cffunction>
-
-<cffunction name="GetSendStatistics" access="public" returntype="query" output="no">
-	<cfreturn Variables.MrECache.method(
+<cfscript>
+public query function GetSendStatistics() {
+	return Variables.MrECache.method(
 		id="SendStatistics",
 		Component=This,
 		MethodName="_GetSendStatistics",
 		timeSpan=CreateTimeSpan(0,0,15,0)
-	)>
-</cffunction>
+	);
+}
+</cfscript>
 
 <cffunction name="_GetSendStatistics" access="public" returntype="query" output="no">
 
@@ -116,32 +117,33 @@
 
 	<cfreturn qSendStatistics>
 </cffunction>
-
-<cffunction name="SetIdentityNotificationTopic" access="public" returntype="any" output="no">
-	<cfargument name="Identity" type="string" required="true">
-	<cfargument name="NotificationType" type="string" required="true">
-	<cfargument name="SnsTopic" type="string" required="true">
-
-	<cfset var result = callAPI(
+<cfscript>
+public function SetIdentityNotificationTopic(
+	required string Identity,
+	required string NotificationType,
+	required string SnsTopic
+) {
+	var result = callAPI(
 		Action="SetIdentityNotificationTopic",
 		Parameters={"Identity"=Arguments.Identity,"NotificationType"=Arguments.NotificationType,"SnsTopic"=Arguments.SnsTopic}
-	)>
+	);
 
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="SetIdentityNotificationTopics" access="public" returntype="any" output="no">
-	<cfargument name="Identity" type="string" required="true">
-	<cfargument name="SnsTopic" type="string" required="true">
-	<cfargument name="NotificationTypes" type="string" default="Bounce,Complaint">
+public function SetIdentityNotificationTopics(
+	required string Identity,
+	required string SnsTopic,
+	string NotificationType="Bounce,Complaint"
+) {
+	var type = "";
 
-	<cfset var type = "">
+	for ( type in ListToArray(Arguments.NotificationTypes) ) {
+		SetIdentityNotificationTopic(Identity=Arguments.Identity,NotificationType=type,SnsTopic=Arguments.SnsTopic);
+	}
 
-	<cfloop list="#Arguments.NotificationTypes#" index="type">
-		<cfset SetIdentityNotificationTopic(Identity=Arguments.Identity,NotificationType=type,SnsTopic=Arguments.SnsTopic)>
-	</cfloop>
-
-</cffunction>
+}
+</cfscript>
 
 <cffunction name="GetIdentity" access="public" returntype="string" output="no" hint="I get the identity for the given value.">
 	<cfargument name="Sender" type="string" required="true">

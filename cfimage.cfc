@@ -39,7 +39,7 @@
 	<cfimage
 		action="write"
 		source="#myImage#"
-		destination="#filename#"
+		destination="#arguments.source#"
 		overwrite="true"
 		quality="#arguments.quality#"
 	>

@@ -356,7 +356,7 @@
 	<cfif bSetGuid>
 		<cflock timeout="30" throwontimeout="No" name="DataMgr_GuidNum" type="EXCLUSIVE">
 			<!--- %%I cant figure out a way to safely increment the variable to make it unique for a transaction w/0 the use of request scope --->
-			<cfif isDefined("request.DataMgr_GuidNum")>
+			<cfif StructKeyExists(request,"DataMgr_GuidNum")>
 				<cfset request.DataMgr_GuidNum = Val(request.DataMgr_GuidNum) + 1>
 			<cfelse>
 				<cfset request.DataMgr_GuidNum = 1>
@@ -522,7 +522,7 @@
 	<cfif bSetGuid>
 		<cflock timeout="30" throwontimeout="No" name="DataMgr_GuidNum" type="EXCLUSIVE">
 			<!--- %%I cant figure out a way to safely increment the variable to make it unique for a transaction w/0 the use of request scope --->
-			<cfif isDefined("request.DataMgr_GuidNum")>
+			<cfif StructKeyExists(request,"DataMgr_GuidNum")>
 				<cfset request.DataMgr_GuidNum = Val(request.DataMgr_GuidNum) + 1>
 			<cfelse>
 				<cfset request.DataMgr_GuidNum = 1>

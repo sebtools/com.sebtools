@@ -1,139 +1,141 @@
 ﻿<cfcomponent output="no">
+<cfscript>
+public function init(required DataMgr) {
 
-<cffunction name="init" access="public" returntype="any" output="no">
-	<cfargument name="DataMgr" type="any" required="yes">
+	Variables.DataMgr = Arguments.DataMgr;
+	Variables.DataMgr.loadXml(getDbXml(),true,true);
 
-	<cfset Variables.DataMgr = Arguments.DataMgr>
-	<cfset Variables.DataMgr.loadXml(getDbXml(),true,true)>
+	loadPastDeployments();
+	deployNewLengths();
 
-	<cfset loadPastDeployments()>
-	<cfset deployNewLengths()>
+	return This;
+}
 
-	<cfreturn This>
-</cffunction>
+public function loadPastDeployments() {
+	var qDeployments = 0;
+	var sDeployment = 0;
+	var DeploymentStructKey = "";
 
-<cffunction name="loadPastDeployments" access="public" returntype="any" output="no">
+	if ( NOT StructKeyExists(Variables,"sPastDeployments") ) {
+		Variables.sPastDeployments = {};
 
-	<cfset var qDeployments = 0>
-	<cfset var DeploymentStructKey = "">
+		qDeployments = Variables.DataMgr.getRecords(tablename="utilDeployments",fieldlist="ComponentPath,Name,DateRun");
 
-	<cfif NOT StructKeyExists(Variables,"sPastDeployments")>
-		<cfset Variables.sPastDeployments = StructNew()>
+		for ( sDeployment in qDeployments ) {
+			DeploymentStructKey = getDeploymentStructKey(Name=sDeployment.Name,ComponentPath=sDeployment.ComponentPath);
+			Variables.sPastDeployments[DeploymentStructKey] = sDeployment.DateRun;
+		}
+	}
 
-		<cfset qDeployments = Variables.DataMgr.getRecords(tablename="utilDeployments",fieldlist="ComponentPath,Name,DateRun")>
+}
 
-		<cfoutput query="qDeployments">
-			<cfset DeploymentStructKey = getDeploymentStructKey(Name=Name,ComponentPath=ComponentPath)>
-			<cfset Variables.sPastDeployments[DeploymentStructKey] = DateRun>
-		</cfoutput>
-	</cfif>
+public function deploy(
+	required string Name,
+	required string ComponentPath,
+	required Component,
+	required string MethodName,
+	struct Args
+) {
+	
+	if ( NOT isDeployed(ArgumentCollection=Arguments) ) {
+		try {
+			runDeployment(ArgumentCollection=Arguments);
+		} catch ( any e ) {
+			rethrow;
+		}
+	}
 
-</cffunction>
+	return This;
+}
 
-<cffunction name="deploy" access="public" returntype="any" output="no">
-	<cfargument name="Name" type="string" required="yes">
-	<cfargument name="ComponentPath" type="string" required="yes">
-	<cfargument name="Component" type="any" required="yes">
-	<cfargument name="MethodName" type="string" required="yes">
-	<cfargument name="Args" type="struct" required="no">
+public void function require(
+	required Component,
+	required string MethodName
+) {
+	var sComponent = getMetaData(Arguments.Component);
 
-	<cfif NOT isDeployed(ArgumentCollection=Arguments)>
-		<cftry>
-			<cfset runDeployment(ArgumentCollection=Arguments)>
-		<cfcatch>
-			<cfrethrow>
-		</cfcatch>
-		</cftry>
-	</cfif>
-
-	<cfreturn This>
-</cffunction>
-
-<cffunction name="require" access="public" returntype="void" output="no">
-	<cfargument name="Component" type="any" required="yes">
-	<cfargument name="MethodName" type="string" required="yes">
-
-	<cfset var sComponent = getMetaData(Arguments.Component)>
-
-	<cfset deploy(
+	deploy(
 		Name = "#sComponent.FullName#.#Arguments.MethodName#()",
 		ComponentPath = "#sComponent.FullName#",
 		Component = "#Arguments.Component#",
 		MethodName = "#Arguments.MethodName#"
-	)>
+	);
 
-</cffunction>
+}
 
-<cffunction name="runDeployment" access="public" returntype="any" output="no">
+public function runDeployment() {
+	var TimeMarkBegin = 0;
+	var TimeMarkEnd = 0;
 
-	<cfset var TimeMarkBegin = 0>
-	<cfset var TimeMarkEnd = 0>
+	if ( NOT StructKeyExists(Arguments,"Args") ) {
+		Arguments.Args = {};
+	}
 
-	<cfset TimeMarkBegin = getTickCount()>
-	<cfinvoke component="#Arguments.Component#" method="#MethodName#">
-		<cfif StructKeyExists(Arguments,"Args")>
-			<cfinvokeargument name="ArgumentCollection" value="#Arguments.Args#">
-		</cfif>
-	</cfinvoke>
-	<cfset TimeMarkEnd = getTickCount()>
-	<cfset Arguments.Seconds = GetSecondsDiff(TimeMarkBegin,TimeMarkEnd)>
-	<cfset recordDeployment(ArgumentCollection=Arguments)>
+	TimeMarkBegin = getTickCount();
+	invoke(Arguments.Component,MethodName,Arguments.Args);
+	TimeMarkEnd = getTickCount();
+	Arguments.Seconds = GetSecondsDiff(TimeMarkBegin,TimeMarkEnd);
+	recordDeployment(ArgumentCollection=Arguments);
 
-</cffunction>
+}
 
-<cffunction name="isDeployed" access="public" returntype="boolean" output="no">
-	<cfargument name="Name" type="string" required="yes">
-	<cfargument name="ComponentPath" type="string" required="yes">
+public boolean function isDeployed(
+	required string Name,
+	required string ComponentPath
+) {
+	var sTasks = {};
+	var result = false;
 
-	<cfset var sTasks = StructNew()>
-	<cfset var result = false>
+	sTasks["Name"] = Arguments.Name;
+	sTasks["ComponentPath"] = Arguments.ComponentPath;
 
-	<cfset sTasks["Name"] = Arguments.Name>
-	<cfset sTasks["ComponentPath"] = Arguments.ComponentPath>
+	sTasks = Variables.DataMgr.truncate(tablename="utilDeployments",data=sTasks);
 
-	<cfset sTasks = Variables.DataMgr.truncate(tablename="utilDeployments",data=sTasks)>
+	// Look for the run in the local structure
+	result = StructKeyExists(Variables.sPastDeployments,getDeploymentStructKey(ArgumentCollection=Arguments));
 
-	<!--- Look for the run in the local structure --->
-	<cfset result = StructKeyExists(Variables.sPastDeployments,getDeploymentStructKey(ArgumentCollection=Arguments))>
+	// If not found in the local structure, double-check the database
+	if ( NOT result ) {
+		result = Variables.DataMgr.hasRecords(tablename="utilDeployments",data=sTasks);
+	}
 
-	<!--- If not found in the local structure, double-check the database --->
-	<cfif NOT result>
-		<cfset result = Variables.DataMgr.hasRecords(tablename="utilDeployments",data=sTasks)>
-	</cfif>
+	return result;
+}
 
-	<cfreturn result>
-</cffunction>
+private numeric function GetSecondsDiff(
+	required numeric begin,
+	required numeric end
+) {
+	var result = 0;
 
-<cffunction name="GetSecondsDiff" access="private" returntype="numeric" output="no">
-	<cfargument name="begin" type="numeric" required="yes">
-	<cfargument name="end" type="numeric" required="yes">
+	if ( Arguments.end GTE Arguments.begin ) {
+		result = Int( ( Arguments.end - Arguments.begin ) / 1000 );
+	}
 
-	<cfset var result = 0>
+	return result;
+}
 
-	<cfif Arguments.end GTE Arguments.begin>
-		<cfset result = Int( ( Arguments.end - Arguments.begin ) / 1000 )>
-	</cfif>
+public void function recordDeployment() {
+	var DeploymentStructKey = getDeploymentStructKey(ArgumentCollection=Arguments);
 
-	<cfreturn result>
-</cffunction>
+	Variables.DataMgr.insertRecord(tablename="utilDeployments",data=Arguments,truncate=true);
+	Variables.sPastDeployments[DeploymentStructKey] = now();
 
-<cffunction name="recordDeployment" access="public" returntype="void" output="no">
+}
 
-	<cfset var DeploymentStructKey = getDeploymentStructKey(ArgumentCollection=Arguments)>
+private string function getDeploymentStructKey(
+	required string Name,
+	required string ComponentPath
+) {
+	var sArgs = Variables.DataMgr.truncate(tablename="utilDeployments",data=Arguments);
 
-	<cfset Variables.DataMgr.insertRecord(tablename="utilDeployments",data=Arguments,truncate=true)>
-	<cfset Variables.sPastDeployments[DeploymentStructKey] = now()>
+	return "#sArgs.Name#:::#sArgs.ComponentPath#";
+}
 
-</cffunction>
-
-<cffunction name="getDeploymentStructKey" access="private" returntype="string" output="no">
-	<cfargument name="Name" type="string" required="true">
-	<cfargument name="ComponentPath" type="string" required="true">
-
-	<cfset var sArgs = Variables.DataMgr.truncate(tablename="utilDeployments",data=Arguments)>
-
-	<cfreturn "#sArgs.Name#:::#sArgs.ComponentPath#">
-</cffunction>
+public void function deployNewLengths() {
+	deploy(Name="deployNewDeploymentNameLength",ComponentPath="com.sebtools.utils.Deployer",Component=This,MethodName="changeLengths");
+}
+</cfscript>
 
 <cffunction name="changeLengths" access="public" returntype="void" output="no">
 
@@ -155,12 +157,6 @@
 			</cfquery>
 		</cfif>
 	</cfoutput>
-
-</cffunction>
-
-<cffunction name="deployNewLengths" access="public" returntype="void" output="no">
-
-	<cfset deploy(Name="deployNewDeploymentNameLength",ComponentPath="com.sebtools.utils.Deployer",Component=This,MethodName="changeLengths")>
 
 </cffunction>
 

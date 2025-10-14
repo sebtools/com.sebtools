@@ -25,178 +25,213 @@
 		variables.Scheduler = arguments.Scheduler;
 		loadScheduledTask();
 	}
+
+	if ( Variables.getNewDefs AND NOT StructKeyExists(arguments,"Scheduler") ) {
+		loadUniversalData();
+	}
+
+	// Add Default Words
+	if ( Variables.DataMgr.hasRecords("spamWords") ) {
+		loadWords(getDefaultSpamWords());
+	}
+
+	return This;
 	</cfscript>
-
-	<cfif variables.getNewDefs AND NOT StructKeyExists(arguments,"Scheduler")>
-		<cfset loadUniversalData()>
-	</cfif>
-
-	<!--- Add Default Words --->
-	<cfif variables.DataMgr.hasRecords("spamWords")>
-		<cfset loadWords(getDefaultSpamWords())>
-	</cfif>
-
-	<cfreturn this>
 </cffunction>
 
 <cffunction name="loadScheduledTask" access="public" returntype="void" output="no">
-	<cfif StructKeyExists(variables,"Scheduler")>
-		<cfinvoke component="#variables.Scheduler#" method="setTask">
-			<cfinvokeargument name="Name" value="SpamFilter">
-			<cfinvokeargument name="ComponentPath" value="com.sebtools.SpamFilter">
-			<cfinvokeargument name="Component" value="#This#">
-			<cfinvokeargument name="MethodName" value="loadUniversalData">
-			<cfinvokeargument name="interval" value="weekly">
-			<cfinvokeargument name="weekdays" value="Monday">
-			<cfinvokeargument name="Hours" value="1,2,3">
-		</cfinvoke>
-	</cfif>
+	<cfscript>
+	if ( StructKeyExists(Variables,"Scheduler") ) {
+		Variables.Scheduler.setTask(
+			Name="SpamFilter",
+			ComponentPath="com.sebtools.SpamFilter",
+			Component="#This#",
+			MethodName="loadUniversalData",
+			interval="weekly",
+			weekdays="Monday",
+			Hours="1,2,3"
+		)
+	}
+	</cfscript>
 </cffunction>
 
 <cffunction name="filter" access="public" returntype="struct" output="no" hint="I run the filter on the given structure and return it.">
 	<cfargument name="data" type="struct" required="yes">
 	<cfargument name="maxpoints" type="numeric" default="0">
+	<cfscript>
+	if ( isSpam(ArgumentCollection=Arguments) ) {
+		throw(
+			message="This message appears to be spam.",
+			detail="If you feel that you have gotten this message in error, pleas change your entry and try again.",
+			type="SpamFilter",
+			errorcode="Spam"
+		);
+	}
 
-	<cfif isSpam(argumentCollection=arguments)>
-		<cfthrow message="This message appears to be spam." detail="If you feel that you have gotten this message in error, pleas change your entry and try again." type="SpamFilter" errorcode="Spam">
-	</cfif>
-
-	<cfreturn arguments.data>
+	return Arguments.data;
+	</cfscript>
 </cffunction>
 
 <cffunction name="isSpam" access="public" returntype="boolean" output="no" hint="I indicate whether the given structure is spam.">
 	<cfargument name="data" type="struct" required="yes">
 	<cfargument name="maxpoints" type="numeric" default="0">
+	<cfscript>
+	var pointlimit = Arguments.maxpoints;
+	var pointval = 0;
+	var result = false;
 
-	<cfset var pointlimit = arguments.maxpoints>
-	<cfset var pointval = 0>
-	<cfset var result = false>
+	// If we don't have a point limit, set it to the number of fields
+	if ( NOT pointlimit ) {
+		pointlimit = getPointLimit(Arguments.data,maxpoints);
+	}
 
-	<!--- If we don't have a point limit, set it to the number of fields --->
-	<cfif NOT pointlimit>
-		<cfset pointlimit = getPointLimit(arguments.data,maxpoints)>
-	</cfif>
+	// Run that filter!
+	pointval = getPoints(Arguments.data,maxpoints);
 
-	<!--- Run that filter! --->
-	<cfset pointval = getPoints(arguments.data,maxpoints)>
+	if ( pointval GT pointlimit ) {
+		result = true;
+	}
 
-	<cfif pointval GT pointlimit>
-		<cfset result = true>
-	</cfif>
-
-	<cfreturn result>
+	return result;
+	</cfscript>
 </cffunction>
 
 <cffunction name="getPoints" access="public" returntype="numeric" output="no"hint="I return the number of points in the given structure.">
 	<cfargument name="data" type="struct" required="yes">
 	<cfargument name="maxpoints" type="numeric" default="0">
+	<cfscript>
+	var langPoints = 0;
+	var pointval = 0;
+	var qWords = variables.DataMgr.getRecords("spamWords", {orderBy="points DESC"});
+	var sWord = 0;
+	var qRegExs = variables.DataMgr.getRecords("spamRegExs");
+	var sRegEx = 0;
+	var field = "";
+	var finds = 0;
+	var field2 = "";
+	var duplist = "";
 
-	<cfset var langPoints = 0>
-	<cfset var pointval = 0>
-	<cfset var qWords = variables.DataMgr.getRecords("spamWords", {orderBy="points DESC"})>
-	<cfset var qRegExs = variables.DataMgr.getRecords("spamRegExs")>
-	<cfset var field = "">
-	<cfset var finds = 0>
-	<cfset var field2 = "">
-	<cfset var duplist = "">
-
-	<cfloop collection="#arguments.data#" item="field">
-		<cfif ArrayFindNoCase(variables.ignoreKeys, field) or ListFindNoCase("validate,finger", listFirst(field,"_"))>
-			<!--- Ignore --->
-		<cfelseif isSimpleValue(arguments.data[field]) AND Len(field) and Len(arguments.data[field]) and field NEQ "Email">
-			<cfloop query="qWords">
-				<!--- Get the number of times the word appears --->
-				<cfset finds = numWordMatches(arguments.data[field],trim(Word),Arguments.maxpoints)>
-				<cfset pointval = pointval + (finds * Val(points))>
-				<cfif maxpoints GT 0 AND pointval GT maxpoints>
-					<cfreturn pointval>
-				</cfif>
-			</cfloop>
-			<cfloop query="qRegExs">
-				<!--- Get the number of times the expression is matched --->
-				<cfset finds = numRegExMatches(arguments.data[field],trim(RegEx),Val(checkcase),Arguments.maxpoints)>
-				<cfset pointval = pointval + (finds * Val(points))>
-				<cfif maxpoints GT 0 AND pointval GT maxpoints>
-					<cfreturn pointval>
-				</cfif>
-			</cfloop>
-			<!--- Points for duplicate field values --->
-			<cfset duplist = ListAppend(duplist,field)>
-			<cfloop collection="#arguments.data#" item="field2">
-				<cfif
+	for ( field in Arguments.data ) {
+		if (
+			ArrayFindNoCase(variables.ignoreKeys, field)
+			OR
+			ListFindNoCase("validate,finger", listFirst(field,"_"))
+		) {
+			// Ignore
+		} else if ( 
+			isSimpleValue(arguments.data[field])
+			AND
+			Len(field)
+			AND
+			Len(arguments.data[field])
+			AND
+			field NEQ "Email"
+		) {
+			for ( sWord in qWords ) {
+				// Get the number of times the word appears
+				finds = numWordMatches(Arguments.data[field],trim(sWord.Word),Arguments.maxpoints);
+				pointval = pointval + (finds * Val(sWord.points));
+				if ( maxpoints GT 0 AND pointval GT maxpoints ) {
+					return pointval;
+				}
+			}
+			for ( sRegEx in qRegExs ) {
+				// Get the number of times the expression is matched
+				finds = numRegExMatches(arguments.data[field],trim(sRegEx.RegEx),Val(sRegEx.checkcase),Arguments.maxpoints);
+				pointval = pointval + (finds * Val(sRegEx.points));
+				if ( maxpoints GT 0 AND sRegEx.pointval GT maxpoints ) {
+					return pointval;
+				}
+			}
+			// Points for duplicate field values
+			duplist = ListAppend(duplist,field);
+			for ( field2 in Arguments.data ) {
+				if (
 						(field2 NEQ field)
 					AND	isSimpleValue(arguments.data[field])
 					AND	isSimpleValue(arguments.data[field2])
 					AND	(arguments.data[field2] EQ arguments.data[field])
 					AND	NOT ListFindNoCase(duplist,field2)
-				>
-					<cfset pointval = pointval + 1>
-					<cfset duplist = ListAppend(duplist,field2)>
-					<cfif maxpoints GT 0 AND pointval GT maxpoints>
-						<cfreturn pointval>
-					</cfif>
-				</cfif>
-			</cfloop>
+				) {
+					pointval = pointval + 1;
+					duplist = ListAppend(duplist,field2);
+					if ( maxpoints GT 0 AND pointval GT maxpoints ) {
+						return pointval;
+					}
+				}
+			}
 
-			<!--- get points for banned foreign languages --->
-			<cfset langPoints = getForeignLanguagePoints(arguments.data[field]) />
-			<cfset pointval = pointval + langPoints />
+			// get points for banned foreign languages
+			langPoints = getForeignLanguagePoints(arguments.data[field]);
+			pointval = pointval + langPoints;
 
-		</cfif>
-	</cfloop>
+		}
+	}
 
-	<cfreturn pointval>
+	return pointval;
+	</cfscript>
 </cffunction>
 
 <cffunction name="getPointsArray" access="public" returntype="array" output="no"hint="I return an array of details about the points in the given structure.">
 	<cfargument name="data" type="struct" required="yes">
+	<cfscript>
+	var pointval = 0;
+	var qWords = Variables.DataMgr.getRecords("spamWords", {orderBy="points DESC"});
+	var sWord = 0;
+	var qRegExs = Variables.DataMgr.getRecords("spamRegExs");
+	var sRegEx = 0;
+	var field = "";
+	var finds = 0;
+	var aPoints = [];
+	var field2 = "";
+	var duplist = "";
 
-	<cfset var pointval = 0>
-	<cfset var qWords = variables.DataMgr.getRecords("spamWords", {orderBy="points DESC"})>
-	<cfset var qRegExs = variables.DataMgr.getRecords("spamRegExs")>
-	<cfset var field = "">
-	<cfset var finds = 0>
-	<cfset var aPoints = ArrayNew(1)>
-	<cfset var field2 = "">
-	<cfset var duplist = "">
-
-	<cfloop collection="#arguments.data#" item="field">
-		<cfif isSimpleValue(arguments.data[field]) AND Len(field) AND Len(arguments.data[field]) AND field NEQ "Email">
-			<cfloop query="qWords">
-				<!--- Get the number of times the word appears --->
-				<cfset finds = numWordMatches(arguments.data[field],trim(Word))>
-				<cfif finds>
-					<cfset pointval = pointval + (finds * points)>
-					<cfset ArrayAppend(aPoints,"#(finds * points)#:#trim(Word)#")>
-				</cfif>
-			</cfloop>
-			<cfloop query="qRegExs">
-				<!--- Get the number of times the expression is matched --->
-				<cfset finds = numRegExMatches(arguments.data[field],trim(RegEx),Val(checkcase))>
-				<cfif finds>
-					<cfset pointval = pointval + (finds * points)>
-					<cfset ArrayAppend(aPoints,"#(finds * points)#:(#Label#):#trim(Regex)#")>
-				</cfif>
-			</cfloop>
-			<!--- Points for duplicate field values --->
-			<cfset duplist = ListAppend(duplist,field)>
-			<cfloop collection="#arguments.data#" item="field2">
-				<cfif
+	for ( field in Arguments.data ) {
+		if (
+			isSimpleValue(arguments.data[field])
+			AND
+			Len(field)
+			AND
+			Len(arguments.data[field])
+			AND
+			field NEQ "Email"
+		) {
+			for ( sWord in qWords ) {
+				// Get the number of times the word appears
+				finds = numWordMatches(arguments.data[field],trim(sWord.Word));
+				if ( finds ) {
+					pointval = pointval + (finds * sWord.points);
+					ArrayAppend(aPoints,"#(finds * sWord.points)#:#trim(sWord.Word)#");
+				}
+			}
+			for ( sRegEx in qRegExs ) {
+				// Get the number of times the expression is matched
+				finds = numRegExMatches(arguments.data[field],trim(sRegEx.RegEx),Val(sRegExcheckcase));
+				if ( finds ) {
+					pointval = pointval + (finds * sRegExpoints);
+					ArrayAppend(aPoints,"#(finds * sRegExpoints)#:(#sRegEx.Label#):#trim(sRegEx.Regex)#");
+				}
+			}
+			// Points for duplicate field values
+			duplist = ListAppend(duplist,field);
+			for ( field2 in Arguments.data ) {
+				if (
 						(field2 neq field)
 					AND	isSimpleValue(arguments.data[field])
 					AND	isSimpleValue(arguments.data[field2])
 					AND	(arguments.data[field2] eq arguments.data[field])
 					AND	NOT ListFindNoCase(duplist,field2)
-				>
-					<cfset pointval = pointval + 1>
-					<cfset duplist = ListAppend(duplist,field2)>
-					<cfset ArrayAppend(aPoints,"#(1)#:(duplicate):#field2#:#arguments.data[field2]#")>
-				</cfif>
-			</cfloop>
-		</cfif>
-	</cfloop>
+				) {
+					pointval = pointval + 1;
+					duplist = ListAppend(duplist,field2);
+					ArrayAppend(aPoints,"#(1)#:(duplicate):#field2#:#arguments.data[field2]#");
+				}
+			}
+		}
+	}
 
-	<cfreturn aPoints>
+	return aPoints;
+	</cfscript>
 </cffunction>
 
 <cffunction name="getRegEx" access="public" returntype="query" output="no" hint="I return the requested regex.">

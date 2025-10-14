@@ -1,42 +1,53 @@
 <cfcomponent displayname="Amazon Signature Version 3" extends="base" output="false">
+<cfscript>
 
-<cffunction name="getRequest" access="public" returntype="struct" output="false" hint="I return the raw(ish) results of Amazon REST Call.">
-	<cfargument name="subdomain" type="string" required="true" hint="The subdomain for the AWS service being used.">
-	<cfargument name="Action" type="string" required="true" hint="The AWS API action being called.">
-	<cfargument name="method" type="string" default="GET" hint="The HTTP method to invoke.">
-	<cfargument name="parameters" type="struct" default="#structNew()#" hint="An struct of HTTP URL parameters to send in the request.">
-	<cfargument name="timeout" type="numeric" default="20" hint="The default call timeout.">
+/**
+* I return the raw(ish) results of Amazon REST Call.
+* @subdomain The subdomain for the AWS service being used.
+* @Action The AWS API action being called.
+* @method The HTTP method to invoke.
+* @parameters A struct of HTTP URL parameters to send in the request.
+* @timeout The default call timeout.
+*/
 
-	<cfscript>
+public struct function getRequest(
+	required string subdomain,
+	required string Action,
+	string method="GET",
+	struct parameters="#{}#",
+	numeric timeout="20"
+) {
 	var sRequest = Super.getRequest(ArgumentCollection=Arguments);
 	var timestamp = sRequest.headers["Date"];
 
 	sRequest["Headers"]["X-Amzn-Authorization"] = getAuthorizationString(timestamp);
-	</cfscript>
 
-	<cfreturn sRequest>
-</cffunction>
+	return sRequest;
+}
 
-<cffunction name="getAuthorizationString" access="public" returntype="string" output="false" hint="I return the authorization string.">
-	<cfargument name="timestamp" type="string" required="false">
+/**
+* I return the authorization string.
+*/
+public string function getAuthorizationString(required string timestamp) {
+	
+	if ( NOT StructKeyExists(Arguments,"timestamp") ) {
+		Arguments.timestamp = makeTimeStamp();
+	}
 
-	<cfif NOT StructKeyExists(Arguments,"timestamp")>
-		<cfset Arguments.timestamp = makeTimeStamp()>
-	</cfif>
+	return "AWS3-HTTPS AWSAccessKeyId=#getAccessKey()#,Algorithm=HmacSHA256,Signature=#createSignature(Arguments.timestamp)#";
+}
 
-	<cfreturn "AWS3-HTTPS AWSAccessKeyId=#getAccessKey()#,Algorithm=HmacSHA256,Signature=#createSignature(Arguments.timestamp)#">
-</cffunction>
+/**
+* I create request signature according to AWS standards.
+*/
+public function createSignature(required any string) {
+	var fixedData = Replace(Arguments.string,"\n","#chr(10)#","all");
 
-<cffunction name="createSignature" access="public" returntype="any" output="false" hint="Create request signature according to AWS standards">
-	<cfargument name="string" type="any" required="true" />
+	return toBase64(HMAC_SHA256(getSecretKey(),fixedData) );
+}
 
-	<cfset var fixedData = Replace(Arguments.string,"\n","#chr(10)#","all")>
-
-	<cfreturn toBase64(HMAC_SHA256(getSecretKey(),fixedData) )>
-</cffunction>
-
-<cffunction name="makeTimeStamp" access="public" returntype="string" output="false">
-	<cfreturn GetHTTPTimeString(Now())>
-</cffunction>
-
+public string function makeTimeStamp() {
+	return GetHTTPTimeString(Now());
+}
+</cfscript>
 </cfcomponent>

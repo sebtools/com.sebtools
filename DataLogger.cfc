@@ -1,47 +1,84 @@
 <cfcomponent extends="com.sebtools.component" displayname="Data Logger" hint="I log data changes for auditing." output="no">
 
-<cffunction name="init" access="public" returntype="any" output="no">
-	<cfargument name="DataMgr" type="any" required="yes">
-	<cfargument name="Observer" type="any" required="yes">
+<cfscript>
+public function init(
+	required DataMgr,
+	required Observer
+) {
 
-	<cfset initInternal(ArgumentCollection=Arguments)>
+	initInternal(ArgumentCollection=Arguments);
 
-	<cfreturn This>
-</cffunction>
+	return This;
+}
 
-<cffunction name="initInternal" access="public" returntype="any" output="no">
-	<cfargument name="DataMgr" type="any" required="yes">
-	<cfargument name="Observer" type="any" required="yes">
+public function initInternal(
+	required DataMgr,
+	required Observer
+) {
 
-	<cfset Super.initInternal(ArgumentCollection=Arguments)>
+	Super.initInternal(ArgumentCollection=Arguments);
 
-	<cfset Variables.logged_tables = "">
+	Variables.logged_tables = "";
 
-	<cfset Variables.DataMgr.loadXML(getDbXml(),true,true)>
+	Variables.DataMgr.loadXML(getDbXml(),true,true);
 
-	<cfset registerListener()>
+	registerListener();
 
-	<cfreturn This>
-</cffunction>
+	return This;
+}
 
-<cffunction name="catchError" access="public" returntype="void" output="no" hint="I catch logging errors. This can be extended on a per-site basis.">
-	<cfargument name="MethodName" type="string" required="yes">
-	<cfargument name="Error" type="any" required="yes">
-	<cfargument name="Args" type="struct" required="yes">
+public void function catchError(
+	required string MethodName,
+	required any Error,
+	required struct Args
+) hint="I catch logging errors. This can be extended on a per-site basis." {
 
-	<cfset Variables.Observer.announceEvent(
+	Variables.Observer.announceEvent(
 		EventName = "DataLogger:onError",
 		Args = Arguments
-	)>
+	);
 
-</cffunction>
+}
 
-<cffunction name="getDataMgr" access="public" returntype="any" output="no">
-	<cfreturn Variables.DataMgr>
-</cffunction>
+public function getDataMgr() {
+	return Variables.DataMgr;
+}
 
-<cffunction name="getObserver" access="public" returntype="any" output="no">
-	<cfreturn Variables.Observer>
+public function getObserver() {
+	return Variables.Observer;
+}
+</cfscript>
+
+<cffunction name="getRecordChanges" access="public" returntype="any" output="no">
+	<cfargument name="tablename" type="string" required="yes">
+	<cfargument name="pkvalue" type="string" required="yes">
+	<cfargument name="fieldlist" type="string" required="no">
+
+	<cfset var qChanges = 0>
+	<cfset var sWhoNames = []>
+	
+	<cf_DMQuery name="qChanges">
+		SELECT		
+					s.ChangeSetID,
+					s.DateLogged,
+					<cf_DMSQL sql="#getWhoNameSQL('s.Who')#" />AS [Who],
+					[Action],
+					FieldName,
+					OldValue,
+					NewValue
+		FROM		audChangeSets s
+		LEFT JOIN	audChanges c
+			ON		s.ChangeSetID = c.ChangeSetID
+		WHERE		1 = 1
+			AND		tablename = <cf_DMParam name="tablename" value="#Arguments.tablename#" cfsqltype="CF_SQL_VARCHAR">
+			AND		pkvalue = <cf_DMParam name="pkvalue" value="#Arguments.pkvalue#" cfsqltype="CF_SQL_INTEGER">
+		<cfif StructKeyHasLen(Arguments,"fieldlist")>
+			AND		FieldName IN <cf_DMParam value="#Arguments.fieldlist#" cfsqltype="CF_SQL_VARCHAR" list="yes">
+		</cfif>
+		ORDER BY	s.ChangeSetID
+	</cf_DMQuery>
+
+	<cfreturn qChanges>
 </cffunction>
 
 <cffunction name="getRestoreChanges" access="public" returntype="struct" output="no" hint="I get the changes needed to restore a record to its state at a given time.">
@@ -85,245 +122,259 @@
 	<cfreturn sResult>
 </cffunction>
 
-<cffunction name="getRecord" access="public" returntype="query" output="no" hint="I get the record as it would have existed at the given point in time.">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="pkvalue" type="string" required="yes">
-	<cfargument name="when" type="date" required="yes">
-	<cfargument name="fieldlist" type="string" required="no">
+<cfscript>
+public query function getRecord(
+	required string tablename,
+	required string pkvalue,
+	required date when,
+	string fieldlist
+) hint="I get the record as it would have existed at the given point in time." {
 
-	<cfset var qRecord = 0>
-	<cfset var sGet = {tablename=Arguments.tablename}>
-	<cfset var pkfield = Variables.DataMgr.getPrimaryKeyFieldName(Arguments.tablename)>
-	<cfset var sChanges = 0>
-	<cfset var field = "">
-	<cfset var cols = "">
+	var qRecord = 0;
+	var sGet = {tablename=Arguments.tablename};
+	var pkfield = Variables.DataMgr.getPrimaryKeyFieldName(Arguments.tablename);
+	var sChanges = 0;
+	var field = "";
+	var cols = "";
 
-	<cfset sGet["data"] = {"#pkfield#"=Arguments.pkvalue}>
+	sGet["data"] = {"#pkfield#"=Arguments.pkvalue};
 
-	<cfif StructKeyExists(Arguments,"fieldlist")>
-		<cfset sGet["fieldlist"] = Arguments.fieldlist>
-	</cfif>
+	if ( StructKeyExists(Arguments,"fieldlist") ) {
+		sGet["fieldlist"] = Arguments.fieldlist;
+	}
 
-	<cfset qRecord = Variables.DataMgr.getRecord(ArgumentCollection=sGet)>
+	qRecord = Variables.DataMgr.getRecord(ArgumentCollection=sGet);
 
-	<cfif NOT qRecord.RecordCount>
-		<cfif StructKeyExists(Variables,"DataTrashcan")>
-			<cfset qRecord = Variables.DataTrashcan.getDeletedRecord(ArgumentCollection=sGet)>
-		</cfif>
+	if ( NOT qRecord.RecordCount ) {
+		if ( StructKeyExists(Variables,"DataTrashcan") ) {
+			qRecord = Variables.DataTrashcan.getDeletedRecord(ArgumentCollection=sGet);
+		}
 
-		<cfif NOT qRecord.RecordCount>
-			<!--- If record isn't found at all, then throw error. If it is found, but deleted still then return empty query. --->
-			<cfthrow type="DataLogger" message="Unable to retrieve record for table #Arguments.tablename# with primary key value of #Arguments.pkvalue#.">
-		</cfif>
+		if ( NOT qRecord.RecordCount ) {
+			//If record isn't found at all, then throw error. If it is found, but deleted still then return empty query.
+			throw(type="DataLogger",message="Unable to retrieve record for table #Arguments.tablename# with primary key value of #Arguments.data[pkfield]#.");
+		}
 
-		<!--- If a deleted record is found, make sure it was deleted after the When date --->
-		<cfif qRecord.RecordCount AND ListFindNoCase(qRecord.ColumnList,"DataTrashcan_DateDeleted")>
-			<!--- If the record was deleted before the given date, treat it as still deleted and return nothing. --->
-			<cfif qRecord.DataTrashcan_DateDeleted LT Arguments.when>
-				<cfset QueryDeleteRow(qRecord, 1)>
-			</cfif>
-		</cfif>
-	</cfif>
-
-	<cfset sChanges = getRestoreChanges(ArgumentCollection=Arguments)>
-
-	<cfset cols = qRecord.ColumnList>
-	<cfloop collection="#sChanges#" item="field">
-		<cfif ListFindNoCase(cols,field)>
-			<cfset QuerySetCell(qRecord,field,sChanges[field])>
-		</cfif>
-	</cfloop>
-
-	<cfreturn qRecord>
-</cffunction>
-
-<cffunction name="getWho" access="public" returntype="string" output="no" hint="I get the 'Who' value for the data logging. This should be overridden on a per-site basis.">
-	<cfreturn CGI.REMOTE_ADDR>
-</cffunction>
-
-<cffunction name="addChangeSet" access="public" returntype="string" output="no">
-	<cfargument name="action" type="string" required="yes">
-	<cfargument name="pkvalue" type="string" required="no">
-	<cfargument name="ChangeUUID" type="string" required="no">
-	<cfargument name="sql" type="any" required="no">
-
-	<cfset var sArgs = StructCopy(Arguments)>
-
-	<cfif NOT StructKeyExists(sArgs,"ChangeUUID")>
-		<cfset sArgs.ChangeUUID = CreateUUID()>
-	</cfif>
-	<cfset sArgs["Who"] = getWho()>
-	<cfif StructKeyExists(sArgs,"sql")>
-		<cfset sArgs["sql"] = Variables.DataMgr.readableSQL(sArgs.sql)>
-	</cfif>
-
-	<cfreturn Variables.DataMgr.insertRecord(tablename="audChangeSets",data=sArgs)>
-</cffunction>
-
-<cffunction name="hasReset" access="public" returntype="string" output="no">
-	<cfargument name="ChangeSetID" type="string" required="no">
-
-	<cfset var sArgs = {ChangeSetID=Arguments.ChangeSetID,action="restore"}>
-
-	<cfreturn Variables.DataMgr.hasRecords(tablename="audChangeSets",data=sArgs)>
-</cffunction>
-
-<cffunction name="convertArgs" access="public" returntype="any" output="no">
-
-	<cfset var sArgs = {}>
-
-	<cfset sArgs["tablename"] = Arguments.tablename>
-	<cfset sArgs["action"] = Arguments.action>
-	<cfif StructKeyExists(Arguments,"ChangeUUID")>
-		<cfset sArgs["ChangeUUID"] = Arguments.ChangeUUID>
-	</cfif>
-	<cfif StructKeyExists(Arguments,"sql")>
-		<cfset sArgs["sql"] = Arguments.sql>
-	</cfif>
-	<cfif StructKeyExists(Arguments,"pkvalue")>
-		<cfset sArgs["pkvalue"] = Arguments.pkvalue>
-	</cfif>
-
-	<!--- Convert action arguments. --->
-	<cfif Arguments.action CONTAINS "insert">
-		<cfset sArgs["action"] = "insert">
-	<cfelseif Arguments.action CONTAINS "update">
-		<cfset sArgs["action"] = "update">
-	<cfelseif Arguments.action CONTAINS "delete">
-		<cfset sArgs["action"] = "delete">
-	<cfelse>
-		<!--- For now, only logging the above actions --->
-		<cfreturn false>
-	</cfif>
-
-	<cfif
-			Arguments.action CONTAINS "after"
-		OR
-			StructKeyExists(Arguments, "after")
-		OR
-			( StructKeyExists(Arguments,"complete") AND Arguments.complete IS true )
-	>
-		<cfset sArgs["DateCompleted"] = now()>
-	</cfif>
-
-	<!--- We won't know the primary key value yet for an insert --->
-	<cfif NOT ( StructKeyExists(Arguments,"pkvalue") AND Len(Arguments["pkvalue"]) )>
-		<cfif StructKeyExists(Arguments,"data") AND StructCount(Arguments.data)>
-			<cfif sArgs["action"] NEQ "insert" AND NOT StructKeyExists(Arguments,"pkvalue")>
-				<cfset Arguments["pkvalue"] = getPKValue(Arguments.tablename,Arguments.data)>
-			</cfif>
-		</cfif>
-	</cfif>
-
-	<cfreturn sArgs>
-</cffunction>
-
-<cffunction name="logAction" access="public" returntype="any" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="action" type="string" required="yes">
-	<cfargument name="data" type="struct" required="no">
-	<cfargument name="ChangeUUID" type="string" required="no">
-	<cfargument name="sql" type="any" required="no">
-	<cfargument name="before" type="any" required="no">
-	<cfargument name="after" type="any" required="no">
-
-	<cfset var sArgs = {}>
-	<cfset var sDataChanges = {}>
-	<cfset var ChangeSetID = 0>
-	<cfset var aChanges = 0>
-	<cfset var ii = 0>
-	<cfset var key = "">
-
-	<!--- Don't create an infinite loop by attempting to log the DataLogger tables. --->
-	<cfif Arguments.tablename CONTAINS "audChange">
-		<cfreturn false>
-	</cfif>
-
-	<!--- Only log tables that DataLogger has been requested to log. --->
-	<cfif NOT ListFindNoCase(Variables.logged_tables,Arguments.tablename)>
-		<cfreturn false>
-	</cfif>
-
-	<cfset sArgs = convertArgs(ArgumentCollection=Arguments)>
-
-	<!---<cftry>--->
-		<!--- ** Log the Change ** --->
-		<cfif
-			StructKeyExists(Arguments,"data")
-			AND
-			StructKeyHasVal(Arguments.data,"DataLogger_ChangeSetID")
-			AND
-			hasRestore(Arguments.data["DataLogger_ChangeSetID"])
-		>
-			<!--- In rare event where data specified a ChangeSetID, use it. Only current case: a restore --->
-			<cfset ChangeSetID = Arguments.data["DataLogger_ChangeSetID"]>
-		<cfelse>
-			<!--- The rest of the time, we'll create one. --->
-			<cfset ChangeSetID = addChangeSet(ArgumentCollection=sArgs)>
-		</cfif>
-
-		<cfscript>
-		if ( sArgs["action"] EQ "update" ) {
-			aChanges = getDataChanges(ArgumentCollection=Arguments);
-			for  ( ii=1; ii LTE ArrayLen(aChanges); ii++ ) {
-				//Make sure to track the change set
-				aChanges[ii]["ChangeSetID"] = ChangeSetID;
-				if ( StructCount(aChanges[ii]) GT 1 ) {
-					//Save the change
-					Variables.DataMgr.runSQLArray(
-						Variables.DataMgr.insertRecordSQL(
-							tablename="audChanges",
-							OnExists="insert",
-							data=aChanges[ii]
-						)
-					);
-				}
+		//If a deleted record is found, make sure it was deleted after the When date
+		if ( qRecord.RecordCount AND ListFindNoCase(qRecord.ColumnList,"DataTrashcan_DateDeleted") ) {
+			//If the record was deleted before the given date, treat it as still deleted and return nothing.
+			if ( qRecord.DataTrashcan_DateDeleted LT Arguments.when ) {
+				QueryDeleteRow(qRecord, 1);
 			}
 		}
-		</cfscript>
-	<!---<cfcatch>
-		<cfset catchError("logAction",CFCATCH,Arguments)>
-	</cfcatch>
-	</cftry>--->
+	}
 
+	sChanges = getRestoreChanges(ArgumentCollection=Arguments);
+
+	cols = qRecord.ColumnList;
+	for ( field in sChanges ) {
+		if ( ListFindNoCase(cols,field) ) {
+			QuerySetCell(qRecord,field,sChanges[field]);
+		}
+	}
+
+	return qRecord;
+}
+
+public string function getWho() hint="I get the 'Who' value for the data logging. This should be overridden on a per-site basis." {
+	return CGI.REMOTE_ADDR;
+}
+</cfscript>
+
+<cffunction name="getWhoAdded" access="public" returntype="string" output="no" hint="I get the 'Who' value for who added the given record.">
+	<cfargument name="tablename" type="string" required="yes">
+	<cfargument name="pkvalue" type="string" required="no">
+	
+	<cfset var qAdd = 0>
+
+	<cf_DMQuery name="qAdd">
+		SELECT		Who
+		FROM		audChangeSets s
+		WHERE		1 = 1
+			AND		tablename = <cf_DMParam value="#Arguments.tablename#" cfsqltype="CF_SQL_VARCHAR">
+			AND		[Action] = 'insert'
+			AND		pkvalue = <cf_DMParam value="#Arguments.pkvalue#" cfsqltype="CF_SQL_VARCHAR">
+	</cf_DMQuery>
+
+	<cfreturn qAdd.Who>
 </cffunction>
 
-<cffunction name="logActionComplete" access="public" returntype="any" output="no">
-	<cfargument name="ChangeUUID" type="string" required="no">
+<cfscript>
+public string function addChangeSet(
+	required string action,
+	string pkvalue,
+	string ChangeUUID,
+	any sql
+) hint="I add a change set to the log." {
 
-	<cfset var sWhere = {DateCompleted=""}>
-	<cfset var sSet = {DateCompleted=now()}>
+	var sArgs = StructCopy(Arguments);
 
-	<cfif StructKeyExists(Arguments,"ChangeUUID") AND Len(Arguments.ChangeUUID)>
-		<cfset sWhere["ChangeUUID"] = Arguments.ChangeUUID>
-		<cftry>
-			<!--- Set change set to completed --->
-			<cfset Variables.DataMgr.updateRecords(
+	if ( NOT StructKeyExists(sArgs,"ChangeUUID") ) {
+		sArgs.ChangeUUID = CreateUUID();
+	}
+	sArgs["Who"] = getWho();
+	if ( StructKeyExists(sArgs,"sql") ) {
+		sArgs["sql"] = Variables.DataMgr.readableSQL(sArgs.sql);
+	}
+
+	return Variables.DataMgr.insertRecord(tablename="audChangeSets",data=sArgs);
+}
+
+public string function hasReset(required string ChangeSetID) {
+	var sArgs = {ChangeSetID=Arguments.ChangeSetID,action="restore"};
+
+	return Variables.DataMgr.hasRecords(tablename="audChangeSets",data=sArgs);
+}
+
+public function convertArgs() {
+	var sArgs = {};
+
+	sArgs["tablename"] = Arguments.tablename;
+	sArgs["action"] = Arguments.action;
+	if ( StructKeyExists(Arguments,"ChangeUUID") ) {
+		sArgs["ChangeUUID"] = Arguments.ChangeUUID;
+	}
+	if ( StructKeyExists(Arguments,"sql") ) {
+		sArgs["sql"] = Arguments.sql;
+	}
+	if ( StructKeyExists(Arguments,"pkvalue") ) {
+		sArgs["pkvalue"] = Arguments.pkvalue;
+	}
+
+	//Convert action arguments.
+	if ( Arguments.action CONTAINS "insert" ) {
+		sArgs["action"] = "insert";
+	} else if ( Arguments.action CONTAINS "update" ) {
+		sArgs["action"] = "update";
+	} else if ( Arguments.action CONTAINS "delete" ) {
+		sArgs["action"] = "delete";
+	} else {
+		// For now, only logging the above actions
+		return false;
+	}
+
+	if (
+		Arguments.action CONTAINS "after"
+		OR
+		StructKeyExists(Arguments, "after")
+		OR
+		( StructKeyExists(Arguments,"complete") AND Arguments.complete IS true )
+	) {
+		sArgs["DateCompleted"] = now();
+	}
+
+	//We won't know the primary key value yet for an insert
+	if ( NOT ( StructKeyExists(Arguments,"pkvalue") AND Len(Arguments["pkvalue"]) ) ) {
+		if ( StructKeyExists(Arguments,"data") AND StructCount(Arguments.data) ) {
+			if ( sArgs["action"] NEQ "insert" AND NOT StructKeyExists(Arguments,"pkvalue") ) {
+				Arguments["pkvalue"] = getPKValue(Arguments.tablename,Arguments.data);
+			}
+		}
+	}
+
+	return sArgs;
+}
+
+public function logAction(
+	required string tablename,
+	required string action,
+	struct data,
+	string ChangeUUID,
+	any sql,
+	any before,
+	any after
+) {
+
+	var sArgs = {};
+	var sDataChanges = {};
+	var ChangeSetID = 0;
+	var aChanges = 0;
+	var ii = 0;
+	var key = "";
+
+	// Don't create an infinite loop by attempting to log the DataLogger tables.
+	if ( Arguments.tablename CONTAINS "audChange" ) {
+		return false;
+	}
+
+	// Only log tables that DataLogger has been requested to log.
+	if ( NOT ListFindNoCase(Variables.logged_tables,Arguments.tablename) ) {
+		return false;
+	}
+
+	sArgs = convertArgs(ArgumentCollection=Arguments);
+
+	// ** Log the Change **
+	if (
+		StructKeyExists(Arguments,"data")
+		AND
+		StructKeyHasVal(Arguments.data,"DataLogger_ChangeSetID")
+		AND
+		hasReset(Arguments.data["DataLogger_ChangeSetID"])
+	) {
+		// In rare event where data specified a ChangeSetID, use it. Only current case: a restore
+		ChangeSetID = Arguments.data["DataLogger_ChangeSetID"];
+	} else {
+		// The rest of the time, we'll create one.
+		ChangeSetID = addChangeSet(ArgumentCollection=sArgs);
+	}
+
+	if ( sArgs["action"] EQ "update" ) {
+		aChanges = getDataChanges(ArgumentCollection=Arguments);
+		for  ( ii=1; ii LTE ArrayLen(aChanges); ii++ ) {
+			// Make sure to track the change set
+			aChanges[ii]["ChangeSetID"] = ChangeSetID;
+			if ( StructCount(aChanges[ii]) GT 1 ) {
+				// Save the change
+				Variables.DataMgr.runSQLArray(
+					Variables.DataMgr.insertRecordSQL(
+						tablename="audChanges",
+						OnExists="insert",
+						data=aChanges[ii]
+					)
+				);
+			}
+		}
+	}
+
+}
+
+public function logActionComplete(
+	string ChangeUUID
+) {
+
+	var sWhere = {DateCompleted=""};
+	var sSet = {DateCompleted=now()};
+
+	if ( StructKeyExists(Arguments,"ChangeUUID") AND Len(Arguments.ChangeUUID) ) {
+		try {
+			// Set change set to completed
+			Variables.DataMgr.updateRecords(
 				tablename="audChangeSets",
 				data_set=sSet,
 				data_where=sWhere
-			)>
-			<!--- Record the primary key value for the change set if we got it and didn't have it before. --->
-			<cfif StructKeyExists(Arguments,"pkvalue") AND Len(Arguments.pkvalue)>
-				<cfset sWhere = {ChangeUUID=Arguments.ChangeUUID,pkvalue=""}>
-				<cfset sSet = {pkvalue=Arguments.pkvalue}>
-				<cfset Variables.DataMgr.updateRecords(
+			);
+			// Record the primary key value for the change set if we got it and didn't have it before.
+			if ( StructKeyExists(Arguments,"pkvalue") AND Len(Arguments.pkvalue) ) {
+				sWhere = {ChangeUUID=Arguments.ChangeUUID,pkvalue=""};
+				sSet = {pkvalue=Arguments.pkvalue};
+				Variables.DataMgr.updateRecords(
 					tablename="audChangeSets",
 					data_set=sSet,
 					data_where=sWhere
-				)>
-			</cfif>
-		<cfcatch>
-			<cfset catchError("logActionComplete",CFCATCH,Arguments)>
-		</cfcatch>
-		</cftry>
-	</cfif>
+				);
+			}
+		} catch (any e) {
+			catchError("logActionComplete",e,Arguments);
+		}
+	}
 
-</cffunction>
+}
 
-<cffunction name="getLoggedTables" access="public" returntype="any" output="no">
-	<cfreturn Variables.logged_tables>
-</cffunction>
+public function getLoggedTables() {
+	return Variables.logged_tables;
+}
+</cfscript>
 
 <cffunction name="isFieldChanged" access="public" returntype="any" output="no">
 	<cfargument name="tablename" type="string" required="yes">
@@ -360,31 +411,29 @@
 	<cfreturn ( qChanges.RecordCount GT 0 )>
 </cffunction>
 
-<cffunction name="logTable" access="public" returntype="any" output="no">
-	<cfargument name="tablename" type="string" required="yes">
+<cfscript>
+public function logTable(required string tablename) {
+	
+	Arguments.tablename = Trim(Arguments.tablename);
 
-	<cfset Arguments.tablename = Trim(Arguments.tablename)>
+	if ( Len(Arguments.tablename) AND NOT ListFindNoCase(Variables.logged_tables,Arguments.tablename) ) {
+		Variables.logged_tables = ListAppend(Variables.logged_tables,Arguments.tablename);
+	}
+}
 
-	<cfif Len(Arguments.tablename) AND NOT ListFindNoCase(Variables.logged_tables,Arguments.tablename)>
-		<cfset Variables.logged_tables = ListAppend(Variables.logged_tables,Arguments.tablename)>
-	</cfif>
+public function logTables(required string tables) {
+	var table = "";
 
-</cffunction>
+	if ( ArrayLen(Arguments) GT 1 ) {
+		Arguments.tables = ArrayToList(Arguments);
+	}
 
-<cffunction name="logTables" access="public" returntype="any" output="no">
-	<cfargument name="tables" type="string" required="yes">
+	for ( table in Arguments.tables ) {
+		logTable(table);
+	}
 
-	<cfset var table = "">
-
-	<cfif ArrayLen(Arguments) GT 1>
-		<cfset Arguments.tables = ArrayToList(Arguments)>
-	</cfif>
-
-	<cfloop list="#Arguments.tables#" index="table">
-		<cfset logTable(table)>
-	</cfloop>
-
-</cffunction>
+}
+</cfscript>
 
 <cffunction name="restoreRecord" access="public" returntype="any" output="no" hint="I restore the record to the given point in time.">
 	<cfargument name="tablename" type="string" required="yes">
@@ -433,50 +482,195 @@
 
 </cffunction>
 
-<cffunction name="setDataTrashcan" access="public" returntype="any" output="no">
-	<cfargument name="DataTrashcan" type="any" required="yes">
+<cffunction name="getUpdateSQLWithLogging" access="public" returntype="any" output="no">
+	<cfargument name="tablename" type="string" required="yes">
+	<cfargument name="set" type="struct" required="yes">
+	<cfargument name="where" type="any" required="yes">
+	<cfargument name="from" type="any" required="no">
+	<cfargument name="tablealias" type="string" required="no">
 
-	<cfset Variables.DataTrashcan = Arguments.DataTrashcan>
+	<cfscript>
+	var aSQL = 0;
+	var pkfield = Variables.DataMgr.getPrimaryKeyFieldName(Arguments.tablename);
+	var aFields = 0;
+	var aSetFields = [];
+	var key = "";
+	var sSet = 0;
+	var ii = 0;
+	var sql = Variables.DataMgr.readableSQL(getUpdateSQLFromParts(ArgumentCollection=Arguments));//ToDo: Need to get the SQL for the update
+
+	for ( key in Arguments.set ) {
+		ArrayAppend(aSetFields, {field=key, sql=Arguments.set[key]});
+	}
+
+	if ( NOT StructKeyHasLen(Arguments,"tablealias") ) {
+		Arguments.tablealias = Arguments.tablename;
+	}
+	</cfscript>
+	
+	<cf_DMSQL name="aSQL">
+			DECLARE @ChangeSetID INT;
+
+			DECLARE @CurrentChange TABLE (
+					ChangeSetID INT,
+					pkvalue varchar(250)
+			)
+
+			DECLARE @Changes TABLE (
+			<cfloop index="ii" from="1" to="#ArrayLen(aSetFields)#" step="1">
+				<cf_DMObject name="Old_#ii#"> varchar(max),
+				<cf_DMObject name="New_#ii#"> varchar(max),
+			</cfloop>
+				pkvalue varchar(250)
+			);
+
+			UPDATE	<cf_DMObject name="#Arguments.tablealias#">
+			SET		
+				<cfloop index="ii" from="1" to="#ArrayLen(aSetFields)#" step="1">
+					<cfset sSet = aSetFields[ii]>
+						<cf_DMObject name="#sSet.field#"> = <cf_DMSQL sql="#sSet.sql#" />
+					<cfif ii LT ArrayLen(aSetFields)>
+						,
+					</cfif>
+				</cfloop>
+		<cfif StructKeyExists(Arguments,"from")>
+			FROM	<cf_DMSQL sql="#Arguments.from#" />
+		<cfelseif Arguments.tablealias NEQ Arguments.tablename>
+			FROM	<cf_DMObject name="#Arguments.tablename#"> <cf_DMObject name="#Arguments.tablealias#" />
+		</cfif>
+			OUTPUT
+			<cfloop array="#aSetFields#" index="sSet">
+				CAST(DELETED.<cf_DMObject name="#sSet.field#"> AS VARCHAR(MAX)),
+				CAST(INSERTED.<cf_DMObject name="#sSet.field#"> AS VARCHAR(MAX)),
+			</cfloop>
+				INSERTED.<cf_DMObject name="#pkfield#">
+			INTO	@Changes
+			WHERE	<cf_DMSQL sql="#Arguments.where#" />
+			;
+
+
+			INSERT INTO audChangeSets (
+					tablename,
+					[Action],
+					DateLogged,
+					Who,
+					pkvalue,
+					[SQL],
+					DateCompleted
+			)
+			OUTPUT
+					INSERTED.ChangeSetID,
+					INSERTED.pkvalue
+			INTO    @CurrentChange(ChangeSetID, pkvalue)
+			SELECT
+					<cf_DMParam name="table" value="#Arguments.tablename#" cfsqltype="CF_SQL_VARCHAR"> AS tablename,
+					'update' AS [Action],
+					getDate() AS DateLogged,
+					<cf_DMParam name="Who" value="#getWho()#" cfsqltype="CF_SQL_VARCHAR"> AS Who,
+					c.pkvalue AS pkvalue,
+					<cf_DMParam name="sql" value="#sql#" cfsqltype="CF_SQL_VARCHAR"> AS [SQL],
+					getDate() AS DateCompleted
+			FROM    @Changes c
+			
+			;
+		<cfloop index="ii" from="1" to="#ArrayLen(aSetFields)#" step="1">
+			INSERT INTO audChanges (
+					ChangeSetID,
+					FieldName,
+					OldValue,
+					NewValue
+			)
+			SELECT	c.ChangeSetID,
+					<cf_DMParam value="#aSetFields[ii].field#" cfsqltype="CF_SQL_VARCHAR">,
+					ch.<cf_DMObject name="Old_#ii#">,
+					ch.<cf_DMObject name="New_#ii#">
+			FROM	@CurrentChange c
+			JOIN	@Changes ch
+				ON	c.pkvalue = ch.pkvalue
+			;
+		</cfloop>
+
+	</cf_DMSQL>
+
+	<cfreturn aSQL>
+</cffunction>
+
+<cffunction name="runUpdateWithLog" access="public" returntype="void" output="no">
+	<cfargument name="tablename" type="string" required="yes">
+	<cfargument name="set" type="struct" required="yes">
+	<cfargument name="where" type="string" required="yes">
+
+	<cf_DMQuery>
+		<cf_DMSQL sql="#getUpdateSQLWithLogging(ArgumentCollection=Arguments)#" />
+	</cf_DMQuery>
 
 </cffunction>
 
-<cffunction name="addRestore" access="public" returntype="string" output="no">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="pkvalue" type="string" required="yes">
-	<cfargument name="when" type="date" required="yes">
-	<cfargument name="fieldlist" type="string" required="no">
+<cfscript>
+public function setDataTrashcan(required DataTrashcan) {
+	
+	Variables.DataTrashcan = Arguments.DataTrashcan;
 
-	<cfset var sArgs = {
+}
+
+public string function addRestore(
+	required string tablename,
+	required string pkvalue,
+	required date when,
+	string fieldlist
+) {
+
+	var sArgs = {
 		"tablename"=Arguments.tablename,
 		"pkvalue"=Arguments.pkvalue,
 		"DateRestoredFrom"=Arguments.when
-	}>
-	<cfif StructKeyHasLen(Arguments,"fieldlist")>
-		<cfset sArgs["fieldlist"] = Arguments.fieldlist>
-	</cfif>
+	};
 
-	<cfreturn Variables.DataMgr.insertRecord(tablename="audRestores",data=sArgs)>
+	if ( StructKeyExists(Arguments,"fieldlist") ) {
+		sArgs["fieldlist"] = Arguments.fieldlist;
+	}
+
+	return Variables.DataMgr.insertRecord(tablename="audRestores",data=sArgs);
+}
+</cfscript>
+
+<cffunction name="getWhoNameSQL" access="package" returntype="any" output="no">
+	<cfargument name="FieldNameSQL" type="any" required="true">
+
+	<cfset var aSQL = 0>
+
+	<cf_DMSQL name="aSQL">
+		Who
+	</cf_DMSQL>
+
+	<cfreturn aSQL>
 </cffunction>
 
-<cffunction name="getCurrentData" access="private" returntype="query" output="no" hint="I get the current data for the given record.">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" required="yes">
+<cfscript>
+private query function getCurrentData(
+	required string tablename,
+	required struct data
+) hint="I get the current data for the given record." {
 
-	<cfset var sPKData = getPKData(Arguments.tablename,Arguments.data)>
-	<cfset var qRecord = Variables.DataMgr.getRecord(tablename=Arguments.tablename,data=sPKData,fieldlist=StructKeyList(Arguments.data))>
+	var sPKData = getPKData(Arguments.tablename,Arguments.data);
+	var qRecord = Variables.DataMgr.getRecord(
+		tablename=Arguments.tablename,
+		data=sPKData,
+		fieldlist=StructKeyList(Arguments.data)
+	);
 
-	<cfreturn qRecord>
-</cffunction>
+	return qRecord;
+}
 
-<cffunction name="getDataChangeArgs" access="private" returntype="any" output="no" hint="I get the data that has changed.">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" required="no">
-	<cfargument name="before" type="any" required="no">
-	<cfargument name="after" type="any" required="no">
+private function getDataChangeArgs(
+	required string tablename,
+	struct data,
+	any before,
+	any after
+) hint="I get the data that has changed." {
 
-	<cfset var sChangeArgs = {}>
+	var sChangeArgs = {};
 
-	<cfscript>
 	if ( StructKeyExists(Arguments,"data") AND StructCount(Arguments.data) ) {
 		sChangeArgs["data"] = Arguments.data;
 	}
@@ -527,24 +721,23 @@
 	if ( StructCount(sChangeArgs) ) {
 		sChangeArgs["tablename"] = Arguments.tablename;
 	}
-	</cfscript>
 
-	<cfreturn sChangeArgs>
-</cffunction>
+	return sChangeArgs;
+}
 
-<cffunction name="getDataChanges" access="private" returntype="any" output="no" hint="I get the data that has changed.">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" required="no">
-	<cfargument name="before" type="any" required="no">
-	<cfargument name="after" type="any" required="no">
+private function getDataChanges(
+	required string tablename,
+	struct data,
+	any before,
+	any after
+) hint="I get the data that has changed." {
 
-	<cfset var sArgs = getDataChangeArgs(ArgumentCollection=Arguments)>
-	<cfset var qRecord = 0>
-	<cfset var aResults = []>
-	<cfset var sChange = []>
-	<cfset var key = "">
+	var sArgs = getDataChangeArgs(ArgumentCollection=Arguments);
+	var qRecord = 0;
+	var aResults = [];
+	var sChange = [];
+	var key = "";
 
-	<cfscript>
 	if ( StructCount(sArgs) ) {
 		//Loop through the data fields provided (data changed in any other manner will have to be captured in the SQL passed in)
 		for ( key in sArgs["data"] ) {
@@ -572,50 +765,94 @@
 			}
 		}
 	}
-	</cfscript>
 
-	<cfreturn aResults>
-</cffunction>
+	return aResults;
+}
 
-<cffunction name="registerListener" access="private" returntype="void" output="no" hint="I register a listener with Observer to listen for services being loaded.">
-
-	<cfset Variables.Observer.registerListeners(
+private void function registerListener() hint="I register a listener with Observer to listen for services being loaded." {
+	Variables.Observer.registerListeners(
 		Listener = This,
 		ListenerName = "DataLogger",
 		ListenerMethod = "logAction",
 		EventNames = "DataMgr:afterInsert,DataMgr:afterDelete,DataMgr:afterUpdate"
-	)>
+	);
+}
 
-</cffunction>
+private function getPKData(
+	required string tablename,
+	required struct data
+) hint="I get the primary key value for the given data." {
 
-<cffunction name="getPKData" access="private" returntype="struct" output="no" hint="I get the primary key value for the given data.">
+	var sResult = {};
+	var pkfields = Variables.DataMgr.getPrimaryKeyFieldNames(Arguments.tablename);
+	var pkfield = "";
+
+	for ( pkfield in ListToArray(pkfields) ) {
+		sResult[pkfield] = Arguments.data[pkfield];
+	}
+
+	return sResult;
+}
+
+private string function getPKValue(
+	required string tablename,
+	required struct data
+) hint="I get the primary key value for the given data." {
+
+	var result = "";
+	var pkfields = Variables.DataMgr.getPrimaryKeyFieldNames(Arguments.tablename);
+	var pkfield = "";
+
+	for ( pkfield in ListToArray(pkfields) ) {
+		result = ListAppend(result,Arguments.data[pkfield]);
+	}
+
+	return result;
+}
+</cfscript>
+
+<cffunction name="getUpdateSQLFromParts" access="private" returntype="any" output="no" hint="I get the SQL for an update statement.">
 	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" required="yes">
+	<cfargument name="set" type="struct" required="yes">
+	<cfargument name="where" type="any" required="yes">
+	<cfargument name="from" type="any" required="no">
+	<cfargument name="tablealias" type="string" required="no">
 
-	<cfset var sResult = {}>
-	<cfset var pkfields = Variables.DataMgr.getPrimaryKeyFieldNames(arguments.tablename)>
-	<cfset var pkfield = "">
+	<cfscript>
+	var aSQL = 0;
+	var aSetFields = [];
+	var key = "";
+	var sSet = 0;
+	var ii = 0;
 
-	<cfloop list="#pkfields#" index="pkfield">
-		<cfset sResult[pkfield] = Arguments.data[pkfield]>
-	</cfloop>
+	for ( key in Arguments.set ) {
+		ArrayAppend(aSetFields, {field=key, sql=Arguments.set[key]});
+	}
 
-	<cfreturn sResult>
-</cffunction>
+	if ( NOT StructKeyHasLen(Arguments,"tablealias") ) {
+		Arguments.tablealias = Arguments.tablename;
+	}
+	</cfscript>
 
-<cffunction name="getPKValue" access="private" returntype="string" output="no" hint="I get the primary key value for the given data.">
-	<cfargument name="tablename" type="string" required="yes">
-	<cfargument name="data" type="struct" required="yes">
+	<cf_DMSQL name="aSQL">
+			UPDATE	<cf_DMObject name="#Arguments.tablealias#">
+			SET		
+				<cfloop index="ii" from="1" to="#ArrayLen(aSetFields)#" step="1">
+					<cfset sSet = aSetFields[ii]>
+						<cf_DMObject name="#sSet.field#"> = <cf_DMSQL sql="#sSet.sql#" />
+					<cfif ii LT ArrayLen(aSetFields)>
+						,
+					</cfif>
+				</cfloop>
+		<cfif StructKeyExists(Arguments,"from")>
+			FROM	<cf_DMSQL sql="#Arguments.from#" />
+		<cfelseif Arguments.tablealias NEQ Arguments.tablename>
+			FROM	<cf_DMObject name="#Arguments.tablename#"> <cf_DMObject name="#Arguments.tablealias#" />
+		</cfif>
+			WHERE	<cf_DMSQL sql="#Arguments.where#" />
+	</cf_DMSQL>
 
-	<cfset var result = "">
-	<cfset var pkfields = Variables.DataMgr.getPrimaryKeyFieldNames(arguments.tablename)>
-	<cfset var pkfield = "">
-
-	<cfloop list="#pkfields#" index="pkfield">
-		<cfset result = ListAppend(result,Arguments.data[pkfield])>
-	</cfloop>
-
-	<cfreturn result>
+	<cfreturn aSQL>
 </cffunction>
 
 <cffunction name="getDbXml" access="public" returntype="string" output="no" hint="I return the XML for the tables needed for SpamFilter.cfc to work.">

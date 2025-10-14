@@ -1,26 +1,25 @@
 <cfcomponent displayname="MS Word Filter" output="false" hint="I strip out the junk MS Word puts into HTML.">
-
-<cffunction name="init" access="public" returntype="any" output="no" hint="I instantiate and return this component.">
-	<cfreturn This>
-</cffunction>
-
-<cffunction name="filter" access="public" returntype="struct" output="no" hint="I run the filter on the given structure and return it.">
-	<cfargument name="data" type="struct" required="yes">
-	<cfargument name="maxpoints" type="numeric" default="0">
-	
-	<cfset var field = "">
-
-	<cfloop collection="#arguments.data#" item="field">
-		<!--- This means we'll test for MS Word text twice, but that will save an extra variable assignment. --->
-		<cfif isMSWordText(Arguments.data[field])>
-			<cfset Arguments.data[field] = cleanWord(Arguments.data[field])>
-		</cfif>
-	</cfloop>
-	
-	<cfreturn Arguments.data>
-</cffunction>
-
 <cfscript>
+public function init() {
+	return This;
+}
+
+public struct function filter(
+	required struct data,
+	numeric maxpoints="0"
+) {
+	var field = "";
+
+	for ( field in Arguments.data ) {
+		// This means we'll test for MS Word text twice, but that will save an extra variable assignment.
+		if ( isMSWordText(Arguments.data[field]) ) {
+			Arguments.data[field] = cleanWord(Arguments.data[field]);
+		}
+	}
+	
+	return Arguments.data;
+}
+
 function isMSWordText(string) {
 	//If it isn't a string, this isn't MS Word text.
 	if ( NOT isSimpleValue(Arguments.string) ) {

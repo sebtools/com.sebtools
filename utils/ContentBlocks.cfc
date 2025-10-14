@@ -1,309 +1,360 @@
 ﻿<cfcomponent extends="com.sebtools.Records" output="no">
+<cfscript>
+Variables.prefix = "util"
 
-<cfset variables.prefix = "util">
+public function init(
+	required Manager,
+	Settings
+) {
+	initInternal(ArgumentCollection=Arguments);
+	
+	Variables.sContentBocks = {};
+	
+	return This;
+}
 
-<cffunction name="init" access="public" returntype="any" output="no" hint="I initialize and return this component.">
-	<cfargument name="Manager" type="any" required="true">
-	<cfargument name="Settings" type="any" required="false">
+/**
+* I add the given content block if it doesn't yet exist.
+*/
+public function addComponent(
+	required ComponentRef,
+	required string ComponentName
+) {
 	
-	<cfset initInternal(argumentCollection=arguments)>
-	
-	<cfset Variables.sContentBocks = StructNew()>
-	
-	<cfreturn This>
-</cffunction>
+	Arguments.ComponentRef["ContentBlocks"] = This;
+	Arguments.ComponentRef["ContentBlocksCompName"] = Arguments.ComponentName;
+	Arguments.ComponentRef["addContentBlock"] = addContentBlockThis;
 
-<cffunction name="addComponent" access="public" returntype="any" output="no" hint="I add the given content block if it doesn't yet exist.">
-	<cfargument name="ComponentRef" type="any" required="true">
-	<cfargument name="ComponentName" type="string" required="true">
-	
-	<cfset Arguments.ComponentRef["ContentBlocks"] = This>
-	<cfset Arguments.ComponentRef["ContentBlocksCompName"] = Arguments.ComponentName>
-	<cfset Arguments.ComponentRef["addContentBlock"] = addContentBlockThis>
-	
-</cffunction>
+}
 
-<cffunction name="addContentBlockThis" access="public" returntype="any" output="no">
-	<cfset Arguments["Component"] = This.ContentBlocksCompName>
-	
-	<cfset This.ContentBlocks.addContentBlock(ArgumentCollection=Arguments)>
-	
-</cffunction>
+public function addContentBlockThis() {
 
-<cffunction name="addContentBlock" access="public" returntype="any" output="no" hint="I add the given content block if it doesn't yet exist.">
+	Arguments["Component"] = This.ContentBlocksCompName;
 	
-	<cfset var qCheck = 0>
-	<cfset var sCheck = {}>
+	This.ContentBlocks.addContentBlock(ArgumentCollection=Arguments);
+
+}
+
+/**
+* I add the given content block if it doesn't yet exist.
+*/
+public function addContentBlock() {
+	var qCheck = 0;
+	var sCheck = {};
 	
-	<!--- Friendlier argument names --->
-	<cfif StructKeyExists(Arguments,"Name") AND NOT StructKeyExists(Arguments,"ContentBlockName")>
-		<cfset Arguments.ContentBlockName = Arguments.Name>
-		<cfset StructDelete(Arguments,"Name")>
-	</cfif>
-	<cfif StructKeyExists(Arguments,"Text") AND NOT StructKeyExists(Arguments,"ContentBlockText")>
-		<cfset Arguments.ContentBlockText = Arguments.Text>
-		<cfset StructDelete(Arguments,"Text")>
-	</cfif>
-	<cfif StructKeyExists(Arguments,"html") AND NOT StructKeyExists(Arguments,"isHTML") AND isBoolean(Arguments.html)>
-		<cfset Arguments.isHTML = Arguments.html>
-		<cfset StructDelete(Arguments,"html")>
-	</cfif>
+	// Friendlier argument names
+	if ( StructKeyExists(Arguments,"Name") AND NOT StructKeyExists(Arguments,"ContentBlockName") ) {
+		Arguments.ContentBlockName = Arguments.Name;
+		StructDelete(Arguments,"Name");
+	}
+	if ( StructKeyExists(Arguments,"Text") AND NOT StructKeyExists(Arguments,"ContentBlockText") ) {
+		Arguments.ContentBlockText = Arguments.Text;
+		StructDelete(Arguments,"Text");
+	}
+	if ( StructKeyExists(Arguments,"html") AND NOT StructKeyExists(Arguments,"isHTML") AND isBoolean(Arguments.html) ) {
+		Arguments.isHTML = Arguments.html;
+		StructDelete(Arguments,"html");
+	}
 	
-	<cfif StructKeyExists(Arguments,"Component")>
-		<cfset qCheck = getContentBlocks(ContentBlockName=Arguments.ContentBlockName,ExcludeComponent=Arguments.Component,fieldlist="ContentBlockID,Component")>
+	if ( StructKeyExists(Arguments,"Component") ) {
+		qCheck = getContentBlocks(ContentBlockName=Arguments.ContentBlockName,ExcludeComponent=Arguments.Component,fieldlist="ContentBlockID,Component");
 		
-		<cfif qCheck.RecordCount AND Len(Variables.Manager.DataMgr.getDatasource())>
-			<cfset throwError(Message="A content block of this name is already being used by another component (""#qCheck.Component#"").",ErrorCode="NameConflict")>
-		</cfif>
-	</cfif>
+		if ( qCheck.RecordCount AND Len(Variables.Manager.DataMgr.getDatasource()) ) {
+			throwError(Message="A content block of this name is already being used by another component (""#qCheck.Component#"").",ErrorCode="NameConflict");
+		}
+	}
 	
-	<!---
+	/*
 	Only take action if this doesn't already exists for this component.
 	(we don't want to update because the admin may have change the text from the default)
-	--->
-	<cfset sCheck["ContentBlockName"] = Arguments.ContentBlockName>
-	<cfif StructKeyExists(Arguments,"Component")>
-		<cfset sCheck["Component"] = Arguments.Component>
-	</cfif>
-	<cfif NOT hasContentBlocks(ArgumentCollection=sCheck)>
-		<cfset Variables.sContentBocks[Arguments.ContentBlockName] = Arguments>
+	*/
+	sCheck["ContentBlockName"] = Arguments.ContentBlockName;
+	if ( StructKeyExists(Arguments,"Component") ) {
+		sCheck["Component"] = Arguments.Component;
+	}
+	if ( NOT hasContentBlocks(ArgumentCollection=sCheck) ) {
+		Variables.sContentBocks[Arguments.ContentBlockName] = Arguments;
 
-		<cfset saveContentBlock(ArgumentCollection=arguments)>
-	</cfif>
+		saveContentBlock(ArgumentCollection=arguments);
+	}
 	
-</cffunction>
+}
 
-<cffunction name="getContentBlockHTML" access="public" returntype="string" output="no" hint="I get the HTML for the requested content block.">
-	<cfargument name="ContentBlockName" type="string" required="yes">
-	<cfargument name="data" type="struct" required="no">
+/**
+* I get the HTML for the requested content block.
+*/
+public string function getContentBlockHTML(
+	required string ContentBlockName,
+	struct data
+) {
+	var qContentBlock = 0;
+	var result = "";
 	
-	<cfset var qContentBlock = 0>
-	<cfset var result = "">
-	
-	<cfif Len(Variables.Manager.DataMgr.getDatasource())>
-		<cfset qContentBlock = getContentBlocks(ContentBlockName=Arguments.ContentBlockName,fieldlist="ContentBlockID,isHTML,ContentBlockText")>
+	if ( Len(Variables.Manager.DataMgr.getDatasource()) ) {
+		qContentBlock = getContentBlocks(ContentBlockName=Arguments.ContentBlockName,fieldlist="ContentBlockID,isHTML,ContentBlockText");
 		
-		<cfif qContentBlock.RecordCount>
-			<cfset result = qContentBlock.ContentBlockText>
-			<cfif NOT ( qContentBlock.isHTML IS true )>
-				<cfset result = ParagraphFormatFull(result)>
-			</cfif>
-		</cfif>
-	<cfelseif StructKeyExists(Variables.sContentBocks,Arguments.ContentBlockName)>
-		<cfset result = Variables.sContentBocks[Arguments.ContentBlockName].ContentBlockText>
-		<cfif NOT ( StructKeyExists(Variables.sContentBocks[Arguments.ContentBlockName],"isHTML") AND Variables.sContentBocks[Arguments.ContentBlockName].isHTML IS true )>
-			<cfset result = ParagraphFormatFull(result)>
-		</cfif>
-	</cfif>
+		if ( qContentBlock.RecordCount ) {
+			result = qContentBlock.ContentBlockText;
+			if ( NOT ( qContentBlock.isHTML IS true ) ) {
+				result = ParagraphFormatFull(result);
+			}
+		}
+	} else if ( StructKeyExists(Variables.sContentBocks,Arguments.ContentBlockName) ) {
+		result = Variables.sContentBocks[Arguments.ContentBlockName].ContentBlockText;
+		if (
+			NOT (
+				StructKeyExists(Variables.sContentBocks[Arguments.ContentBlockName],"isHTML")
+				AND
+				Variables.sContentBocks[Arguments.ContentBlockName].isHTML IS true
+			)
+		) {
+			result = ParagraphFormatFull(result);
+		}
+	}
 
-	<cfif NOT StructKeyExists(Arguments,"data")>
-		<cfset Arguments.data = StructNew()>
-	</cfif>
+	if ( NOT StructKeyExists(Arguments,"data") ) {
+		Arguments.data = {};
+	}
 	
-	<cfset result = populate(result,Arguments.data)>
+	result = populate(result,Arguments.data);
 	
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="getContentBlockID" access="public" returntype="string" output="no" hint="I get the ID for the requested content block.">
-	<cfargument name="ContentBlockName" type="string" required="yes">
+/**
+* I get the ID for the requested content block.
+*/
+public string function getContentBlockID(required string ContentBlockName) {
+	var qContentBlock = getContentBlocks(ContentBlockName=Arguments.ContentBlockName,fieldlist="ContentBlockID");
+	var result = 0;
 	
-	<cfset var qContentBlock = getContentBlocks(ContentBlockName=Arguments.ContentBlockName,fieldlist="ContentBlockID")>
-	<cfset var result = 0>
+	if ( qContentBlock.RecordCount ) {
+		result = qContentBlock.ContentBlockID;
+	}
 	
-	<cfif qContentBlock.RecordCount>
-		<cfset result = qContentBlock.ContentBlockID>
-	</cfif>
-	
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="getContentBlockText" access="public" returntype="string" output="no" hint="I get the TEXT for the requested content block.">
-	<cfargument name="ContentBlockName" type="string" required="yes">
-	<cfargument name="data" type="struct" required="no">
+/**
+* I get the TEXT for the requested content block.
+*/
+public string function getContentBlockText(
+	required string ContentBlockName,
+	struct data
+) {
+	var qContentBlock = 0;
+	var result = "";
 	
-	<cfset var qContentBlock = 0>
-	<cfset var result = "">
+	if ( Len(Variables.Manager.DataMgr.getDatasource()) ) {
+		qContentBlock = getContentBlocks(ContentBlockName=Arguments.ContentBlockName,fieldlist="ContentBlockID,isHTML,ContentBlockText");
+		if ( qContentBlock.RecordCount ) {
+			result = qContentBlock.ContentBlockText;
+			if ( qContentBlock.isHTML IS true ) {
+				result = HTMLEditFormat(result);
+			}
+		}
+	} else if ( StructKeyExists(Variables.sContentBocks,Arguments.ContentBlockName) ) {
+		result = Variables.sContentBocks[Arguments.ContentBlockName].ContentBlockText;
+		if (
+			StructKeyExists(Variables.sContentBocks[Arguments.ContentBlockName],"isHTML")
+			AND
+			Variables.sContentBocks[Arguments.ContentBlockName].isHTML IS true
+		) {
+			result = ParagraphFormatFull(result);
+		}
+	}
 	
-	<cfif Len(Variables.Manager.DataMgr.getDatasource())>
-		<cfset qContentBlock = getContentBlocks(ContentBlockName=Arguments.ContentBlockName,fieldlist="ContentBlockID,isHTML,ContentBlockText")>
-		<cfif qContentBlock.RecordCount>
-			<cfset result = qContentBlock.ContentBlockText>
-			<cfif qContentBlock.isHTML IS true>
-				<cfset result = HTMLEditFormat(result)>
-			</cfif>
-		</cfif>
-	<cfelseif StructKeyExists(Variables.sContentBocks,Arguments.ContentBlockName)>
-		<cfset result = Variables.sContentBocks[Arguments.ContentBlockName].ContentBlockText>
-		<cfif StructKeyExists(Variables.sContentBocks[Arguments.ContentBlockName],"isHTML") AND Variables.sContentBocks[Arguments.ContentBlockName].isHTML IS true>
-			<cfset result = ParagraphFormatFull(result)>
-		</cfif>
-	</cfif>
+	if ( NOT StructKeyExists(Arguments,"data") ) {
+		Arguments.data = {};
+	}
 	
-	<cfif NOT StructKeyExists(Arguments,"data")>
-		<cfset Arguments.data = StructNew()>
-	</cfif>
+	result = populate(result,Arguments.data);
 	
-	<cfset result = populate(result,Arguments.data)>
-	
-	<cfreturn result>
-</cffunction>
+	return result;
+}
 
-<cffunction name="getFieldsArray" access="public" returntype="array" output="no">
+public array function getFieldsArray() {
+	var qContentBlocks = 0;
+	var sContentBlock = 0;
+	var sResult = 0;
+	var aResults = 0;
 	
-	<cfset var qContentBlocks = 0>
-	<cfset var aResults = 0>
-	
-	<cfif StructKeyExists(Arguments,"ContentBlockID") AND Len(Arguments.ContentBlockID) AND NOT isNumeric(Arguments.ContentBlockID)>
-		<cfset qContentBlocks = getContentBlocks(ContentBlockNames=Arguments.ContentBlockID,fieldlist="ContentBlockID,ContentBlockName,isHTML,ContentBlockText")>
-		<cfset aResults = ArrayNew(1)>
+	if (
+		StructKeyExists(Arguments,"ContentBlockID")
+		AND
+		Len(Arguments.ContentBlockID)
+		AND
+		NOT isNumeric(Arguments.ContentBlockID)
+	) {
+		qContentBlocks = getContentBlocks(
+			ContentBlockNames=Arguments.ContentBlockID,
+			fieldlist="ContentBlockID,ContentBlockName,isHTML,ContentBlockText"
+		);
+		aResults = [];
 		
-		<cfoutput query="qContentBlocks">
-			<cfset ArrayAppend(aResults,StructNew())>
-			<cfset aResults[ArrayLen(aResults)]["name"] = qContentBlocks.ContentBlockID[CurrentRow]>
-			<cfif isHTML IS true>
-				<cfset aResults[ArrayLen(aResults)]["type"] = "FCKeditor">
-			<cfelse>
-				<cfset aResults[ArrayLen(aResults)]["type"] = "textarea">
-			</cfif>
-			<cfset aResults[ArrayLen(aResults)]["label"] = ContentBlockName>
-			<cfset aResults[ArrayLen(aResults)]["defaultValue"] = ContentBlockText>
-		</cfoutput>
-		<!---<cfdump var="#aResults#">
-		<cfdump var="#Super.getFieldsArray(ArgumentCollection=Arguments)#">
-		<cfabort>--->
-		<cfreturn aResults>
-	<cfelse>
-		<cfreturn Super.getFieldsArray(ArgumentCollection=Arguments)>
-	</cfif>
-</cffunction>
+		for ( sContentBlock in qContentBlocks ) {
+			sResult = {};
+			sResult["name"] = sContentBlock["ContentBlockID"];
+			if ( isHTML IS true ) {
+				sResult["type"] = "FCKeditor";
+			} else {
+				sResult["type"] = "textarea";
+			}
+			sResult["label"] = sContentBlock["ContentBlockName"];
+			sResult["defaultValue"] = sContentBlock["ContentBlockText"];
+			ArrayAppend(aResults,sResult);
+		}
 
-<cffunction name="getFieldsStruct" access="public" returntype="struct" output="no">
-	
-	<cfset var sFields = StructNew()>
-	<cfset var aFields = 0>
-	<cfset var ii = 0>
-	
-	<cfset aFields = getFieldsArray(argumentCollection=arguments)>
-	
-	<cfloop index="ii" from="1" to="#ArrayLen(aFields)#" step="1">
-		<cfif StructKeyExists(aFields[ii],"name")>
-			<cfset sFields[aFields[ii]["name"]] = aFields[ii]>
-		</cfif>
-	</cfloop>
-	
-	<cfreturn sFields>
-</cffunction>
+		return aResults;
+	} else {
+		return Super.getFieldsArray(ArgumentCollection=Arguments);
+	}
+}
 
-<cffunction name="populate" access="public" returntype="any" output="no" hint="I populate the values within the string from the given structure (and from Settings, if available).">
-	<cfargument name="string" type="string" required="true">
-	<cfargument name="data" type="struct" required="false">
+public struct function getFieldsStruct() {
+	var sFields = {};
+	var aFields = 0;
+	var sField = 0;
 	
-	<cfset var result = Arguments.string>
-	<cfset var key = "">
+	aFields = getFieldsArray(ArgumentCollection=Arguments);
+	
+	for ( sField in aFields ) {
+		if ( StructKeyExists(sField,"name") ) {
+			sFields[sField["name"]] = sField;
+		}
+	}
+	
+	return sFields;
+}
 
-	<cfif Len(Trim(result))>
-		<cfif StructKeyExists(Arguments,"data") AND StructCount(Arguments.data) AND ReFindNoCase("\[.*\]",result)>
-			<cfloop collection="#Arguments.data#" item="key">
-				<cfif StructKeyExists(Arguments.data,key) AND isSimpleValue(Arguments.data[key])>
-					<cfset result = ReplaceNoCase(result,"[#key#]",Arguments.data[key])>
-				</cfif>
-			</cfloop>
-		</cfif>
+/**
+* I populate the values within the string from the given structure (and from Settings, if available).
+*/
+public function populate(
+	required string string,
+	struct data
+) {
+	var result = Arguments.string;
+	var key = "";
 
-		<cfif Len(result) AND StructKeyExists(Variables,"Settings") AND StructKeyExists(Variables.Settings,"populate")>
-			<cfset result = Variables.Settings.populate(result)>
-		</cfif>
-	</cfif>
-	
-	<cfreturn result>
-</cffunction>
+	if ( Len(Trim(result)) ) {
+		if (
+			StructKeyExists(Arguments,"data")
+			AND
+			StructCount(Arguments.data)
+			AND
+			ReFindNoCase("\[.*\]",result)
+		) {
+			for ( key in Arguments.data ) {
+				if ( StructKeyExists(Arguments.data,key) AND isSimpleValue(Arguments.data[key]) ) {
+					result = ReplaceNoCase(result,"[#key#]",Arguments.data[key]);
+				}
+			}
+		}
 
-<cffunction name="saveContentBlock" access="public" returntype="string" output="no">
+		if (
+			Len(result)
+			AND
+			StructKeyExists(Variables,"Settings")
+			AND
+			StructKeyExists(Variables.Settings,"populate")
+		) {
+			result = Variables.Settings.populate(result);
+		}
+	}
 	
-	<cfset var qContentBlocks = 0>
-	
-	<cfif isMultiEdit(ArgumentCollection=Arguments)>
-		<cfset qContentBlocks = getContentBlocks(fieldlist="ContentBlockID")>
-		<cfoutput query="qContentBlocks">
-			<cfif StructKeyExists(Arguments,"a#qContentBlocks['ContentBlockID'][CurrentRow]#")>
-				<cfset saveRecord(ContentBlockID=qContentBlocks['ContentBlockID'][CurrentRow],ContentBlockText=Arguments["a#qContentBlocks['ContentBlockID'][CurrentRow]#"])>
-			</cfif>
-		</cfoutput>
-	<cfelse>
-		<cfreturn saveRecord(ArgumentCollection=Arguments)>
-	</cfif>
-	
-</cffunction>
+	return result;
+}
 
-<cffunction name="validateContentBlock" access="public" returntype="struct" output="no">
+public string function saveContentBlock() {
+	var qContentBlocks = 0;
+	var sContentBlock = 0;
 	
-	<cfset Arguments = validateBrief(ArgumentCollection=Arguments)>
-	
-	<cfreturn Arguments>
-</cffunction>
+	if ( isMultiEdit(ArgumentCollection=Arguments) ) {
+		qContentBlocks = getContentBlocks(fieldlist="ContentBlockID");
+		for ( sContentBlock in qContentBlocks ) {
+			if ( StructKeyExists(Arguments,"a#sContentBlock['ContentBlockID']#") ) {
+				saveRecord(
+					ContentBlockID=sContentBlock['ContentBlockID'],
+					ContentBlockText=Arguments["a#sContentBlock['ContentBlockID']#"]
+				);
+			}
+		}
+	} else {
+		return saveRecord(ArgumentCollection=Arguments);
+	}
 
-<cffunction name="isMultiEdit" access="private" returntype="boolean" output="no">
-	
-	<cfset var qContentBlocks = getContentBlocks(fieldlist="ContentBlockID")>
-	<cfset var result = false>
-	
-	<cfoutput query="qContentBlocks">
-		<cfif StructKeyExists(Arguments,"a#qContentBlocks['ContentBlockID'][CurrentRow]#")>
-			<cfreturn true>
-		</cfif>
-	</cfoutput>
-	
-	<cfreturn false>
-</cffunction>
+}
 
-<cffunction name="validateBrief" access="private" returntype="struct" output="no">
-	
-	<cfif StructKeyExists(Arguments,"ContentBlockText")>
-		<cfset Arguments.ContentBlockBrief = Abbreviate(Arguments.ContentBlockText,150)>
-	</cfif>
-	
-	<cfreturn Arguments>
-</cffunction>
+public struct function validateContentBlock() {
 
-<cffunction name="Abbreviate" access="public" returntype="string" output="no">
-	<cfargument name="string" type="string" required="true">
-	<cfargument name="length" type="string" required="true">
+	Arguments = validateBrief(ArgumentCollection=Arguments);
+
+	return Arguments;
+}
+
+private boolean function isMultiEdit() {
+	var qContentBlocks = getContentBlocks(fieldlist="ContentBlockID");
+	var sContentBlock = 0;
+	var result = false;
 	
-	<cfset var result = Arguments.string>
-	<cfset var addEllipses = false>
+	for ( sContentBlock in qContentBlocks ) {
+		if ( StructKeyExists(Arguments,"a#sContentBlock['ContentBlockID']#") ) {
+			return true;
+		}
+	}
 	
-	<!--- Remove all contentless tags at the front and end of the string --->
-	<cfset result = ReReplaceNoCase(result,"^.*?>","")>
-	<cfset result = ReReplaceNoCase(result,"^(<.*?>\s*)*","")>
-	<cfset result = ReReplaceNoCase(result, "(</[^>]*>|\s)*$","")>
+	return false;
+}
+
+private struct function validateBrief() {
+
+	if ( StructKeyExists(Arguments,"ContentBlockText") ) {
+		Arguments.ContentBlockBrief = Abbreviate(Arguments.ContentBlockText,150);
+	}
 	
-	<cfif FindNoCase("</p>",result,1) GT 1>
-		<cfset result = Left(result,FindNoCase("</p>",result,1)-1)>
-		<cfset addEllipses = true>
-	</cfif>
-	<cfif FindNoCase("<br",result,1) GT 1>
-		<cfset result = Left(result,FindNoCase("<br",result,1)-1)>
-		<cfset addEllipses = true>
-	</cfif>
+	return Arguments;
+}
+
+public string function Abbreviate(
+	required string string,
+	required string length
+) {
+	var result = Arguments.string;
+	var addEllipses = false;
 	
-	<cfset result = Left(result,Arguments.length+1)>
-	<cfif Len(Trim(result)) GT Arguments.length>
-		<cfset result = Left(result,Arguments.length-3)>
-		<cfset result = ReReplaceNoCase(result,"[^\s]*$","")>
-		<cfset addEllipses = true>
-	</cfif>
+	// Remove all contentless tags at the front and end of the string
+	result = ReReplaceNoCase(result,"^.*?>","");
+	result = ReReplaceNoCase(result,"^(<.*?>\s*)*","");
+	result = ReReplaceNoCase(result, "(</[^>]*>|\s)*$","");
 	
-	<cfset result = Trim(result)>
-	<cfset result = stripHTML(result)>
+	if ( FindNoCase("</p>",result,1) GT 1 ) {
+		result = Left(result,FindNoCase("</p>",result,1)-1);
+		addEllipses = true;
+	}
+	if ( FindNoCase("<br",result,1) GT 1 ) {
+		result = Left(result,FindNoCase("<br",result,1)-1);
+		addEllipses = true;
+	}
 	
-	<cfif addEllipses>
-		<cfset result = "#Trim(result)#...">
-		<cfset result = ReReplaceNoCase(result,"\.{4,}$","...")>
-	</cfif>
+	result = Left(result,Arguments.length+1);
+	if ( Len(Trim(result)) GT Arguments.length ) {
+		result = Left(result,Arguments.length-3);
+		result = ReReplaceNoCase(result,"[^\s]*$","");
+		addEllipses = true;
+	}
 	
-	<cfreturn result>
-</cffunction>
+	result = Trim(result);
+	result = stripHTML(result);
+	
+	if ( addEllipses ) {
+		result = "#Trim(result)#...";
+		result = ReReplaceNoCase(result,"\.{4,}$","...");
+	}
+	
+	return result;
+}
+</cfscript>
 
 <cffunction name="xml" access="public" output="yes">
 <tables prefix="#variables.prefix#">
@@ -319,7 +370,7 @@
 <cfscript>
 /**
  * Removes HTML from the string.
- * v2 - Mod by Steve Bryant to find trailing, half done HTML.        
+ * v2 mod by Steve Bryant to find trailing, half done HTML.        
  * v4 mod by James Moberg - empties out script/style blocks
  * 
  * @param string      String to be modified. (Required)
@@ -328,32 +379,32 @@
  * @version 4, October 4, 2010 
  */
 function stripHTML(str) {
-    str = reReplaceNoCase(str, "<*style.*?>(.*?)</style>","","all");
-    str = reReplaceNoCase(str, "<*script.*?>(.*?)</script>","","all");
+	str = reReplaceNoCase(str, "<*style.*?>(.*?)</style>","","all");
+	str = reReplaceNoCase(str, "<*script.*?>(.*?)</script>","","all");
 
-    str = reReplaceNoCase(str, "<.*?>","","all");
-    //get partial html in front
-    str = reReplaceNoCase(str, "^.*?>","");
-    //get partial html at end
-    str = reReplaceNoCase(str, "<.*$","");
-    return trim(str);
+	str = reReplaceNoCase(str, "<.*?>","","all");
+	//get partial html in front
+	str = reReplaceNoCase(str, "^.*?>","");
+	//get partial html at end
+	str = reReplaceNoCase(str, "<.*$","");
+	return trim(str);
 }
 
 function ParagraphFormatFull(str) {
-    //first make Windows style into Unix style
-    str = replace(str,chr(13)&chr(10),chr(10),"ALL");
-    //now make Macintosh style into Unix style
-    str = replace(str,chr(13),chr(10),"ALL");
-    //now fix tabs
-    str = replace(str,chr(9),"&nbsp;&nbsp;&nbsp;","ALL");
-    //now return the text formatted in HTML
-    str = replace(str,chr(10),"<br />","ALL");
-    
-    str = replace(str,"<br /><br />","</p><p>","ALL");
-    
-    str = "<p>#str#</p>";
-    
-    return str;
+	//first make Windows style into Unix style
+	str = replace(str,chr(13)&chr(10),chr(10),"ALL");
+	//now make Macintosh style into Unix style
+	str = replace(str,chr(13),chr(10),"ALL");
+	//now fix tabs
+	str = replace(str,chr(9),"&nbsp;&nbsp;&nbsp;","ALL");
+	//now return the text formatted in HTML
+	str = replace(str,chr(10),"<br />","ALL");
+
+	str = replace(str,"<br /><br />","</p><p>","ALL");
+
+	str = "<p>#str#</p>";
+
+	return str;
 }
 </cfscript>
 </cfcomponent>

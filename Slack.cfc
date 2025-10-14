@@ -1,18 +1,21 @@
 <cfcomponent displayname="Slack" hint="Slack Messaging Integration" output="false">
-	
-<cffunction name="init" access="public" returntype="any" output="no">
-	<cfargument name="WebHookURL" type="string" required="yes">
-	<cfargument name="isProduction" type="boolean" default="true">
+<cfscript>
+public function init(
+	required string WebHookURL,
+	boolean isProduction="true"
+) {
 
-	<cfset variables.WebHookURL = arguments.WebHookURL>
-	<cfset variables.isProduction = arguments.isProduction>
+	Variables.WebHookURL = Arguments.WebHookURL;
+	Variables.isProduction = Arguments.isProduction;
 
-	<cfreturn This>
-</cffunction>
+	return This;
+}
 
-<cffunction name="getWebHookURL" access="public" returntype="string" output="no">
-	<cfreturn variables.WebHookURL>
-</cffunction>
+public string function getWebHookURL() {
+
+	return variables.WebHookURL;
+}
+</cfscript>
 
 <cffunction name="sendNotice" access="public" returntype="void" output="no">
 	<cfargument name="Message" type="string" required="yes">

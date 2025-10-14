@@ -1,74 +1,89 @@
-<!--- 1.0 Beta Build 04 --->
-<!--- Last Updated: 2007-05-27 --->
 <!--- Created by Steve Bryant 2007-01-26 --->
 <cfcomponent displayname="PhoneFormatter" hint="I ensure that phone numbers are in the correct format.">
+<cfscript>
+/*
+* I initialize and return this component.
+*/
+public function init(
+	required DataMgr,
+	required Format,
+	string DefaultAreaCode="000"
+) {
 
-<cffunction name="init" access="public" returntype="any" output="no" hint="I initialize and return this component.">
-	<cfargument name="DataMgr" type="any" required="yes">
-	<cfargument name="Format" type="any" required="yes">
-	<cfargument name="DefaultAreaCode" type="string" default="000">
+	Variables.DataMgr = Arguments.DataMgr;
+	Variables.Format = Arguments.Format;
+	Variables.DefaultAreaCode = Arguments.DefaultAreaCode;
 
-	<cfset variables.DataMgr = arguments.DataMgr>
-	<cfset variables.Format = arguments.Format>
-	<cfset variables.DefaultAreaCode = arguments.DefaultAreaCode>
+	if ( Len(variables.DefaultAreaCode) NEQ 3 ) {
+		Variables.DefaultAreaCode = "000";
+	}
 
-	<cfif Len(variables.DefaultAreaCode) NEQ 3>
-		<cfset variables.DefaultAreaCode = "000">
-	</cfif>
+	Variables.phonechars = "()- ext./\";
+	Variables.badchars = getBadChars();
+	Variables.goodchars = getGoodChars();
 
-	<cfset variables.phonechars = "()- ext./\">
-	<cfset variables.badchars = getBadChars()>
-	<cfset variables.goodchars = getGoodChars()>
+	Variables.datasource = variables.DataMgr.getDatasource();
 
-	<cfset variables.datasource = variables.DataMgr.getDatasource()>
+	return This;
+}
 
-	<cfreturn this>
-</cffunction>
+/*
+* I return the given phone number in the correct format.
+* @phonenum The phone number to be formatted.
+* @areacodeThe area code to use if none is present.
+*/
+public string function fixPhoneNumber(
+	required string phonenum,
+	string areacode="#variables.DefaultAreaCode#"
+) {
+	var digits = ReReplace(ListFirst(Arguments.phonenum,"x"),"[^[:digit:]]","","all");
+	var result = "";
 
-<cffunction name="fixPhoneNumber" access="public" returntype="string" output="no" hint="I return the given phone number in the correct format.">
-	<cfargument name="phonenum" type="string" required="yes" hint="The phone number to be formatted.">
-	<cfargument name="areacode" type="string" default="#variables.DefaultAreaCode#" hint="The area code to use if none is present">
+	if ( Len(Arguments.areacode) NEQ 3 ) {
+		Arguments.areacode = Variables.DefaultAreaCode;
+	}
 
-	<cfset var digits = ReReplace(ListFirst(arguments.phonenum,"x"),"[^[:digit:]]","","all")>
-	<cfset var result = "">
+	if ( Len(digits) ) {
+		if ( Len(digits) EQ 7 OR ( Len(digits) GT 7 AND Len(digits) LT 10 ) ) {
+			result = PhoneFormat("#Arguments.areacode##Arguments.phonenum#",Variables.Format);
+		} else { 
+			result = PhoneFormat(Arguments.phonenum,Variables.Format);
+		}
+	}
 
-	<cfif Len(arguments.areacode) NEQ 3>
-		<cfset arguments.areacode = variables.DefaultAreaCode>
-	</cfif>
+	return result;
+}
 
-	<cfif Len(digits)>
-		<cfif Len(digits) EQ 7 OR ( Len(digits) GT 7 AND Len(digits) LT 10 )>
-			<cfset result = PhoneFormat("#arguments.areacode##arguments.phonenum#",variables.Format)>
-		<cfelse>
-			<cfset result = PhoneFormat(arguments.phonenum,variables.Format)>
-		</cfif>
-	</cfif>
+/*
+* I fix all of the phone numbers in the given field of the given table.
+* @table The table to correct
+* @phonefield The field holding the phone number (must not have other information).
+* @pkfields The primary key field of the table (must be exactly one to work).
+*/
+public void function fixPhoneNumbers(
+	required string table,
+	required string phonefield,
+	required string pkfields
+) {
+	var qPhoneNumbers = getProblemNumbers(Arguments.table,Arguments.pkfields,Arguments.phonefield);
+	var pkfield = "";
+	var data = 0;
+	var sPhone = 0;
 
-	<cfreturn result>
-</cffunction>
+	for ( sPhone in qPhoneNumbers ) {
+		if ( sPhone.PhoneNumber NEQ sPhone.PhoneNumber_Formatted ) {
+			data = {};
+			for ( pkfield in ListToArray(Arguments.pkfields) ) {
+				data[pkfield] = sPhone[pkfield];
+			}
+			data[Arguments.phonefield] = sPhone.PhoneNumber_Formatted;
 
-<cffunction name="fixPhoneNumbers" access="public" returntype="void" output="no" hint="I fix all of the phone numbers in the given field of the given table.">
-	<cfargument name="table" type="string" required="yes" hint="The table to correct">
-	<cfargument name="phonefield" type="string" required="yes" hint="The field holding the phone number (must not have other information).">
-	<cfargument name="pkfields" type="string" required="yes" hint="The primary key field of the table (must be exactly one to work).">
+			Variables.DataMgr.updateRecord(Arguments.table,data);
+		}
+	}
 
-	<cfset var qPhoneNumbers = getProblemNumbers(arguments.table,arguments.pkfields,arguments.phonefield)>
-	<cfset var pkfield = "">
-	<cfset var data = 0>
-
-	<cfloop query="qPhoneNumbers">
-		<cfif PhoneNumber NEQ PhoneNumber_Formatted>
-			<cfset data = StructNew()>
-			<cfloop index="pkfield" list="#arguments.pkfields#">
-				<cfset data[pkfield] = qPhoneNumbers['ID'][CurrentRow]>
-			</cfloop>
-			<cfset data[arguments.phonefield] = PhoneNumber_Formatted>
-
-			<cfset variables.DataMgr.updateRecord(arguments.table,data)>
-		</cfif>
-	</cfloop>
-
-</cffunction>
+}
+</cfscript>
 
 <cffunction name="getProblemNumbers" access="public" returntype="query" output="no" hint="I get all of the phone numbers from the given table that are not formatted correctly (as well as the correct formatting for that phone number).">
 	<cfargument name="table" type="string" required="yes" hint="The table to correct">
@@ -84,6 +99,9 @@
 	<cftry>
 		<cfquery name="qPhoneNumbers" datasource="#variables.datasource#">
 		SELECT	#sqlIdField# AS ID, #sqlPhoneField# AS PhoneNumber, '' AS PhoneNumber_Formatted
+				<cfif sqlIdField NEQ "ID">
+					, #sqlIdField#
+				</cfif>
 		FROM	#sqlTable#
 		WHERE	(
 						#sqlPhoneField# IS NOT NULL
@@ -110,47 +128,53 @@
 	<cfreturn qPhoneNumbers>
 </cffunction>
 
-<cffunction name="getBadChars" access="private" returntype="string" output="no" hint="I return a list of all of the unacceptable characters for phone numbers.">
-	<cfargument name="Format" type="string" default="#variables.Format#">
-
-	<cfset var i = 0>
-	<cfset var thischar = "">
-	<cfset var result = "">
-
-	<!--- Loop through all phone characters --->
-	<cfloop index="i" from="1" to="#Len(variables.phonechars)#" step="1">
-		<!--- Get the character --->
-		<cfset thisChar = Mid(variables.phonechars,i,1)>
-		<!--- If the character isn't in the format, add it to the list of unacceptable characters --->
-		<cfif NOT FindNoCase(thisChar, arguments.Format)>
-			<cfset result = ListAppend(result,thisChar)>
-		</cfif>
-	</cfloop>
-
-	<cfreturn result>
-</cffunction>
-
-<cffunction name="getGoodChars" access="private" returntype="string" output="no" hint="I return a list of all of the acceptable non-numeric characters for phone numbers.">
-	<cfargument name="Format" type="string" default="#variables.Format#">
-
-	<cfset var i = 0>
-	<cfset var thischar = "">
-	<cfset var result = "">
-
-	<!--- Loop through the format --->
-	<cfloop index="i" from="1" to="#Len(arguments.Format)#" step="1">
-		<!--- Get the character --->
-		<cfset thisChar = Mid(arguments.Format,i,1)>
-		<!--- If the character isn't numeric and isn't already in the list of good characters, add it to the list --->
-		<cfif NOT isNumeric(thisChar) AND NOT ListFindNoCase(result,thisChar)>
-			<cfset result = ListAppend(result,thisChar)>
-		</cfif>
-	</cfloop>
-
-	<cfreturn result>
-</cffunction>
-
 <cfscript>
+/*
+* I return a list of all of the unacceptable characters for phone numbers.
+*/
+private string function getBadChars(
+	string Format="#Variables.Format#"
+) {
+	var ii = 0;
+	var thischar = "";
+	var result = "";
+
+	// Loop through all phone characters
+	for ( ii=1; ii LTE Len(variables.phonechars); ii++ ) {
+		// Get the character
+		thisChar = Mid(variables.phonechars,ii,1);
+		// If the character isn't in the format, add it to the list of unacceptable characters
+		if ( NOT FindNoCase(thisChar, arguments.Format) ) {
+			result = ListAppend(result,thisChar);
+		}
+	}
+
+	return result;
+}
+
+/*
+* I return a list of all of the acceptable non-numeric characters for phone numbers.
+*/
+private string function getGoodChars(
+	string Format="#Variables.Format#"
+) {
+	var ii = 0;
+	var thischar = "";
+	var result = "";
+
+	// Loop through the format
+	for ( ii=1; ii LTE Len(Arguments.Format); ii++ ) {
+		// Get the character
+		thisChar = Mid(arguments.Format,ii,1);
+		// If the character isn't numeric and isn't already in the list of good characters, add it to the list
+		if ( NOT isNumeric(thisChar) AND NOT ListFindNoCase(result,thisChar) ) {
+			result = ListAppend(result,thisChar);
+		}
+	}
+
+	return result;
+}
+
 function ParsePhoneNumber(Phone) {
 	var Phone_Orig = Phone;
 	var sPhone = {};
@@ -177,7 +201,7 @@ function ParsePhoneNumber(Phone) {
 function PhoneFormat (input, mask) {
 	var curPosition = "";
 	var newFormat = "";
-	var i = 0;//counter
+	var ii = 0;//counter
 	var area = "   ";
 	var numsonly = reReplace(input,"[^[:digit:]]","","all");//numbers extraced from input
 	var digits = 0;//number of digits in mask
@@ -192,8 +216,8 @@ function PhoneFormat (input, mask) {
 	}
 
 	//count number of numbers
-	for (i=1; i lte len(trim(mask)); i=i+1) {
-		curPosition = mid(mask,i,1);
+	for (ii=1; ii lte len(trim(mask)); ii=ii+1) {
+		curPosition = mid(mask,ii,1);
 		if ( isNumeric(curPosition) ) {
 			digits = digits + 1;
 		}
@@ -216,9 +240,9 @@ function PhoneFormat (input, mask) {
 	newFormat = " #trim(newFormat)#";
 
 	//Loop through mask and replace digits with numbers from input
-	for (i=1; i lte len(trim(mask)); i=i+1) {
-		curPosition = mid(mask,i,1);
-		if( NOT isNumeric(curPosition) ) newFormat = insert(curPosition,newFormat, i) & " ";
+	for (ii=1; ii lte len(trim(mask)); ii=ii+1) {
+		curPosition = mid(mask,ii,1);
+		if( NOT isNumeric(curPosition) ) newFormat = insert(curPosition,newFormat, ii) & " ";
 	}
 
 	//If this is a 7-digit number (no area code passed or in input), start with a number
@@ -233,8 +257,7 @@ function PhoneFormat (input, mask) {
 		}
 	}
 
-	return trim(newFormat);
+	return Trim(newFormat);
 }
 </cfscript>
-
 </cfcomponent>

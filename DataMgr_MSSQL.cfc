@@ -643,7 +643,7 @@
 	<cfif bSetGuid>
 		<cflock timeout="30" throwontimeout="No" name="DataMgr_GuidNum" type="EXCLUSIVE">
 			<!--- %%I cant figure out a way to safely increment the variable to make it unique for a transaction w/0 the use of request scope --->
-			<cfif isDefined("request.DataMgr_GuidNum")>
+			<cfif StructKeyExists(request,"DataMgr_GuidNum")>
 				<cfset request.DataMgr_GuidNum = Val(request.DataMgr_GuidNum) + 1>
 			<cfelse>
 				<cfset request.DataMgr_GuidNum = 1>
@@ -1048,53 +1048,65 @@
 		<cfset length = sRelationField["Length"]>
 	</cfif>
 
+	<!---
+	SQL Server has a character limit for this
+	4000 for nvarchar
+	8000 for varchar
+	The good news is that the character limit doesn't really matter here, so we can set it to max.
+	Setting to zero is effectively max because of the next code black that uses max for any non positive numeric value.
+	--->
+	<cfif Val(length) GT 4000>
+		<cfset length = 0>
+	</cfif>
+
 	<cfif NOT Val(length)>
 		<cfset length = "max">
 	</cfif>
 
 	<cf_DMSQL name="aSQL">
-	REPLACE(
-		STUFF	(
-			(
-				SELECT
-						<cfif StructKeyExists(sRelation,"distinct") AND sRelation["distinct"] IS true>
-							DISTINCT
-						</cfif>
-							'<cfoutput>#sRelation['delimiter']#</cfoutput>'
-							+
-							CONVERT(
-								nvarchar(<cfoutput>#length#</cfoutput>),
-								<cf_DMSQL sql="#getFieldSelectSQL(tablename=sRelation['table'],field=sRelation['field'],tablealias=sRelation['tablealias'],useFieldAlias=false)#" />
-							)
-				FROM		<cf_DMObject name="#sRelation['table']#"><cfif sRelation['tablealias'] NEQ sRelation['table']> <cf_DMObject name="#sRelation['tablealias']#"></cfif>
-			<cfif StructKeyExists(sRelation,"join-table")>
-				INNER JOIN	<cf_DMObject name="#sRelation['join-table']#"> jt
-					ON		<cf_DMSQL sql="#getFieldSelectSQL(tablename=sRelation['table'],field=sRelation['remote-table-join-field'],tablealias=sRelation['tablealias'],useFieldAlias=false)#" />
-							=
-							<cf_DMSQL sql="#getFieldSelectSQL(tablename=sRelation['join-table'],field=sRelation['join-table-field-remote'],useFieldAlias=false,tablealias='jt')#" />
-				WHERE		1 = 1
-					AND		<cf_DMSQL sql="#getFieldSelectSQL(tablename=sRelation['join-table'],field=sRelation['join-table-field-local'],useFieldAlias=false,tablealias='jt')#" />
-							=
-							<cf_DMSQL sql="#getFieldSelectSQL(tablename=Arguments.tablename,field=sRelation['local-table-join-field'],useFieldAlias=false,tablealias=Arguments.tablealias)#" />
-			<cfelse>
-				WHERE		1 = 1
-					AND		<cf_DMSQL sql="#getFieldSelectSQL(tablename=sRelation['table'],field=sRelation['join-field-remote'],tablealias=sRelation['tablealias'],useFieldAlias=false)#" />
-							=
-							<cf_DMSQL sql="#getFieldSelectSQL(tablename=Arguments.tablename,field=sRelation['join-field-local'],tablealias=Arguments.tablealias,useFieldAlias=false)#" />
-			</cfif>
+	(
+		SELECT	STRING_AGG(list_value,'<cfoutput>#sRelation['delimiter']#</cfoutput>')
 			<cfif NOT ( StructKeyExists(sRelation,"distinct") AND sRelation["distinct"] IS true )>
-			ORDER BY
-						<cfif StructKeyExists(sRelation,"sort-field") AND Len(sRelation["sort-field"])>
-							<cf_DMSQL sql="#getFieldSelectSQL(tablename=sRelation['table'],field=sRelation['sort-field'],useFieldAlias=false)#" />
-						<cfelse>
-							<cf_DMSQL sql="#getFieldSelectSQL(tablename=sRelation['table'],field=sRelation['field'],useFieldAlias=false)#" />
-						</cfif>
+				WITHIN GROUP (ORDER BY sort_value)
 			</cfif>
-				FOR XML PATH('')
-			)
-		,1,1,''),
-		'&amp;',
-		'&'
+		FROM	(
+					SELECT
+							<cfif StructKeyExists(sRelation,"distinct") AND sRelation["distinct"] IS true>
+								DISTINCT
+							</cfif>
+								CONVERT(
+									nvarchar(<cfoutput>#length#</cfoutput>),
+									<cf_DMSQL sql="#getFieldSelectSQL(tablename=sRelation['table'],field=sRelation['field'],tablealias=sRelation['tablealias'],useFieldAlias=false)#" />
+								) AS list_value
+						<cfif NOT ( StructKeyExists(sRelation,"distinct") AND sRelation["distinct"] IS true )>
+								,
+							<cfif StructKeyExists(sRelation,"sort-field") AND Len(sRelation["sort-field"])>
+								<cf_DMSQL sql="#getFieldSelectSQL(tablename=sRelation['table'],field=sRelation['sort-field'],useFieldAlias=false)#" />
+							<cfelse>
+								<cf_DMSQL sql="#getFieldSelectSQL(tablename=sRelation['table'],field=sRelation['field'],useFieldAlias=false)#" />
+							</cfif>
+							AS sort_value
+						</cfif>
+					FROM		<cf_DMObject name="#sRelation['table']#"><cfif sRelation['tablealias'] NEQ sRelation['table']> <cf_DMObject name="#sRelation['tablealias']#"></cfif>
+				<cfif StructKeyExists(sRelation,"join-table")>
+					INNER JOIN	<cf_DMObject name="#sRelation['join-table']#"> jt
+						ON		<cf_DMSQL sql="#getFieldSelectSQL(tablename=sRelation['table'],field=sRelation['remote-table-join-field'],tablealias=sRelation['tablealias'],useFieldAlias=false)#" />
+								=
+								<cf_DMSQL sql="#getFieldSelectSQL(tablename=sRelation['join-table'],field=sRelation['join-table-field-remote'],useFieldAlias=false,tablealias='jt')#" />
+					WHERE		1 = 1
+						AND		<cf_DMSQL sql="#getFieldSelectSQL(tablename=sRelation['join-table'],field=sRelation['join-table-field-local'],useFieldAlias=false,tablealias='jt')#" />
+								=
+								<cf_DMSQL sql="#getFieldSelectSQL(tablename=Arguments.tablename,field=sRelation['local-table-join-field'],useFieldAlias=false,tablealias=Arguments.tablealias)#" />
+				<cfelse>
+					WHERE		1 = 1
+						AND		<cf_DMSQL sql="#getFieldSelectSQL(tablename=sRelation['table'],field=sRelation['join-field-remote'],tablealias=sRelation['tablealias'],useFieldAlias=false)#" />
+								=
+								<cf_DMSQL sql="#getFieldSelectSQL(tablename=Arguments.tablename,field=sRelation['join-field-local'],tablealias=Arguments.tablealias,useFieldAlias=false)#" />
+				</cfif>
+				<cfif StructKeyExists(sRelation,"filters")>
+					<cf_DMSQL sql="#getWhereSQL(tablename=sRelation['table'],filters=sRelation['filters'])#">
+				</cfif>
+				) list_records
 	)
 	</cf_DMSQL>
 
@@ -1111,11 +1123,19 @@
 
 	<cfset var bTable = checkTable(arguments.tablename)><!--- Check whether table is loaded --->
 	<cfset var sKeyField = getField(Arguments.tablename,arguments.keyfield)>
+	<cfset var sMultiField = getField(Arguments.tablename,arguments.multifield)>
+	<cfset var MultiFieldType = getDBDataTypeFull(sMultiField)>
+
+	<cfif NOT getDatabaseVersion() GTE 13>
+		<cfreturn Super.saveRelationList(ArgumentCollection=Arguments)>
+	</cfif>
 
 	<!--- Make sure a value is passed in for the primary key value --->
 	<cfif NOT Len(Trim(arguments.keyvalue))>
 		<cfset throwDMError("You must pass in a value for keyvalue of saveRelationList","NoKeyValueForSaveRelationList")>
 	</cfif>
+
+	<cfset Arguments.multilist = ListRemoveDuplicates(Arguments.multilist)>
 
 	<cfif arguments.reverse>
 		<cfinvoke method="saveRelationList">
@@ -1129,34 +1149,39 @@
 
 	<cf_DMQuery>
 		DECLARE @list AS varchar(max) = <cf_DMParam value="#Arguments.multilist#" cfsqltype="CF_SQL_LONGVARCHAR">;
-		WITH CTE_Target (<cf_DMObject name="#Arguments.keyfield#">,<cf_DMObject name="#Arguments.multifield#">)
-		AS (
-					SELECT	<cf_DMObject name="#Arguments.keyfield#">,
-							<cf_DMObject name="#Arguments.multifield#">
-					FROM	<cf_DMObject name="#Arguments.tablename#">
-					WHERE	<cf_DMObject name="#Arguments.keyfield#"> = <cf_DMParam name="#Arguments.keyfield#" value="#Arguments.keyvalue#" cfsqltype="#sKeyField.CF_Datatype#">
+		DECLARE @Records TABLE (<cf_DMObject name="#Arguments.multifield#"> <cfoutput>#MultiFieldType#</cfoutput>);
+		
+		INSERT INTO @Records (<cf_DMObject name="#Arguments.multifield#">)
+		SELECT	TRY_CAST(value AS <cfoutput>#MultiFieldType#</cfoutput>)
+		FROM	STRING_SPLIT(@list, ',');
+
+		INSERT INTO <cf_DMObject name="#Arguments.tablename#"> (
+				<cf_DMObject name="#Arguments.keyfield#">,
+				<cf_DMObject name="#Arguments.multifield#">
 		)
-		MERGE		CTE_Target AS TARGET
-		USING		(
-						SELECT
-								<cf_DMParam name="#Arguments.keyfield#" value="#Arguments.keyvalue#" cfsqltype="#sKeyField.CF_Datatype#"> AS <cf_DMObject name="#Arguments.keyfield#">,
-								value AS <cf_DMObject name="#Arguments.multifield#">
-						FROM	STRING_SPLIT(@list, ',')
-					) AS SOURCE
-			ON		TARGET.<cf_DMObject name="#Arguments.keyfield#"> = SOURCE.<cf_DMObject name="#Arguments.keyfield#">
-				AND	TARGET.<cf_DMObject name="#Arguments.multifield#"> = SOURCE.<cf_DMObject name="#Arguments.multifield#">
-		WHEN		NOT MATCHED BY TARGET
-			THEN	
-					INSERT (
-						<cf_DMObject name="#Arguments.keyfield#">,
-						<cf_DMObject name="#Arguments.multifield#">
-					)
-					VALUES (
-						SOURCE.<cf_DMObject name="#Arguments.keyfield#">,
-						SOURCE.<cf_DMObject name="#Arguments.multifield#">
-					)
-		WHEN		NOT MATCHED BY SOURCE
-			THEN	DELETE
+		SELECT
+				<cf_DMParam name="#Arguments.keyfield#" value="#Arguments.keyvalue#" cfsqltype="#sKeyField.CF_Datatype#">,
+				<cf_DMObject name="#Arguments.multifield#">
+		FROM
+				@Records r
+		EXCEPT
+		SELECT
+				<cf_DMObject name="#Arguments.keyfield#">,
+				<cf_DMObject name="#Arguments.multifield#">
+		FROM	<cf_DMObject name="#Arguments.tablename#">
+		WHERE	<cf_DMObject name="#Arguments.keyfield#"> = <cf_DMParam name="#Arguments.keyfield#" value="#Arguments.keyvalue#" cfsqltype="#sKeyField.CF_Datatype#">
+		
+		;
+
+		DELETE
+		FROM	<cf_DMObject name="#Arguments.tablename#">
+		WHERE	1 = 1
+			AND	<cf_DMObject name="#Arguments.keyfield#"> = <cf_DMParam name="#Arguments.keyfield#" value="#Arguments.keyvalue#" cfsqltype="#sKeyField.CF_Datatype#">
+			AND	<cf_DMObject name="#Arguments.multifield#"> NOT IN (
+					SELECT	<cf_DMObject name="#Arguments.multifield#">
+					FROM	@Records
+				)
+		
 		;
 	</cf_DMQUery>
 
@@ -1223,7 +1248,11 @@
 					)
 			) {
 				if ( isList ) {
-					aSQL[ii] = "SELECT val FROM @#aSQL[ii].name#";
+					if ( getDatabaseVersion() GTE 13 ) {
+						aSQL[ii] = "SELECT val FROM @#aSQL[ii].name#";
+					} else {
+						aSQL[ii] = sParams[aSQL[ii].name];
+					}
 				} else {
 					aSQL[ii] = "@#aSQL[ii].name#";
 				}
@@ -1234,21 +1263,20 @@
 	for ( ii in sParams ) {
 		if ( NOT StructKeyExists(sDeclares,ii) ) {
 			isList = ( isStruct(sParams[ii]) AND StructKeyExists(sParams[ii],"list") AND sParams[ii].list IS true );
-			type = getDBDataType(sParams[ii].CFSQLTYPE);
-			if ( isStringType(getDBDataType(sParams[ii].CFSQLTYPE)) ) {
-				type_str = "#type#(#sParams[ii].MaxLength#)";
-			} else {
-				type_str = type;
-			}
+			type_str = getDBDataTypeFull(sParams[ii]);
 			if ( isList ) {
-				sNewParam = StructCopy(sParams[ii]);
-				StructDelete(sNewParam,"Name");
-				StructDelete(sNewParam,"list");
-				sNewParam["cfsqltype"] = "cf_sql_varchar";
+				if ( getDatabaseVersion() GTE 13 ) {
+					sNewParam = StructCopy(sParams[ii]);
+					StructDelete(sNewParam,"Name");
+					StructDelete(sNewParam,"list");
+					sNewParam["cfsqltype"] = "cf_sql_varchar";
 
-				ArrayPrepend(aSQL,", ',');");
-				ArrayPrepend(aSQL,StructCopy(sNewParam));
-				ArrayPrepend(aSQL,"DECLARE @#ii# TABLE(val #type_str#) INSERT INTO @#ii# (val) SELECT value AS val FROM STRING_SPLIT(");
+					ArrayPrepend(aSQL,", ',');");
+					ArrayPrepend(aSQL,StructCopy(sNewParam));
+					ArrayPrepend(aSQL,"DECLARE @#ii# TABLE(val #type_str#) INSERT INTO @#ii# (val) SELECT value AS val FROM STRING_SPLIT(");
+				} else {
+
+				}
 			} else {
 				str = "DECLARE @#ii# #type_str# = ";
 				ArrayPrepend(aSQL,"#chr(10)##chr(13)#");

@@ -23,22 +23,24 @@
 	<cfargument name="Scheduler" type="any" required="false">
 	<cfargument name="Observer" type="any" required="false">
 
-	<cfset setUpVariables(ArgumentCollection=Arguments)>
+	<cfscript>
+	setUpVariables(ArgumentCollection=Arguments);
 
-	<!--- If Scheduler is passed is, make sure it regularly checks the mail service. --->
-	<cfif StructKeyExists(Variables,"Scheduler")>
-		<cfinvoke component="#Variables.Scheduler#" method="setTask">
-			<cfinvokeargument name="Name" value="Mailer: Check Mail Server">
-			<cfinvokeargument name="ComponentPath" value="com.sebtools.Mailer">
-			<cfinvokeargument name="Component" value="#This#">
-			<cfinvokeargument name="MethodName" value="checkMailService">
-			<cfinvokeargument name="interval" value="hourly">
-		</cfinvoke>
-	</cfif>
+	// If Scheduler is passed is, make sure it regularly checks the mail service.
+	if ( StructKeyExists(Variables,"Scheduler") ) {
+		Variables.Scheduler.setTask(
+			Name="Mailer: Check Mail Server",
+			ComponentPath="com.sebtools.Mailer",
+			Component=This,
+			MethodName="checkMailService",
+			interval="hourly"
+		);
+	}
 
-	<cfset checkMailService()>
+	checkMailService();
 
-	<cfreturn This>
+	return This;
+	</cfscript>
 </cffunction>
 
 <cffunction name="setUpVariables" access="private" returntype="void" output="no">
@@ -59,49 +61,53 @@
 	<cfargument name="verify" type="boolean" default="false">
 	<cfargument name="Scheduler" type="any" required="false">
 	<cfargument name="Observer" type="any" required="false">
+	<cfscript>
+	var key = "";
 
-	<cfset var key = "">
+	// Convert init arguments into variables.
+	for ( key in Arguments ) {
+		variables[key] = Arguments[key];
+		if ( isObject(Arguments[key]) ) {
+			This[key] = Arguments[key];
+		}
+	}
 
-	<!--- Convert init arguments into variables. --->
-	<cfloop collection="#Arguments#" item="key">
-		<cfset variables[key] = Arguments[key]>
-		<cfif isObject(Arguments[key])>
-			<cfset This[key] = Arguments[key]>
-		</cfif>
-	</cfloop>
+	// From and To are only defaults.
+	StructDelete(Variables,"From");
+	StructDelete(Variables,"To");
+	variables.DefaultFrom = Arguments.From;
+	variables.DefaultTo = Arguments.To;
 
-	<!--- From and To are only defaults. --->
-	<cfset StructDelete(Variables,"From")>
-	<cfset StructDelete(Variables,"To")>
-	<cfset variables.DefaultFrom = arguments.From>
-	<cfset variables.DefaultTo = arguments.To>
-
-	<cfset variables.Notices = StructNew()>
-	<cfset variables.isLogging = false>
+	variables.Notices = {};
+	variables.isLogging = false;
 
 
-	<cfif NOT (
-			Len(arguments.MailServer)
-		AND	Len(arguments.From)
-	)>
-		<cfset arguments.mode = "Sim">
-	</cfif>
-	<cfif NOT StructKeyExists(arguments,"mode")>
-		<cfif getMetaData(this).name CONTAINS "Sim">
-			<cfset arguments.mode = "Sim">
-		<cfelse>
-			<cfset arguments.mode = "Live">
-		</cfif>
-	</cfif>
+	if (
+		NOT (
+			Len(Arguments.MailServer)
+			AND
+			Len(Arguments.From)
+		)
+	) {
+		Arguments.mode = "Sim";
+	}
+	if ( NOT StructKeyExists(Arguments,"mode") ) {
+		if ( getMetaData(This).name CONTAINS "Sim" ) {
+			Arguments.mode = "Sim";
+		} else {
+			Arguments.mode = "Live";
+		}
+	}
 
-	<cfset setMode(arguments.mode)>
+	setMode(Arguments.mode);
 
-	<cfif StructKeyExists(Variables,"DataMgr")>
-		<cfif Arguments.log OR variables.mode EQ "Sim" OR variables.verify>
-			<cfset startLogging(variables.DataMgr)>
-		</cfif>
-	</cfif>
-
+	if ( StructKeyExists(Variables,"DataMgr") ) {
+		if ( Arguments.log OR variables.mode EQ "Sim" OR variables.verify ) {
+			startLogging(variables.DataMgr);
+		}
+	}
+	</cfscript>
+	
 </cffunction>
 
 <cffunction name="addNotice" access="public" returntype="void" output="no" hint="I add a notice to the mailer.">
@@ -125,17 +131,20 @@
 	<cfargument name="wraptext" type="string" default="800">
 	<cfargument name="Sender" type="string" default="">
 
-	<cfif NOT
+	<cfscript>
+	if (
+		NOT
 		(
 				( StructKeyExists(arguments,"Contents") AND Len(arguments.Contents) )
 			OR	( StructKeyExists(arguments,"html") AND Len(arguments.html) )
 			OR	( StructKeyExists(arguments,"text") AND Len(arguments.text) )
 		)
-	>
-		<cfthrow message="If Contents argument is not provided than either html or text arguments must be." type="Mailer" errorcode="ContentsRequired">
-	</cfif>
+	) {
+		throw(message="If Contents argument is not provided than either html or text arguments must be.",type="Mailer",errorcode="ContentsRequired");
+	}
 
-	<cfset variables.Notices[arguments.name] = Duplicate(arguments)>
+	Variables.Notices[arguments.name] = Duplicate(arguments);
+	</cfscript>
 
 </cffunction>
 
@@ -152,19 +161,20 @@
 </cffunction>
 
 <cffunction name="getData" access="public" returntype="struct" output="no" hint="I get the data stored in the Mailer component.">
-	<cfreturn variables.RootData>
+	<cfreturn Variables.RootData>
 </cffunction>
 
 <cffunction name="getDataKeys" access="public" returntype="string" output="no" hint="I get the datakeys for the given email notice. The datakeys are the items that can/should be overridden by incoming data.">
 	<cfargument name="name" type="string" required="yes">
+	<cfscript>
+	var result = "";
 
-	<cfset var result = "">
+	if ( StructKeyExists(Variables.Notices, Arguments.name) ) {
+		result = Variables.Notices[Arguments.name].DataKeys;
+	}
 
-	<cfif StructKeyExists(variables.Notices, arguments.name)>
-		<cfset result = variables.Notices[arguments.name].DataKeys>
-	</cfif>
-
-	<cfreturn result>
+	return result;
+	</cfscript>
 </cffunction>
 
 <cffunction name="getEmailAddress" access="public" returntype="string" output="no">
@@ -185,40 +195,42 @@
 </cffunction>
 
 <cffunction name="getMessages" access="public" returntype="query" output="no">
+	<cfscript>
+	if ( StructKeyExists(Variables,"DataMgr") ) {
+		startLogging(Variables.DataMgr);
+	}
 
-	<cfif StructKeyExists(variables,"DataMgr")>
-		<cfset startLogging(variables.DataMgr)>
-	</cfif>
-
-	<cfreturn variables.DataMgr.getRecords(tablename=variables.logtable,fieldlist="LogID,DateSent,To,Subject,ReplyTo")>
+	return Variables.DataMgr.getRecords(tablename=Variables.logtable,fieldlist="LogID,DateSent,To,Subject,ReplyTo");
+	</cfscript>
 </cffunction>
 
 <cffunction name="getMessage" access="public" returntype="query" output="no">
 	<cfargument name="LogID" type="numeric" required="yes">
+	<cfscript>
+	if ( StructKeyExists(Variables,"DataMgr") ) {
+		startLogging(Variables.DataMgr);
+	}
 
-	<cfif StructKeyExists(variables,"DataMgr")>
-		<cfset startLogging(variables.DataMgr)>
-	</cfif>
-
-	<cfreturn variables.DataMgr.getRecord(variables.logtable,arguments)>
+	return Variables.DataMgr.getRecord(Variables.logtable,Arguments);
+	</cfscript>
 </cffunction>
 
 <cffunction name="getLogTable" access="public" returntype="string" output="no">
-	<cfreturn variables.logtable>
+	<cfreturn Variables.logtable>
 </cffunction>
 
 <cffunction name="getNotices" access="public" returntype="struct" output="no">
-	<cfreturn variables.Notices>
+	<cfreturn Variables.Notices>
 </cffunction>
 
 <cffunction name="getTo" access="public" returntype="string" output="no">
-	<cfreturn variables.Defaultto>
+	<cfreturn Variables.Defaultto>
 </cffunction>
 
 <cffunction name="removeNotice" access="public" returntype="void" output="no" hint="I remove a notice from the mailer.">
 	<cfargument name="name" type="string" required="yes">
 
-	<cfset StructDelete(variables.Notices,arguments.name)>
+	<cfset StructDelete(Variables.Notices,Arguments.name)>
 
 </cffunction>
 
@@ -274,95 +286,109 @@
 	<cfargument name="Sender" type="string" default="#variables.Sender#">
 	<cfargument name="MailServer" type="string" required="false">
 	<cfargument name="verify" type="boolean" required="false">
+	<cfscript>
+	var sent = false;
+	var attachment = "";
+	var email = "";
 
-	<cfset var sent = false>
-	<cfset var attachment = "">
-	<cfset var e = "">
+	// Only use Variables.verify if Arguments. verify is not explicetly passed in (otherwise sendError could result in a loop of error messages)
+	if ( NOT StructKeyExists(Arguments,"verify") ) {
+		if ( StructKeyExists(Variables,"verify") ) {
+			Arguments.verify = Variables.verify;
+		} else {
+			Arguments.verify = false;
+		}
+	}
 
-	<!--- Only use Variables.verify if Arguments. verify is not explicetly passed in (otherwise sendError could result in a loop of error messages) --->
-	<cfif NOT StructKeyExists(Arguments,"verify")>
-		<cfif StructKeyExists(Variables,"verify")>
-			<cfset Arguments.verify = Variables.verify>
-		<cfelse>
-			<cfset Arguments.verify = false>
-		</cfif>
-	</cfif>
+	if (
+		NOT StructKeyExists(arguments,"Contents")
+		AND
+		NOT (
+			Len(arguments.html)
+			OR
+			Len(arguments.text)
+		)
+	) {
+		throw(message="Send method requires Contents argument or html or text arguments.");
+	}
 
-	<cfif NOT StructKeyExists(arguments,"Contents") AND NOT (Len(arguments.html) OR Len(arguments.text))>
-		<cfthrow message="Send method requires Contents argument or html or text arguments.">
-	</cfif>
+	// double check for invalid email addresses and fix them if possible
+	for ( email in ListToArray("From,CC,BCC,To,ReplyTo,Sender") ) {
+		if ( StructKeyExists(Arguments,email) AND Len(Arguments[email]) ) {
+			Arguments[email] = fixEmail(Arguments[email]);
+		}
+	}
 
-	<!--- double check for invalid email addresses and fix them if possible --->
-	<cfloop list="From,CC,BCC,To,ReplyTo,Sender" index="e">
-		<cfif StructKeyExists(Arguments,e) AND Len(Arguments[e])>
-			<cfset Arguments[e] = fixEmail(Arguments[e])>
-		</cfif>
-	</cfloop>
+	// Filter invalid recipients
+	if ( Variables.mode EQ "Live" ) {
+		Arguments = filterRecipients(Arguments);
+	}
 
-	<!--- Filter invalid recipients --->
-	<cfif variables.mode EQ "Live">
-		<cfset arguments = filterRecipients(arguments)>
-	</cfif>
+	// If we have no "To" then don't sent
+	if ( NOT Len(Trim(Arguments.To)) ) {
+		return false;
+	}
 
-	<!--- If we have no "To" then don't sent --->
-	<cfif NOT Len(Trim(Arguments.To))>
-		<cfreturn false>
-	</cfif>
+	// If sender is set and reply to is not, then set reply to as sender (sort of a back-up in case sender is not honored)
+	if ( 
+		Len(Trim(Arguments.Sender))
+		AND NOT
+		Len(Trim(Arguments.ReplyTo))
+	) {
+		Arguments.ReplyTo = Arguments.Sender;
+	}
 
-	<!--- If sender is set and reply to is not, then set reply to as sender (sort of a back-up in case sender is not honored) --->
-	<cfif Len(Trim(arguments.Sender)) AND NOT Len(Trim(arguments.ReplyTo))>
-		<cfset arguments.ReplyTo = arguments.Sender>
-	</cfif>
-
-	<!---
+	/*
 	If contents isn't passed in but only one of text/html is, set contents to the one passed in.
 	(to avoid CF trying to send multi-part email)
-	--->
-	<cfif NOT StructKeyExists(arguments,"Contents")>
-		<cfif Len(arguments.text) AND NOT Len(arguments.html)>
-			<cfset arguments.Contents = arguments.text>
-			<cfset arguments.type = "text">
-			<cfset arguments.text = "">
-		</cfif>
-		<cfif Len(arguments.html) AND NOT Len(arguments.text)>
-			<cfset arguments.Contents = arguments.html>
-			<cfset arguments.type = "HTML">
-			<cfset arguments.html = "">
-		</cfif>
-	</cfif>
+	*/
+	if ( NOT StructKeyExists(Arguments,"Contents") ) {
+		if ( Len(Arguments.text) AND NOT Len(Arguments.html) ) {
+			Arguments.Contents = Arguments.text;
+			Arguments.type = "text";
+			Arguments.text = "";
+		}
+		if ( Len(Arguments.html) AND NOT Len(Arguments.text) ) {
+			Arguments.Contents = Arguments.html;
+			Arguments.type = "HTML";
+			Arguments.html = "";
+		}
+	}
 
-	<cfif variables.mode EQ "Live">
-		<cfset sent = sendEmail(argumentCollection=arguments)>
-	<cfelse>
-		<cfset logSend(argumentCollection=arguments)>
-	</cfif>
+	if ( Variables.mode EQ "Live" ) {
+		sent = sendEmail(ArgumentCollection=Arguments);
+	} else {
+		logSend(ArgumentCollection=Arguments);
+	}
 
-	<cfif Arguments.verify>
-		<cfset verifySent(ArgumentCollection=Arguments)>
-	</cfif>
+	if ( Arguments.verify ) {
+		verifySent(ArgumentCollection=Arguments);
+	}
+	</cfscript>
 
 	<cfreturn sent>
 </cffunction>
 
 <cffunction name="sendEmail" access="public" returntype="boolean" output="no" hint="Internal method. Do not use.">
+	<cfscript>
+	var sent = false;
+	var Attachment = "";
 
-	<cfset var sent = false>
-	<cfset var Attachment = "">
+	if ( StructKeyExists(variables,"port") AND Len(variables.port) AND isNumeric(variables.port) ) {
+		param name="arguments.port" default="#variables.port#";
+	}
+	if ( StructKeyExists(variables,"useTLS") AND isBoolean(variables.useTLS) ) {
+		param name="arguments.useTLS" default="#variables.useTLS#";
+	}
 
-	<cfif StructKeyExists(variables,"port") AND Len(variables.port) AND isNumeric(variables.port)>
-		<cfparam name="arguments.port" default="#variables.port#">
-	</cfif>
-	<cfif StructKeyExists(variables,"useTLS") AND isBoolean(variables.useTLS)>
-		<cfparam name="arguments.useTLS" default="#variables.useTLS#">
-	</cfif>
-
-	<!--- This needs to be done here so that the mail server won't get passed through from the SES version to the non-SES version. --->
-	<cfif StructKeyExists(Arguments,"MailServer") AND NOT StructKeyExists(Arguments,"Server")>
-		<cfset Arguments.Server = Arguments.MailServer>
-	</cfif>
-	<cfif NOT StructKeyExists(Arguments,"Server")>
-		<cfset Arguments.Server = Variables.MailServer>
-	</cfif>
+	// This needs to be done here so that the mail server won't get passed through from the SES version to the non-SES version.
+	if ( StructKeyExists(Arguments,"MailServer") AND NOT StructKeyExists(Arguments,"Server") ) {
+		Arguments.Server = Arguments.MailServer;
+	}
+	if ( NOT StructKeyExists(Arguments,"Server") ) {
+		Arguments.Server = Variables.MailServer;
+	}
+	</cfscript>
 
 	<cfif Len(arguments.text) OR Len(arguments.html)>
 		<cfmail attributeCollection="#arguments#"><cfif Len(Trim(arguments.ReplyTo))><cfmailparam name="Reply-To" value="#Trim(arguments.ReplyTo)#"></cfif><cfif Len(Trim(arguments.Sender))><cfmailparam name="Sender" value="#Trim(arguments.Sender)#"></cfif>
@@ -388,16 +414,13 @@
 <cffunction name="sendNotice" access="public" returntype="struct" output="no" hint="I send set/override any data based on the data given and send the given notice.">
 	<cfargument name="name" type="string" required="yes">
 	<cfargument name="data" type="struct">
+	<cfscript>
+	var sMessage = getNoticeMessage(ArgumentCollection=Arguments);
 
-	<cfset var sMessage = getNoticeMessage(argumentCollection=arguments)>
+	send(ArgumentCollection=sMessage);
 
-	<cfinvoke
-		method="send"
-		argumentcollection="#sMessage#"
-	>
-	</cfinvoke>
-
-	<cfreturn sMessage>
+	return sMessage;
+	</cfscript>
 </cffunction>
 
 <cffunction name="getNoticeMessage" access="public" returntype="struct" output="no">
@@ -405,11 +428,11 @@
 	<cfargument name="data" type="struct">
 
 	<cfset var key = 0>
-	<cfset var thisNotice = StructNew()>
+	<cfset var thisNotice = {}>
 	<cfset var missingkeys = "">
 	<cfset var fields = "Subject,Contents,html,text">
 	<cfset var field = "">
-	<cfset var info = StructNew()>
+	<cfset var info = {}>
 
 	<cfif StructKeyExists(arguments,"data")>
 		<cfset info = Duplicate(arguments.data)>
@@ -418,9 +441,7 @@
 	<!--- Put in RootData, if any --->
 	<cfset StructAppend(info, variables.RootData , false)>
 
-	<cflock timeout="40" throwontimeout="yes" name="Mailer_SendNotice" type="EXCLUSIVE">
-		<cfset thisNotice = Duplicate(variables.Notices[arguments.name])>
-	</cflock>
+	<cfset thisNotice = Duplicate(variables.Notices[arguments.name])>
 
 	<!--- If this notice should have incoming data, make sure all keys are present --->
 	<cfif Len(thisNotice.datakeys)>

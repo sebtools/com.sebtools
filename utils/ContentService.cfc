@@ -1,52 +1,48 @@
-<cfcomponent>
+<cfcomponent extends="com.sebtools.component">
+<cfscript>
+public function init(required Manager) {
 
-<cffunction name="init" access="public" returntype="any" output="no">
-    <cfargument name="Manager" type="any" required="true">
+	Variables.aServices = [];
 
-    <cfset Variables.aServices = []>
+	Variables.MrECache = CreateObject("component","MrECache").init(
+		id="content_service",
+		timeSpan=CreateTimeSpan(0,4,0,0)
+	);
 
-    <cfset Variables.MrECache = CreateObject("component","MrECache").init(
-        id="content_service",
-        timeSpan=CreateTimeSpan(0,4,0,0)
-    )>
+	return This;
+}
 
-     <cfreturn This>
-</cffunction>
+public function addService(
+	required Component,
+	required string Method
+) {
 
-<cffunction name="addService" access="public" returntype="any" output="no">
-    <cfargument name="Component" type="any" required="yes">
-    <cfargument name="Method" type="string" required="yes">
+	ArrayAppend(Variables.aServices,Arguments);
 
-    <cfset ArrayAppend(Variables.aServices,Arguments)>
+	return This;
+}
 
-    <cfreturn This>
-</cffunction>
+public string function phrase(
+	required string key,
+	string locale,
+	struct data
+) {
+	var sService = 0;
+	var sArgs = 0;
+	var result = Arguments.key;
 
-<cffunction name="phrase" access="public" returntype="string" output="no">
-    <cfargument name="key" type="string" required="yes">
-    <cfargument name="locale" type="string" required="no">
-    <cfargument name="data" type="struct" required="no">
+	for ( sService in Variables.aServices ) {
+		sArgs = {phrase="#result#"};
+		if ( StructKeyHasLen(Arguments,"locale") ) {
+			sArgs["locale"] = Arguments.locale;
+		}
+		if ( StructKeyExists(Arguments,"data") AND StructCount(Arguments.data) ) {
+			sArgs["data"] = Arguments.data;
+		}
+		result = invoke(sService["Component"],sService["Method"],sArgs);
+	}
 
-    <cfset var ii = 0>
-    <cfset var result = Arguments.key>
-
-    <cfloop index="ii" from="1" to="#ArrayLen(Variables.aServices)#">
-        <cfinvoke
-            returnvariable="result"
-            component="#Variables.aServices[ii].Component#"
-            method="#Variables.aServices[ii].Method#"
-            phrase="#result#"
-        >
-            <cfif StructKeyExists(Arguments,"locale") AND Len(Trim(Arguments.locale))>
-                <<cfinvokeargument name="locale" value="#Arguments.locale#">
-            </cfif>
-            <cfif StructKeyExists(Arguments,"data") AND StructCount(Arguments.data)>
-                <<cfinvokeargument name="data" value="#Arguments.data#">
-            </cfif>
-        </cfinvoke>
-    </cfloop>
-
-    <cfreturn result>
-</cffunction>
-
+	return result;
+}
+</cfscript>
 </cfcomponent>
