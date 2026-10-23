@@ -150,13 +150,25 @@ public function method(
 		if ( NOT StructKeyExists(Arguments,"Args") ) {
 			Arguments["Args"] = {};
 		}
-		local.result = invoke(Arguments.Component,Arguments.MethodName,Arguments.Args);
-		if ( StructKeyExists(local,"result") ) {
-			called(Arguments.id,local.result);
-			return local.result;
-		} else {
-			called(Arguments.id);
+		try {
+			local.result = invoke(
+				Arguments.Component,
+				Arguments.MethodName,
+				Arguments.Args
+			);
 		}
+		finally {
+			if ( StructKeyExists(local, "result") ) {
+				called(Arguments.id, local.result);
+			} else {
+				called(Arguments.id);
+			}
+		}
+
+		if ( StructKeyExists(local, "result") ) {
+			return local.result;
+		}
+
 	}
 
 }
