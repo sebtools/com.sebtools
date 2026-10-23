@@ -144,6 +144,13 @@
 
 		if ( Len(Arguments["value"]) AND isDate(Arguments["value"]) ) {
 			Arguments["value"] = Date2ExcelDate(Arguments["value"]);
+			//Format as as date and no format provided.
+			if ( NOT StructKeyExists(sCol,"format") ) {
+				sCol["format"] = {};
+			}
+			if ( NOT StructKeyExists(sCol["format"],"dataformat") ) {
+				sCol["format"]["dataformat"] = "mm/dd/yyyy";
+			}
 		}
 
 		if ( StructKeyHasLen(sCol,"formula") ) {
