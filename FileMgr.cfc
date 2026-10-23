@@ -586,6 +586,25 @@ public boolean function fileExists(required string fileName, required string fol
 	<cfreturn destination>
 </cffunction>
 
+<cffunction name="writeBase64File" access="public" returntype="string" output="no" hint="I save a file.">
+	<cfargument name="FileName" type="string" required="yes">
+	<cfargument name="Contents" type="string" required="yes">
+	<cfargument name="Folder" type="string" required="no">
+
+	<cfset var bin = binaryDecode(arguments.Contents, "base64")>
+	<cfset var destination = getFilePath(argumentCollection=arguments)>
+
+	<cfif StructKeyExists(arguments,"Folder")>
+		<cfset makeFolder(arguments.Folder)>
+	</cfif>
+
+	<cffile action="WRITE" file="#destination#" output="#bin#" addnewline="no">
+
+	<cfset notifyEvent("writeBase64File",Arguments)>
+
+	<cfreturn destination>
+</cffunction>
+
 <cffunction name="writeBinaryFile" access="public" returntype="string" output="no" hint="I save a file.">
 	<cfargument name="FileName" type="string" required="yes">
 	<cfargument name="Contents" type="binary" required="yes">
