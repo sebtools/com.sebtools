@@ -74,11 +74,23 @@ private function callLimitedAPI(
 }
 
 function AWSTime2CFTime(str) {
+	// If the string looks like an AWS timestamp, convert it to CF time, otherwise return as-is
 	if ( REFindNoCase("^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z",str) ) {
 		return DateAdd("d",0,Trim(REReplaceNoCase(str,"(T|Z)"," ","ALL")));
 	} else {
 		return Trim(str);
 	}
+}
+
+/* Shortcut accessors to AWS helper */
+private string function getRegion() {
+	try { return Variables.AWS.getRegion(); } catch(any e) { return ""; }
+}
+private string function getAccessKey() {
+	try { return Variables.AWS.getAccessKey(); } catch(any e) { return ""; }
+}
+private string function getSecretKey() {
+	try { return Variables.AWS.getSecretKey(); } catch(any e) { return ""; }
 }
 </cfscript>
 </cfcomponent>
